@@ -1,22 +1,19 @@
 from pathlib import Path
-
 from setuptools import setup, find_packages
+from typing import List
 
 from mm_toolbox import __VERSION__
-
 
 def readme():
     with open(str(Path(__file__).parent.resolve()) + "/README.md") as f:
         return f.read()
 
-
-def read_requirements() -> list[str]:
+def read_requirements() -> List[str]:
     return open(str(Path(__file__).parent.resolve()) + "/requirements.txt").readlines()
-
 
 NAME = "mm_toolbox"
 VERSION = __VERSION__
-DESCRIPTION = "Python market making toolbox."
+DESCRIPTION = "python toolbox of fast mm-related funcs"
 LONG_DESCRIPTION = readme()
 LONG_DESCRIPTION_CONTENT_TYPE = "text/markdown"
 URL = "https://github.com/beatzxbt/mm-toolbox"
