@@ -16,17 +16,58 @@ spec = [
 
 @jitclass(spec)
 class EMA:
+    """
+    Exponential Moving Average (EMA) with optional RingBuffer to store history.
+
+    Attributes:
+    -----------
+    window : int
+        The window size for the EMA calculation.
+
+    alpha : float
+        The smoothing factor applied to the EMA. Default is calculated as `3 / (window + 1)`.
+
+    fast : bool
+        If True, the history of calculated EMA values is not stored.
+
+    value : float
+        The current value of the EMA.
+
+    rb : RingBufferF64
+        A ring buffer to store EMA values history, activated if `fast` is False.
+    """
     def __init__(self, window: int, alpha: Optional[float]=0, fast: bool=False):
         self.window = window
-        self.alpha = alpha if alpha != 0 else 2 / (self.window + 1)
+        self.alpha = alpha if alpha != 0 else 3 / (self.window + 1)
         self.fast = fast
         self.value = 0.0
-        self.rb = RingBufferF64(self.window) 
+        self.rb = RingBufferF64(self.window)
 
     def _recursive_ema_(self, update: float) -> float:
+        """
+        Internal method to calculate the EMA given a new data point.
+
+        Parameters:
+        -----------
+        update : float
+            The new data point to include in the EMA calculation.
+
+        Returns:
+        --------
+        float
+            The updated EMA value.
+        """
         return self.alpha * update + (1 - self.alpha) * self.value
 
-    def initialize(self, arr_in):
+    def initialize(self, arr_in: Array) -> None:
+        """
+        Initializes the EMA calculator with a series of data points.
+
+        Parameters:
+        -----------
+        arr_in : Iterable[float]
+            The initial series of data points to feed into the EMA calculator.
+        """
         _ = self.rb.reset()
         self.value = arr_in[0]
         for val in arr_in:
@@ -34,10 +75,19 @@ class EMA:
             if not self.fast:
                 self.rb.appendright(self.value)
 
-    def update(self, new_val: float):
+    def update(self, new_val: float) -> None:
+        """
+        Updates the EMA calculator with a new data point.
+
+        Parameters:
+        -----------
+        new_val : float
+            The new data point to include in the EMA calculation.
+        """
         self.value = self._recursive_ema_(new_val)
         if not self.fast:
             self.rb.appendright(self.value)
+
 
 
 @njit(cache=True)
