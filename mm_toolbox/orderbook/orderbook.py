@@ -61,7 +61,7 @@ class Orderbook:
         self.bba[0, :] = self.bids[0]
         self.bba[1, :] = self.asks[0]
 
-    def _process_book_(book: NDArray, update: NDArray) -> NDArray:
+    def _process_book_(self, book: NDArray, update: NDArray) -> NDArray:
         """
         Updates the given book with new data. Removes entries with matching 
         prices in update, regardless of size, and then adds non-zero quantity 
