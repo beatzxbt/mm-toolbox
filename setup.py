@@ -1,15 +1,19 @@
 from pathlib import Path
-from setuptools import setup, find_packages
 from typing import List
 
-from mm_toolbox import __VERSION__
+from setuptools import setup, find_packages
+
+from mm_toolbox import __VERSION__, clean_repo
+
 
 def readme():
     with open(str(Path(__file__).parent.resolve()) + "/README.md") as f:
         return f.read()
 
+
 def read_requirements() -> List[str]:
     return open(str(Path(__file__).parent.resolve()) + "/requirements.txt").readlines()
+
 
 NAME = "mm_toolbox"
 VERSION = __VERSION__
@@ -39,3 +43,4 @@ if __name__ == "__main__":
         zip_safe=ZIP_SAFE,
         install_requires=REQUIREMENTS,
     )
+    clean_repo(NAME)
