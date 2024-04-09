@@ -27,7 +27,7 @@ class HMA_F64:
         self.smooth_ema = EMA(np.sqrt(window), 0, True)
         self.rb = RingBufferF64(window)
 
-    def _next(self, value: float) -> float:
+    def _recursive_hma_(self, value: float) -> float:
         self.short_ema.update(value)
         self.long_ema.update(value)
         self.smooth_ema.update(self.short_ema.value * 2 - self.long_ema.value)
@@ -42,10 +42,10 @@ class HMA_F64:
         self.value = arr_in[0]
 
         for val in arr_in:
-            self.next(val)
+            self.update(val)
 
-    def next(self, value: float):
-        self.value = self._next(value)
+    def update(self, value: float):
+        self.value = self._recursive_hma_(value)
         if self.slow:
             self.rb.appendright(self.value)
 
