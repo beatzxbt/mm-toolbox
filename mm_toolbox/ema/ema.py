@@ -39,7 +39,7 @@ class EMA:
     def __init__(self, window: int, alpha: Optional[float]=0, fast: bool=True):
         self.window = window
         self.alpha = alpha if alpha != 0 else 3 / (self.window + 1)
-        self.fast = not fast
+        self.fast = fast
         self.value = 0.0
         self.rb = RingBufferF64(self.window)
 
@@ -70,10 +70,8 @@ class EMA:
         """
         _ = self.rb.reset()
         self.value = arr_in[0]
-        for val in arr_in:
-            self.value = self._recursive_ema_(val)
-            if not self.fast:
-                self.rb.appendright(self.value)
+        for value in arr_in:
+            self.update(value)
 
     def update(self, new_val: float) -> None:
         """
