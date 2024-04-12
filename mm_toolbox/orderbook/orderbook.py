@@ -1,9 +1,9 @@
 import numpy as np
-from numba import njit, int64, float64, bool_
+from numba import njit, uint16, float32, bool_
 from numba.experimental import jitclass
 from numpy.typing import NDArray
 
-@njit(bool_[:](float64[:], float64[:]), nogil=True)
+@njit(bool_[:](float32[:], float32[:]), nogil=True)
 def isin(a: NDArray, b: NDArray) -> NDArray:
     out = np.empty(a.size, dtype=bool_)
     b = set(b)
@@ -14,10 +14,10 @@ def isin(a: NDArray, b: NDArray) -> NDArray:
     return out
 
 spec = [
-    ('size', int64),
-    ('asks', float64[:, :]),
-    ('bids', float64[:, :]),
-    ('bba', float64[:, :])
+    ('size', uint16),
+    ('asks', float32[:, :]),
+    ('bids', float32[:, :]),
+    ('bba', float32[:, :])
 ]
 
 @jitclass(spec)
@@ -43,9 +43,9 @@ class Orderbook:
     """
     def __init__(self, size: int) -> None:
         self.size = size
-        self.asks = np.empty((self.size, 2), dtype=float64)
-        self.bids = np.empty((self.size, 2), dtype=float64)
-        self.bba = np.empty((2, 2), dtype=float64)
+        self.asks = np.empty((self.size, 2), dtype=float32)
+        self.bids = np.empty((self.size, 2), dtype=float32)
+        self.bba = np.empty((2, 2), dtype=float32)
 
     def _sort_book_(self) -> NDArray:
         """
