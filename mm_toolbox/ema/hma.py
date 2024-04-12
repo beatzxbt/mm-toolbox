@@ -1,12 +1,12 @@
 import numpy as np
 from numba.experimental import jitclass
-from numba.types import bool_, int64, float64
+from numba.types import bool_, uint32, float64, Array
 
 from mm_toolbox.ema.ema import EMA
 from mm_toolbox.ringbuffer.ringbuffer import RingBufferF64
 
-spec_HMA_F64 = [
-    ("window", int64),
+spec = [
+    ("window", uint32),
     ("slow", bool_),
     ("value", float64),
     ("short_ema", EMA.class_type.instance_type),
@@ -15,17 +15,23 @@ spec_HMA_F64 = [
     ("rb", RingBufferF64.class_type.instance_type),
 ]
 
-
-@jitclass(spec_HMA_F64)
-class HMA_F64:
-    def __init__(self, window: int, fast: bool = True):
+@jitclass(spec)
+class HMA:
+    def __init__(self, window: int, fast: bool=True):
         self.window = window
-        self.slow = not fast
-        self.value = 0.0
-        self.short_ema = EMA(int(self.window // 2), 0, True)
+        self.fast = fast
+        self.short_ema = EMA(self.window // 2, 0, True)
         self.long_ema = EMA(window, 0, True)
-        self.smooth_ema = EMA(np.sqrt(window), 0, True)
+        self.smooth_ema = EMA(int(window ** 0.5), 0, True)
+        self.value = 0.0
         self.rb = RingBufferF64(window)
+
+    def _reset_(self) -> None:
+        """Clears the EMA & RB buffers."""
+        _ = self.rb.reset()
+        _ = self.short_ema.rb.reset()
+        _ = self.smooth_ema.rb.reset()
+        _ = self.long_ema.rb.reset()
 
     def _recursive_hma_(self, value: float) -> float:
         self.short_ema.update(value)
@@ -33,29 +39,13 @@ class HMA_F64:
         self.smooth_ema.update(self.short_ema.value * 2 - self.long_ema.value)
         return self.smooth_ema.value
 
-    def initialize(self, arr_in):
-        self.rb.reset()
-        self.short_ema.rb.reset()
-        self.smooth_ema.rb.reset()
-        self.long_ema.rb.reset()
-
+    def initialize(self, arr_in: Array) -> None:
+        self._reset_()
         self.value = arr_in[0]
-
         for val in arr_in:
             self.update(val)
 
-    def update(self, value: float):
+    def update(self, value: float) -> None:
         self.value = self._recursive_hma_(value)
-        if self.slow:
+        if not self.fast:
             self.rb.appendright(self.value)
-
-
-if __name__ == "__main__":
-    # TEST
-    arr = np.random.rand(10) * 1000
-
-    hma = HMA_F64(window=20, fast=False)
-    hma.initialize(arr)
-
-    print(hma.value)
-    print(hma.rb._unwrap_())
