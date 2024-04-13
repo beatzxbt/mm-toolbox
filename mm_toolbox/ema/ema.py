@@ -1,13 +1,13 @@
 import numpy as np
 from numba import njit
-from numba.types import bool_, int64, float64, Array
+from numba.types import bool_, uint32, float64, Array
 from numba.experimental import jitclass
 from typing import Optional
 
 from mm_toolbox.ringbuffer.ringbuffer import RingBufferF64
 
 spec = [
-    ('window', int64),
+    ('window', uint32),
     ('alpha', float64),
     ('fast', bool_),
     ('value', float64),
@@ -36,7 +36,7 @@ class EMA:
     rb : RingBufferF64
         A ring buffer to store EMA values history, activated if `fast` is False.
     """
-    def __init__(self, window: int, alpha: Optional[float]=0, fast: bool=False):
+    def __init__(self, window: int, alpha: Optional[float]=0, fast: bool=True):
         self.window = window
         self.alpha = alpha if alpha != 0 else 3 / (self.window + 1)
         self.fast = fast
@@ -70,10 +70,8 @@ class EMA:
         """
         _ = self.rb.reset()
         self.value = arr_in[0]
-        for val in arr_in:
-            self.value = self._recursive_ema_(val)
-            if not self.fast:
-                self.rb.appendright(self.value)
+        for value in arr_in:
+            self.update(value)
 
     def update(self, new_val: float) -> None:
         """

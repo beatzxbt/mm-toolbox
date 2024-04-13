@@ -1,8 +1,8 @@
 from pathlib import Path
-from setuptools import setup, find_packages
 from typing import List
+from setuptools import setup, find_packages
 
-from mm_toolbox import __VERSION__
+from mm_toolbox import __VERSION__, clean_repo
 
 def readme():
     with open(str(Path(__file__).parent.resolve()) + "/README.md") as f:
@@ -39,3 +39,4 @@ if __name__ == "__main__":
         zip_safe=ZIP_SAFE,
         install_requires=REQUIREMENTS,
     )
+    clean_repo(NAME)
