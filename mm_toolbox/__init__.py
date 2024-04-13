@@ -1,10 +1,7 @@
-__VERSION__ = "0.0.2"
-
+__VERSION__ = "0.0.3"
 
 def clean_repo(repo_name: str) -> None:
-    '''
-    Clean the repository
-    '''
+    """Clean the repository"""
     import os
 
     if os.name == "nt":
@@ -16,12 +13,10 @@ def clean_repo(repo_name: str) -> None:
 
     os.system(command)
 
-
 def install_package(package: str):
-    '''
-    Install desired package
-    '''
+    """Install desired package"""
     import pip
+
     if hasattr(pip, 'main'):
         pip.main(['install', package])
     else:
