@@ -43,10 +43,14 @@ Please create [issues](https://github.com/beatzxbt/mm-toolbox/issues) to flag bu
 ## Performance tricks for Numba
 
 1. Look at https://numba.pydata.org/numba-doc/dev/reference/envvars.html
-  - Set NUMBA_OPT: max
-  - Set NUMBA_ENABLE_AVX: 1
+   - Set NUMBA_OPT: max
+   - Set NUMBA_ENABLE_AVX: 1
 
-(Will add more later)
+2. Read https://tbetcke.github.io/hpc_lecture_notes/simd.html, TLDR:
+      - Ex. Doing 2.0 rather than 2 in a long calculation
+      - @njit(error_model="numpy") when working with div 
+      - Examine ASM/LLVM generation for autovectorization debugging
+      - @njit(fastmath=True) in for loops if execution order doesn't matter
 
 ### Contact 
 
