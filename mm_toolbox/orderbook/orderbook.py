@@ -1,15 +1,16 @@
 import numpy as np
-from numba import njit, uint16, float32, bool_
+from numba import njit
+from numba.types import uint16, float32, bool_, Array
 from numba.experimental import jitclass
 from numpy.typing import NDArray
 
-@njit(bool_[:](float32[:], float32[:]), nogil=True)
-def isin(a: NDArray, b: NDArray) -> NDArray:
+@njit(["bool_[:](float32[:], float32[:])"], fastmath=True)
+def isin(a: Array, b: Array) -> Array:
     out = np.empty(a.size, dtype=bool_)
     b = set(b)
 
     for i in range(a.size):
-        out[i] = True if a[i] in b else False
+        out[i] = a[i] in b
             
     return out
 
@@ -43,9 +44,9 @@ class Orderbook:
     """
     def __init__(self, size: int) -> None:
         self.size = size
-        self.asks = np.empty((self.size, 2), dtype=float32)
-        self.bids = np.empty((self.size, 2), dtype=float32)
-        self.bba = np.empty((2, 2), dtype=float32)
+        self.asks = np.zeros((self.size, 2), dtype=float32)
+        self.bids = np.zeros((self.size, 2), dtype=float32)
+        self.bba = np.zeros((2, 2), dtype=float32)
 
     def _sort_book_(self) -> NDArray:
         """
