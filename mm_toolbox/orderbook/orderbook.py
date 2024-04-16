@@ -96,8 +96,8 @@ class Orderbook:
         bids : NDArray
             Initial bid orders data, formatted as [[price, size], ...].
         """
-        self.asks[:, :] = asks
-        self.bids[:, :] = bids
+        self.asks[:asks.shape[0], :] = asks
+        self.bids[:bids.shape[0], :] = bids
         self._sort_book_()
 
     def update_book(self, asks: NDArray, bids: NDArray) -> NDArray:
