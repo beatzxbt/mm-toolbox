@@ -138,7 +138,7 @@ class Orderbook:
             The weighted mid price, which accounts for the volume imbalance at the top of the book.
         """
         imb = self.bba[0, 1] / (self.bba[0, 1] + self.bba[1, 1])
-        return self.bba[0, 0] * imb + self.bba[0, 0] * (1 - imb)
+        return self.bba[0, 0] * imb + self.bba[1, 0] * (1 - imb)
     
     def get_vamp(self, depth: float) -> float:
         """
