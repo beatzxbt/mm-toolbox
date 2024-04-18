@@ -3,7 +3,7 @@ from numba import njit
 from numba.types import Array
 from typing import Union
 
-@njit(cache=True)
+@njit(error_model="numpy", cache=True)
 def round_ceil(num: Union[float, Array], step_size: Union[float, int]) -> Union[float, int]:
     """
     Rounds a number or array of numbers up to the nearest multiple of a given step size.
@@ -31,7 +31,7 @@ def round_ceil(num: Union[float, Array], step_size: Union[float, int]) -> Union[
     return np.round(step_size * np.ceil(num / step_size), int(np.ceil(-np.log10(step_size))))
 
 
-@njit(cache=True)
+@njit(error_model="numpy", cache=True)
 def round_floor(num: Union[float, Array], step_size: Union[float, int]) -> Union[float, int]:
     """
     Rounds a number or array of numbers down to the nearest multiple of a given step size.
@@ -59,7 +59,7 @@ def round_floor(num: Union[float, Array], step_size: Union[float, int]) -> Union
     return np.round(step_size * np.floor(num / step_size), int(np.ceil(-np.log10(step_size))))
 
 
-@njit(cache=True)
+@njit(error_model="numpy", cache=True)
 def round_discrete(num: Union[float, Array], step_size: Union[float, int]) -> Union[float, int]:
     """
     Rounds a number or array of numbers to the nearest multiple of a given step size.
