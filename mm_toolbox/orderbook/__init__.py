@@ -12,4 +12,5 @@
 # -> bug-fixing for orderbook.display_internal() in denormalizing arrays prior to display
 # -> get_bids() and get_asks() funcs which auto denormalize all arrays 
 # -> perform orderbook indicators on pure uints before final, single denormalization
+# -> change array signatures to specify C-style (change all int32[:, :] -> Array(int32, 2, "C"))
 # -> add more here!
