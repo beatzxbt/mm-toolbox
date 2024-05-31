@@ -1,4 +1,4 @@
-from numba import njit, float64
+from numba import njit
 
 @njit(["float64(float64, float64, float64)"], cache=True)
 def true_range(open: float, high: float, low: float) -> float:
