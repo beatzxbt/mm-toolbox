@@ -2,9 +2,10 @@ import numpy as np
 from numba import njit
 from numba.types import int32, float32, bool_, Array
 from numba.experimental import jitclass
-from typing import Tuple
+from typing import Tuple, Union
 
-@njit(["int32(int32[:, :], int32)"], fastmath=True, cache=True)
+
+@njit(["int32(int32[:, :], int32)"], fastmath=True)
 def linear_search(arr: Array, price: int) -> int:
     """
     Performs a linear search on the order book array to find the level that matches the specified price.
@@ -29,7 +30,7 @@ def linear_search(arr: Array, price: int) -> int:
 
     return n + 1
 
-@njit(["int32(int32[:, :], int32)"], fastmath=True, cache=True)
+@njit(["int32(int32[:, :], int32)"], fastmath=True)
 def linear_search_reversed(arr: Array, price: int) -> int:
     """
     Performs a linear search on the order book array starting from the end to find the level that matches the specified price.
@@ -239,19 +240,18 @@ def process_single_trade(asks: Array, bids: Array, isBuy: bool, price: int, size
                 bids[0, 1] = 0
             else:
                 bids[-1, 1] -= size
-            
-spec = [
-    ("tick_size", float32),
-    ("lot_size", float32),
-    ("num_levels", int32),
-    ("asks", int32[:, :]),
-    ("bids", int32[:, :]),
-    ("last_updated_timestamp", int32),
-    ("warmed_up", bool_),
-]
+          
 
-@jitclass(spec)
+@jitclass
 class Orderbook:
+    tick_size: float32
+    lot_size: float32
+    num_levels: int32
+    asks: int32[:, :]
+    bids: int32[:, :]
+    last_updated_timestamp: int32
+    warmed_up: bool_
+
     def __init__(self, tick_size: float, lot_size: float, num_levels: int) -> None:
         self.tick_size = tick_size
         self.lot_size = lot_size
@@ -319,23 +319,43 @@ class Orderbook:
         """
         return round(num/step)
     
-    def denormalize(self, num: int, step: int) -> float:
+    def denormalize(self, num: Union[int, Array], step: Union[float, Array]) -> Union[float, Array]:
         """
-        Denormalizes a number by multiplying it with a step value.
+        Denormalizes a number or an array of numbers by multiplying with a step value or an array of step values.
 
         Parameters
         ----------
-        num : int
-            The integer to be denormalized.
-        step : float
-            The step size used for denormalization.
+        num : int or Array
+            The integer or array of integers to be denormalized.
+            
+        step : float or Array
+            The step size or array of step sizes used for denormalization.
 
         Returns
         -------
-        float
-            The denormalized float value.
+        float or Array
+            The denormalized float value or array of float values.
         """
         return num * step
+
+    def denormalize_book(self, orderbook: Array) -> Array:
+        """
+        Denormalizes the order book array where the first column represents prices and the second column represents sizes.
+
+        Parameters
+        ----------
+        orderbook : Array
+            The (x, 2) sized array representing the order book with the first column as prices and the second column as sizes.
+
+        Returns
+        -------
+        Array
+            The denormalized order book.
+        """
+        denormalize_book = orderbook.copy()
+        denormalize_book[:, 0] = self.denormalize(denormalize_book[:, 0], self.tick_size)
+        denormalize_book[:, 1] = self.denormalize(denormalize_book[:, 1], self.lot_size)
+        return denormalize_book
 
     def warmup_asks(self, best_ask_price: float, best_ask_size: float) -> None:
         """
@@ -516,7 +536,8 @@ class Orderbook:
         float
             The mid price, which is the average of the best bid and best ask prices.
         """
-        return (self.get_best_bid()[0] + self.get_best_ask()[0]) / 2
+        mid = (self.bids[-1, 0] + self.asks[0, 0]) / 2
+        return self.denormalize(mid, self.tick_size)
 
     def get_wmid(self) -> float:
         """
@@ -528,10 +549,9 @@ class Orderbook:
         float
             The weighted mid price, which accounts for the volume imbalance at the top of the book.
         """
-        bid_price, bid_size = self.get_best_bid()
-        ask_price, ask_size = self.get_best_ask()
-        imb = bid_size / (bid_size + ask_size)
-        return bid_price * imb + ask_price * (1 - imb)
+        imb = self.bids[-1, 1] / (self.bids[-1, 1] + self.asks[0, 1])
+        wmid = self.bids[-1, 0] * imb + self.asks[0, 0] * (1 - imb)
+        return self.denormalize(wmid, self.tick_size)
     
     def get_vamp(self, dollar_depth: float) -> float:
         """
@@ -547,13 +567,13 @@ class Orderbook:
         float
             The VAMP, representing an average price weighted by order sizes up to the specified dollar depth.
         """
-        bid_dollar_weighted_sum = 0.0
-        ask_dollar_weighted_sum = 0.0
-        bid_dollar_cum = 0.0
-        ask_dollar_cum = 0.0
+        bid_dollar_weighted_sum = 0
+        ask_dollar_weighted_sum = 0
+        bid_dollar_cum = 0
+        ask_dollar_cum = 0
         
         # Indexed backwards for best -> worst order
-        for price, size in self.bids[::-1]: 
+        for price, size in self.denormalize_book(self.bids[::-1]): 
             order_value = price * size
             if bid_dollar_cum + order_value > dollar_depth:
                 remaining_value = dollar_depth - bid_dollar_cum
@@ -567,7 +587,7 @@ class Orderbook:
             if bid_dollar_cum >= dollar_depth:
                 break
         
-        for price, size in self.asks:
+        for price, size in self.denormalize_book(self.asks):
             order_value = price * size
             if ask_dollar_cum + order_value > dollar_depth:
                 remaining_value = dollar_depth - ask_dollar_cum
@@ -597,7 +617,7 @@ class Orderbook:
         float
             The spread, defined as the difference between the best ask and the best bid prices.
         """
-        return self.get_best_ask()[0] - self.get_best_bid()[0]
+        return self.denormalize(self.asks[0, 0] - self.bids[-1, 0], self.tick_size)
     
     def get_slippage(self, book: Array, dollar_depth: float) -> float:
         """
@@ -619,8 +639,9 @@ class Orderbook:
         mid = self.get_mid()
         dollar_cum = 0.0
         slippage = 0.0
+        denormalize_book = self.denormalize_book(book)
 
-        for price, size in book:
+        for price, size in denormalize_book:
             order_value = price * size
             dollar_cum += order_value
             slippage += np.abs(mid - price) * order_value
