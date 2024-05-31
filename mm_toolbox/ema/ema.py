@@ -6,15 +6,7 @@ from typing import Optional
 
 from mm_toolbox.ringbuffer.ringbuffer import RingBufferF64
 
-spec = [
-    ('window', uint32),
-    ('alpha', float64),
-    ('fast', bool_),
-    ('value', float64),
-    ('rb', RingBufferF64.class_type.instance_type),
-]
-
-@jitclass(spec)
+@jitclass
 class EMA:
     """
     Exponential Moving Average (EMA) with optional RingBuffer to store history.
@@ -36,9 +28,16 @@ class EMA:
     rb : RingBufferF64
         A ring buffer to store EMA values history, activated if `fast` is False.
     """
-    def __init__(self, window: int, alpha: Optional[float]=0, fast: bool=True):
+    
+    window: uint32
+    alpha: float64
+    fast: bool_
+    value: float64
+    rb: RingBufferF64.class_type.instance_type
+
+    def __init__(self, window: int, alpha: Optional[float]=0.0, fast: bool=True):
         self.window = window
-        self.alpha = alpha if alpha != 0 else 3 / (self.window + 1)
+        self.alpha = alpha if alpha != 0 else 3.0 / (self.window + 1)
         self.fast = fast
         self.value = 0.0
         self.rb = RingBufferF64(self.window)
@@ -57,7 +56,7 @@ class EMA:
         float
             The updated EMA value.
         """
-        return self.alpha * update + (1 - self.alpha) * self.value
+        return self.alpha * update + (1.0 - self.alpha) * self.value
 
     def initialize(self, arr_in: Array) -> None:
         """
@@ -68,9 +67,13 @@ class EMA:
         arr_in : Iterable[float]
             The initial series of data points to feed into the EMA calculator.
         """
-        _ = self.rb.reset()
+        self.rb.reset()
         self.value = arr_in[0]
-        for value in arr_in:
+        
+        if not self.fast:
+            self.rb.appendright(self.value)
+
+        for value in arr_in[1:]:
             self.update(value)
 
     def update(self, new_val: float) -> None:
@@ -88,7 +91,7 @@ class EMA:
 
 
 
-@njit(cache=True)
+@njit(["float64[:](int64, bool_, float64)"], error_model="numpy", fastmath=True)
 def ema_weights(window: int, reverse: bool=False, alpha: Optional[float]=0) -> Array:
     """
     Calculate EMA (Exponential Moving Average)-like weights for a given window size.
@@ -97,8 +100,10 @@ def ema_weights(window: int, reverse: bool=False, alpha: Optional[float]=0) -> A
     ----------
     window : int
         The number of periods to use for the EMA calculation.
+
     reverse : bool, optional
         If True, the weights are returned in reverse order. The default is False.
+
     alpha : float, optional
         The decay factor for the EMA calculation. If not provided, it is calculated as 3 / (window + 1).
 
