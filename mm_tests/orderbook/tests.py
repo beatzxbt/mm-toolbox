@@ -129,7 +129,7 @@ class TestOrderbook(unittest.TestCase):
     def test_single_ingest_buy_trade_update(self):
         # Tests processing a single trade marked as a buy
         self.helper_reset_warmup_orderbook()
-        ts, isBuy, price, size = time_ms(), True, 101.0, 2.0
+        ts, isBuy, price, size = (time_ms(), True, 101.0, 2.0)
         self.orderbook.ingest_trade_update(ts, isBuy, price, size)
         
         self.assertEqual(self.orderbook.asks[0, 0], self.orderbook.normalize(101.0, self.tick_size))
@@ -138,7 +138,7 @@ class TestOrderbook(unittest.TestCase):
     def test_single_ingest_sell_trade_update(self):
         # Tests processing a single trade marked as a sell
         self.helper_reset_warmup_orderbook()
-        ts, isBuy, price, size = time_ms(), False, 99.0, 2.0
+        ts, isBuy, price, size = (time_ms(), False, 99.0, 2.0)
         self.orderbook.ingest_trade_update(ts, isBuy, price, size)
         
         self.assertEqual(self.orderbook.asks[0, 0], self.orderbook.normalize(99.0, self.tick_size))

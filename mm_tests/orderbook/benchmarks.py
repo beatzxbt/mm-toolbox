@@ -1,7 +1,20 @@
+import sys
+import os
+
+# Get the project root directory
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+# Add the project root directory to the Python path
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# -------------------------------------------- #
+
 # This BTCUSDT data is from Binance USD-M, scraped by me (feel free to use it elsewhere)
 # Tick & lot size at the time of testing is 0.1/0.001 respectively
 # This benchmark can be ran with other data, just swap keys & data directory
 # Can work any sizes, though it's optimized for smaller orderbooks (~50 levels)
+
 import json
 import numpy as np
 from time import time_ns
@@ -20,7 +33,7 @@ def load_benchmark_data(dir: str):
 try:
     print("starting script, loading data & initializing orderbook...")
 
-    data_generator = load_benchmark_data("/Users/beatz/Documents/Github/mm-toolbox/mm_tests/orderbook/orderbook_test_data.txt")
+    data_generator = load_benchmark_data("/Users/beatz/Documents/Github/mm-toolbox/mm_tests/orderbook/BTCUSDT_filtered_out.txt")
 
     first_update = next(data_generator)
     orderbook = Orderbook(tick_size=0.1, lot_size=0.001, num_levels=50)
