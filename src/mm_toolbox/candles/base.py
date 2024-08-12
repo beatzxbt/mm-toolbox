@@ -221,18 +221,114 @@ class BaseCandles(ABC):
         self._total_volume_ += size
         return self._cum_price_volume_ / self._total_volume_
     
-    @property
-    def durations(self) -> np.ndarray:
+    def durations(self) -> np.ndarray[float]:
         candles = self.as_array()
         return candles[:, 9] - candles[:, 8]
     
-    @property
-    def imbalances(self) -> np.ndarray:
+    def imbalances(self) -> np.ndarray[float]:
         candles = self.as_array()
         return candles[:, 4] / candles[:, 5]
     
+    def average_true_range(self) -> np.ndarray[float]:
+        """
+        Calculate the true range of a trading price bar.
+
+        The true range is the greatest of the following:
+        - The difference between the current high and the current low,
+        - The absolute difference between the current high and the previous close,
+        - The absolute difference between the current low and the previous close.
+
+        Returns
+        -------
+        np.ndarray[float]
+            The true range of price in the candles.
+        """
+        candles = self.as_array()
+
+        if len(candles) < 2:
+            return np.array([], dtype=np.float64)
+
+        high_low_diff = candles[:, 1] - candles[:, 2]  
+        high_prev_close_diff = np.abs(candles[1:, 1] - candles[:-1, 3])  
+        low_prev_close_diff = np.abs(candles[1:, 2] - candles[:-1, 3])  
+
+        # True Range is the maximum of the three calculated differences
+        true_range = np.maximum.reduce([
+            high_low_diff[1:], 
+            high_prev_close_diff, 
+            low_prev_close_diff
+        ])
+
+        return true_range
+    
+    def rsi(self, period: int = 14) -> np.ndarray[float]:
+        """
+        Calculate the Relative Strength Index (RSI) for the given period.
+
+        Parameters
+        ----------
+        period : int
+            The period over which to calculate the RSI (default is 14).
+
+        Returns
+        -------
+        np.ndarray
+            The RSI values for each candle.
+        """
+        close_prices = self.as_array()[:, 3]
+
+        delta = np.diff(close_prices)
+        gain = np.where(delta > 0.0, delta, 0.0)
+        loss = np.where(delta < 0.0, -delta, 0.0)
+
+        avg_gain = np.zeros_like(close_prices)
+        avg_loss = np.zeros_like(close_prices)
+
+        avg_gain[period] = np.mean(gain[:period])
+        avg_loss[period] = np.mean(loss[:period])
+
+        for i in range(period, len(delta)):
+            avg_gain[i] = (avg_gain[i - 1] * (period - 1.0) + gain[i]) / period
+            avg_loss[i] = (avg_loss[i - 1] * (period - 1.0) + loss[i]) / period
+
+        rs = avg_gain[period:] / avg_loss[period:]
+        rsi = np.zeros_like(close_prices)
+        rsi[period:] = 100 - (100 / (1 + rs))
+
+        return rsi[period:]
+    
+    def calculate_bollinger_bands(self, period: int = 20, num_std_dev: float = 2.0) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Calculate Bollinger Bands (BB) for the given period.
+
+        Parameters
+        ----------
+        period : int
+            The period over which to calculate the Bollinger Bands (default is 20).
+
+        num_std_dev : float
+            The number of standard deviations to use for the bands (default is 2.0).
+
+        Returns
+        -------
+        Tuple[np.ndarray, np.ndarray, np.ndarray]
+            The lower band, middle band (SMA), and upper band.
+        """
+        close_prices = self.as_array()[:, 3]
+
+        sma = np.convolve(close_prices, np.ones(period) / period, mode='valid')
+        rolling_std = np.zeros_like(sma)
+
+        for i in range(len(sma)):
+            rolling_std[i] = np.std(close_prices[i:i + period])
+
+        upper_band = sma + num_std_dev * rolling_std
+        lower_band = sma - num_std_dev * rolling_std
+
+        return lower_band, sma, upper_band
+    
     @property
-    def current_candle(self) -> np.ndarray:
+    def current_candle(self) -> np.ndarray[float]:
         return np.array([
             self.open_price,
             self.high_price,
