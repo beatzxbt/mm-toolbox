@@ -2,7 +2,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 from typing import Tuple, Iterator, Union
 
-from mm_toolbox.ringbuffer import RingBufferMultiDim
+from mm_toolbox.src.ringbuffer import RingBufferMultiDim
 
 
 class BaseCandles(ABC):
@@ -198,7 +198,8 @@ class BaseCandles(ABC):
 
     def update(self, timestamp: float, side: bool, price: float, size: float) -> None:
         """
-        Updates the candle data with a new trade.
+        Updates the candle data with a new trade. Checks if the update is 
+        as a result of stale data being recieved or not. 
 
         Parameters
         ----------
@@ -214,7 +215,8 @@ class BaseCandles(ABC):
         size : float
             The size (volume) of the trade.
         """
-        self.process_trade(timestamp, side, price, size)
+        if timestamp >= self.open_timestamp:
+            self.process_trade(timestamp, side, price, size)
 
     def calculate_vwap(self, price: float, size: float) -> float:
         self._cum_price_volume_ += price * size
@@ -297,7 +299,7 @@ class BaseCandles(ABC):
 
         return rsi[period:]
     
-    def calculate_bollinger_bands(self, period: int = 20, num_std_dev: float = 2.0) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def bollinger_bands(self, period: int = 20, num_std_dev: float = 2.0) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Calculate Bollinger Bands (BB) for the given period.
 

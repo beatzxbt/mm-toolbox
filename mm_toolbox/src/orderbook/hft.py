@@ -4,7 +4,7 @@ from numba import njit
 from numba.types import uint32, float64, bool_
 from numba.experimental import jitclass
 
-from mm_toolbox.rounding import Round
+from mm_toolbox.src.rounding import Round
 
 @njit(["uint32(uint32[:, :], uint32, uint32, uint32)"], inline="always")
 def linear_search(arr: np.ndarray, price: int, max_len: int, start: int = 0) -> int:

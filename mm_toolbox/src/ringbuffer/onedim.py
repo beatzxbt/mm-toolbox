@@ -1,7 +1,7 @@
 import numpy as np
 from numba.types import uint32, int64, float64
 from numba.experimental import jitclass
-from typing import Tuple, Iterator
+from typing import Tuple
 
 @jitclass
 class RingBufferSingleDimFloat:
@@ -196,6 +196,21 @@ class RingBufferSingleDimFloat:
         self._right_index_ = 0
         return res
     
+    def __contains__(self, num: float) -> bool:
+        """
+        Sum of all elements in the buffer.
+
+        Returns
+        -------
+        float
+            Sum of elements.
+        """
+        return num in self._array_
+
+    def __eq__(self, ringbuffer: 'RingBufferSingleDimFloat') -> bool:
+        assert isinstance(ringbuffer, RingBufferSingleDimFloat)
+        return ringbuffer.as_array() == self.as_array()
+    
     def __len__(self) -> int:
         """
         Number of elements in the buffer.
@@ -207,34 +222,23 @@ class RingBufferSingleDimFloat:
         """
         return self._right_index_ - self._left_index_
 
-    def __getitem__(self, item: Tuple) -> np.ndarray:
+    def __getitem__(self, item: int) -> float:
         """
         Get an item from the buffer.
 
         Parameters
         ----------
-        item : tuple
-            The index or slice to retrieve from the buffer.
+        item : int
+            The index retrieve from the buffer.
 
         Returns
         -------
-        np.ndarray
+        float
             The retrieved item.
         """
         return self.as_array()[item]
-
-    def __iter__(self) -> Iterator[np.ndarray]:
-        """
-        Return an iterator over the buffer elements.
-
-        Returns
-        -------
-        iterator
-            An iterator over the buffer elements.
-        """
-        return iter(self.as_array())
     
-    def __repr__(self) -> str:
+    def __str__(self) -> str:
         """
         String representation of the RingBuffer.
 
@@ -248,17 +252,6 @@ class RingBufferSingleDimFloat:
                 f"current_length={len(self)}, "
                 f"data={self.as_array()})")
     
-    def __sum__(self) -> float:
-        """
-        Sum of all elements in the buffer.
-
-        Returns
-        -------
-        float
-            Sum of elements.
-        """
-        return self._array_.sum()
-
 
 @jitclass
 class RingBufferSingleDimInt:
@@ -453,6 +446,10 @@ class RingBufferSingleDimInt:
         self._right_index_ = 0
         return res
     
+    def __eq__(self, ringbuffer: 'RingBufferSingleDimInt') -> bool:
+        assert isinstance(ringbuffer, RingBufferSingleDimInt)
+        return ringbuffer.as_array() == self.as_array()
+    
     def __len__(self) -> int:
         """
         Number of elements in the buffer.
@@ -464,34 +461,23 @@ class RingBufferSingleDimInt:
         """
         return self._right_index_ - self._left_index_
 
-    def __getitem__(self, item: Tuple) -> np.ndarray:
+    def __getitem__(self, item: int) -> int:
         """
         Get an item from the buffer.
 
         Parameters
         ----------
-        item : tuple
-            The index or slice to retrieve from the buffer.
+        item : int
+            The index to retrieve from the buffer.
 
         Returns
         -------
-        np.ndarray
+        int
             The retrieved item.
         """
         return self.as_array()[item]
-
-    def __iter__(self) -> Iterator[np.ndarray]:
-        """
-        Return an iterator over the buffer elements.
-
-        Returns
-        -------
-        iterator
-            An iterator over the buffer elements.
-        """
-        return iter(self.as_array())
     
-    def __repr__(self) -> str:
+    def __str__(self) -> str:
         """
         String representation of the RingBuffer.
 
@@ -500,18 +486,7 @@ class RingBufferSingleDimInt:
         str
             The string representation of the buffer.
         """
-        return (f"RingBufferSingleDimInt(capacity={self.capacity}, "
+        return (f"RingBufferSingleDimFloat(capacity={self.capacity}, "
                 f"dtype={self.dtype}, "
                 f"current_length={len(self)}, "
                 f"data={self.as_array()})")
-    
-    def __sum__(self) -> int:
-        """
-        Sum of all elements in the buffer.
-
-        Returns
-        -------
-        int
-            Sum of elements.
-        """
-        return self._array_.sum()

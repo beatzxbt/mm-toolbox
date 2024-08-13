@@ -1,4 +1,4 @@
-from typing import Dict, Any, Union
+from typing import Dict
 
 
 class VerifyWsPayload:

@@ -12,7 +12,7 @@
 # -> bug-fixing for orderbook.display_internal() in denormalizing arrays prior to display
 # -> get_bids() and get_asks() funcs which auto denormalize all arrays 
 # -> perform orderbook indicators on pure uints before final, single denormalization
-# -> add more here!
+# -> assert array shape at compile time for better memory access: https://stackoverflow.com/questions/67743726/numba-fast-math-does-not-improve-speed
 
 from .hft import HFTOrderbook
 from .standard import Orderbook
