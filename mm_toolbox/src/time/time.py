@@ -38,14 +38,14 @@ def time_us() -> float:
     """
     return time_sec() * 1_000_000.0
 
-def time_ns() -> float:
+def time_ns() -> int:
     """
-    Get the current time in milliseconds since the epoch.
+    Get the current time in nanoseconds since the epoch.
 
     Returns
     -------
-    float
-        The current time in milliseconds.
+    int
+        The current time in nanoseconds.
     """
     return time_nano()
 

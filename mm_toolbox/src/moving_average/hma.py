@@ -2,11 +2,11 @@ import numpy as np
 from numba.experimental import jitclass
 from numba.types import bool_, uint32, float64
 
-from mm_toolbox.moving_average.ema import EMA
-from mm_toolbox.ringbuffer import RingBufferSingleDimFloat
+from mm_toolbox.src.moving_average.ema import ExponentialMovingAverage as EMA
+from mm_toolbox.src.ringbuffer import RingBufferSingleDimFloat
 
 @jitclass
-class HMA:
+class HullMovingAverage:
     window: uint32
     slow: bool_
     value: float64

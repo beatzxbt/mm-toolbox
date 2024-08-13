@@ -1,6 +1,5 @@
 import os
 import orjson
-import aiofiles
 import aiosonic
 import asyncio
 
