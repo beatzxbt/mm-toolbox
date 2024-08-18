@@ -15,26 +15,6 @@ class Round:
     
     lot_size : float
         The step size for rounding sizes.
-
-    Attributes
-    ----------
-    tick_size : float64
-        The step size for rounding prices.
-    
-    lot_size : float64
-        The step size for rounding sizes.
-    
-    inverse_tick_size : float64
-        The inverse of the tick size, used for faster calculations.
-    
-    inverse_lot_size : float64
-        The inverse of the lot size, used for faster calculations.
-    
-    tick_rounding_decimals : float64
-        The number of decimal places to round to for prices.
-    
-    lot_rounding_decimals : float64
-        The number of decimal places to round to for sizes.
     """
     tick_size: float64
     lot_size: float64
