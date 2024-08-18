@@ -12,23 +12,11 @@ class Orderbook:
     An orderbook class, maintaining separate arrays for bid and
     ask orders with functionality to initialize, update, and sort
     the orders.
-
-    Attributes
-    ----------
-    size : int
-        The maximum number of bid/ask pairs the order book will hold.
-
-    asks : np.ndarray
-        Array to store ask orders, each with price and quantity.
-
-    bids : np.ndarray
-        Array to store bid orders, each with price and quantity.
     """
-
     size: int32
-    seq_id: int32
-    asks: float64[:, :]
-    bids: float64[:, :]
+    _seq_id_: int32
+    _asks_: float64[:, :]
+    _bids_: float64[:, :]
 
     def __init__(self, size: int) -> None:
         self.size: int = size
