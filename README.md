@@ -12,18 +12,17 @@ mm-toolbox/
 │   │   ├── logging/            # Lightweight logging utilities
 │   │   ├── moving_average/     # Implementations of various moving averages
 │   │   ├── numba/              # Numba-optimized functions and utilities
-│   │   ├── orderbook/          # Tools for order book management
+│   │   ├── orderbook/          # Multiple orderbook implementations & tools
 │   │   ├── ringbuffer/         # Efficient fixed-size circular buffers
 │   │   ├── rounding/           # Utilities for rounding prices and sizes
 │   │   ├── time/               # High-performance time utilities
 │   │   ├── websocket/          # WebSocket handling utilities
-│   │   ├── weights/            # Tools for weight calculations
-│   ├── tests/                  # Unit tests for all the modules
+│   │   ├── weights/            # Weight generators 
 │   ├── __init__.py             # Package initialization
-│   └── README.md               # Documentation (this file)
+├── tests/                      # Unit tests for all the modules
 ├── .gitignore                  # Git ignore file
 ├── LICENSE                     # License information
-├── README.md                   # This file
+├── README.md                   # Main documentation file
 ├── requirements.txt            # Python dependencies
 └── setup.py                    # Setup script for pip installation
 ```
