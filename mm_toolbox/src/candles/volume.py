@@ -1,4 +1,4 @@
-from base import BaseCandles
+from mm_toolbox.src.candles.base import BaseCandles
 
 
 class VolumeCandles(BaseCandles):

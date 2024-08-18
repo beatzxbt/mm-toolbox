@@ -4,16 +4,7 @@ from numba.types import int32, float64, bool_
 from numba.experimental import jitclass
 from typing import Dict, Union
 
-@njit(["bool_[:](float64[:], float64[:])"], inline="always")
-def isin(a: np.ndarray[float], b: np.ndarray[float]) -> np.ndarray[bool]:
-    out_len = a.size
-    out = np.empty(out_len, dtype=bool_)
-    b_set = set(b)
-
-    for i in range(out_len):
-        out[i] = a[i] in b_set
-
-    return out
+from mm_toolbox.src.numba import nbisin
 
 @jitclass
 class Orderbook:
@@ -40,14 +31,6 @@ class Orderbook:
     bids: float64[:, :]
 
     def __init__(self, size: int) -> None:
-        """
-        Constructs all the necessary attributes for the orderbook object.
-
-        Parameters
-        ----------
-        size : int
-            Size of the order book (number of orders to store).
-        """
         self.size: int = size
         self._seq_id_: int = 0
         self._asks_: np.ndarray = np.zeros((self.size, 2), dtype=float64)
@@ -72,9 +55,9 @@ class Orderbook:
             A dict containing the current state of the orderbook.
         """
         return {
-            "seq_id": np.float64(self._seq_id_),
-            "asks": self._asks_.astype(np.float64),
-            "bids": self._bids_.astype(np.float64)
+            "seq_id": self._seq_id_,
+            "asks": self._asks_,
+            "bids": self._bids_
         }
 
     def sort_bids(self) -> None:
@@ -101,6 +84,8 @@ class Orderbook:
         bids : np.ndarray
             Initial bid orders data, formatted as [[price, size], ...].
         """
+        assert asks.shape[0] > 0 and asks.ndim == 2 and bids.shape[0] > 0 and bids.ndim == 2
+
         self.reset()
 
         self._seq_id_ = new_seq_id
@@ -124,9 +109,11 @@ class Orderbook:
         bids : np.ndarray
             New bid orders data, formatted as [[price, size], ...].
         """
-        if bids.size > 0 and new_seq_id > self._seq_id_:
+        assert bids.size > 0 and bids.ndim == 2
+        
+        if new_seq_id > self._seq_id_:
             self._seq_id_ = new_seq_id
-            self._bids_ = self._bids_[~isin(self._bids_[:, 0], bids[:, 0])]
+            self._bids_ = self._bids_[~nbisin(self._bids_[:, 0], bids[:, 0])]
             self._bids_ = np.vstack((self._bids_, bids[bids[:, 1] != 0]))
             self.sort_bids()
 
@@ -141,9 +128,11 @@ class Orderbook:
         asks : np.ndarray
             New ask orders data, formatted as [[price, size], ...].
         """
-        if asks.size > 0 and new_seq_id > self._seq_id_:
+        assert asks.size > 0 and asks.ndim == 2
+
+        if new_seq_id > self._seq_id_:
             self._seq_id_ = new_seq_id
-            self._asks_ = self._asks_[~isin(self._asks_[:, 0], asks[:, 0])]
+            self._asks_ = self._asks_[~nbisin(self._asks_[:, 0], asks[:, 0])]
             self._asks_ = np.vstack((self._asks_, asks[asks[:, 1] != 0]))
             self.sort_asks()
 
@@ -302,3 +291,23 @@ class Orderbook:
             The spread, defined as the difference between the best ask and the best bid prices.
         """
         return self._bids_[-1, 0] - self._asks_[0, 0]
+    
+    def __eq__(self, orderbook: 'Orderbook') -> bool:
+        assert isinstance(orderbook, Orderbook)
+        return any(
+            orderbook._bids_ == self._bids_, 
+            orderbook._asks_ == self._asks_,
+            orderbook._seq_id_ == self._seq_id_
+        )
+    
+    def __len__(self) -> int:
+        return min(
+            self._bids_[self._bids_[:, 0] != 0].shape[0],
+            self._asks_[self._asks_[:, 0] != 0].shape[0],
+        )
+
+    def __str__(self) -> str:
+        return (f"Orderbook(size={self.size}, "
+                f"seq_id={self.seq_id}, "
+                f"bids={self._bids_}, "
+                f"asks={self._asks_}")
