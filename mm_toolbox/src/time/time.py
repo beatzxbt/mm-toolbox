@@ -49,24 +49,20 @@ def time_ns() -> int:
     """
     return time_nano()
 
-def datetime_now() -> str:
+def time_iso8601() -> str:
     """
-    Get the current time in the format 'YYYY-MM-DD HH:MM:SS.mmm'.
+    Get the current time in an ISO 8601 formatted timestamp.
 
     Returns
     -------
     str
-        The current time string.
+        An ISO 8601 formatted date-time string (e.g., "2023-04-04T00:28:50.516Z").
     """
-    return strftime("%Y-%m-%d %H:%M:%S") + f".{time_ms() % 1000.0}"
+    return f"{strftime("%Y-%m-%dT%H:%M:%S")}{(time_nano() % 1_000_000_000) // 1_000_000}Z"
 
 def iso8601_to_unix(timestamp: str) -> int:
     """
     Converts an ISO 8601 formatted timestamp to a Unix timestamp.
-
-    This function parses an ISO 8601 date-time string and converts it 
-    into a Unix timestamp, which represents the number of seconds 
-    that have elapsed since January 1, 1970 (midnight UTC/GMT).
 
     Parameters
     ----------
@@ -77,10 +73,5 @@ def iso8601_to_unix(timestamp: str) -> int:
     -------
     int
         The Unix timestamp corresponding to the provided ISO 8601 date-time.
-    
-    Example
-    -------
-    >>> iso8601_to_unix("2023-04-04T00:28:50.516Z")
-    1680569330
     """
     return int(ciso8601.parse_datetime(timestamp).timestamp())
