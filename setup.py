@@ -4,12 +4,13 @@ from setuptools import setup, find_packages
 
 from mm_toolbox import __VERSION__, clean_repo
 
-def readme():
+def readme() -> str:
     with open(str(Path(__file__).parent.resolve()) + "/README.md") as f:
         return f.read()
 
 def read_requirements() -> List[str]:
-    return open(str(Path(__file__).parent.resolve()) + "/requirements.txt").readlines()
+    with open(str(Path(__file__).parent.resolve()) + "/requirements.txt") as f:
+        return [line.strip() for line in f if line.strip()]
 
 NAME = "mm_toolbox"
 VERSION = __VERSION__
