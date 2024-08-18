@@ -1,82 +1,51 @@
-# Heavily optimized for 2D operations but still outperforms 
-# the original numpy_ringbuffer by ~30%.
-
 import warnings
 import numpy as np
-from typing import Tuple, Iterator, Union
+from typing import Tuple, Union
+
+from mm_toolbox.src.numba import nbisin
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 class RingBufferMultiDim:
-    def __init__(self, shape: Union[int, Tuple], dtype: np.dtype = np.float64):
-        """
-        Create a new ring buffer with the given capacity and element type.
+    """
+    A multi-dimensional fixed-size circular buffer for any numpy dtype.
 
-        Parameters
-        ----------
-        shape : int or tuple of int
-            The shape of the ring buffer. If an integer is provided, it
-            specifies the capacity. If a tuple is provided, it specifies
-            the shape including the capacity as the first element.
-            
-        dtype : data-type, optional
-            Desired type of buffer elements. Use a type like (float, 2) to
-            produce a buffer with shape (N, 2). Default is np.float64.
-        """
+    Parameters
+    ----------
+    shape : int or tuple of int
+        The shape of the ring buffer. If an integer is provided, it
+        specifies the capacity. If a tuple is provided, it specifies
+        the shape including the capacity as the first element.
+        
+    dtype : data-type, optional
+        Desired type of buffer elements. Use a type like (float, 2) to
+        produce a buffer with shape (N, 2). Default is np.float64.
+    """
+
+    def __init__(self, shape: Union[int, Tuple], dtype: np.dtype = np.float64):
         self.capacity = shape if isinstance(shape, int) else shape[0]
+        self._dtype_ = dtype 
         self._left_index_ = 0
         self._right_index_ = 0
-        self._array_ = np.empty(shape, dtype)
+        self._array_ = np.empty(shape, self._dtype_)
 
     @property
     def is_full(self) -> bool:
-        """
-        True if there is no more space in the buffer.
-
-        Returns
-        -------
-        bool
-            True if the buffer is full, False otherwise.
-        """
         return (self._right_index_ - self._left_index_) == self.capacity
 
     @property
     def is_empty(self) -> bool:
-        """
-        True if there are no elements in the buffer.
-
-        Returns
-        -------
-        bool
-            True if the buffer is empty, False otherwise.
-        """
         return self._left_index_ == 0 and self._right_index_ == 0
     
     @property
     def dtype(self) -> np.dtype:
-        """
-        Data type of the buffer elements.
-
-        Returns
-        -------
-        np.dtype
-            The data type of the buffer elements.
-        """
-        return self._array_.dtype
+        return self._dtype_
 
     @property
     def shape(self) -> Tuple[int, ...]:
-        """
-        Shape of the buffer.
-
-        Returns
-        -------
-        tuple of int
-            The shape of the buffer including the current length.
-        """
         return (len(self),) + self._array_.shape[1:]
 
-    def as_array(self) -> np.ndarray:
+    def as_array(self) -> np.ndarray[Union[int, float, str, bytes, np.ndarray]]:
         """
         Copy the data from this buffer into unwrapped form.
 
@@ -107,13 +76,13 @@ class RingBufferMultiDim:
             self._left_index_ += self.capacity
             self._right_index_ += self.capacity
 
-    def appendright(self, value: np.ndarray) -> None:
+    def append(self, value: Union[int, float, str, bytes, np.ndarray]) -> None:
         """
         Add a value to the right end of the buffer.
 
         Parameters
         ----------
-        value : np.ndarray
+        value : Union[int, float, str, bytes, np.ndarray]
             The value to be added to the buffer.
 
         Raises
@@ -128,34 +97,13 @@ class RingBufferMultiDim:
         self._right_index_ += 1
         self._fix_indices_()
 
-    def appendleft(self, value: np.ndarray) -> None:
-        """
-        Add a value to the left end of the buffer.
-
-        Parameters
-        ----------
-        value : np.ndarray
-            The value to be added to the buffer.
-
-        Raises
-        ------
-        IndexError
-            If the buffer is full.
-        """
-        if self.is_full:
-            self._right_index_ -= 1
-
-        self._left_index_ -= 1
-        self._fix_indices_()
-        self._array_[self._left_index_] = value
-
-    def popright(self) -> np.ndarray:
+    def popright(self) -> Union[int, float, str, bytes, np.ndarray]:
         """
         Remove and return a value from the right end of the buffer.
 
         Returns
         -------
-        np.ndarray
+        Union[int, float, str, bytes, np.ndarray]
             The value removed from the buffer.
 
         Raises
@@ -171,13 +119,13 @@ class RingBufferMultiDim:
         res = self._array_[self._right_index_ % self.capacity]
         return res
 
-    def popleft(self) -> np.ndarray:
+    def popleft(self) -> Union[int, float, str, bytes, np.ndarray]:
         """
         Remove and return a value from the left end of the buffer.
 
         Returns
         -------
-        np.ndarray
+        Union[int, float, str, bytes, np.ndarray]
             The value removed from the buffer.
 
         Raises
@@ -193,54 +141,42 @@ class RingBufferMultiDim:
         self._fix_indices_()
         return res
 
-    def __len__(self) -> int:
-        """
-        Number of elements in the buffer.
+    def __contains__(self, value: Union[np.dtype, np.ndarray]) -> bool:
+        if self.is_empty:
+            return False
+        
+        match type(value):
+            case self.dtype:
+                # Works for both 1D and 2D buffers
+                return nbisin(value, self._array_)
 
-        Returns
-        -------
-        int
-            The number of elements in the buffer.
-        """
+            case np.ndarray:
+                # If the buffer is 1D and value is 1D
+                if self._array_.ndim == 1 and value.ndim == 1:
+                    return np.any(np.all(self._array_ == value))
+
+                # If the buffer is 2D and value is 1D (search for matching rows)
+                elif self._array_.ndim == 2 and value.ndim == 1:
+                    for i in range(len(self)):
+                        if np.array_equal(self._array_[i], value):
+                            return True
+                    return False
+                
+            case _:
+                raise TypeError("Only np.dtype/np.ndarray allowed.")
+                    
+    def __eq__(self, ringbuffer: 'RingBufferMultiDim') -> bool:
+        assert isinstance(ringbuffer, RingBufferMultiDim)
+        return ringbuffer.as_array() == self.as_array()
+    
+    def __len__(self) -> int:
         return self._right_index_ - self._left_index_
 
-    def __getitem__(self, item: Tuple) -> np.ndarray:
-        """
-        Get an item from the buffer.
-
-        Parameters
-        ----------
-        item : tuple
-            The index or slice to retrieve from the buffer.
-
-        Returns
-        -------
-        np.ndarray
-            The retrieved item.
-        """
+    def __getitem__(self, item: int) -> Union[int, float, str, bytes, np.ndarray]:
         return self.as_array()[item]
-
-    def __iter__(self) -> Iterator[np.ndarray]:
-        """
-        Return an iterator over the buffer elements.
-
-        Returns
-        -------
-        iterator
-            An iterator over the buffer elements.
-        """
-        return iter(self.as_array())
     
-    def __repr__(self) -> str:
-        """
-        String representation of the RingBuffer.
-
-        Returns
-        -------
-        str
-            The string representation of the buffer.
-        """
+    def __str__(self) -> str:
         return (f"RingBufferMultiDim(capacity={self.capacity}, "
-                f"dtype={self._array_.dtype}, "
+                f"dtype={self.dtype}, "
                 f"current_length={len(self)}, "
                 f"data={self.as_array()})")
