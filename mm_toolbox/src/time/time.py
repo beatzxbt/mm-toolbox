@@ -58,7 +58,8 @@ def time_iso8601() -> str:
     str
         An ISO 8601 formatted date-time string (e.g., "2023-04-04T00:28:50.516Z").
     """
-    return f"{strftime("%Y-%m-%dT%H:%M:%S")}{(time_nano() % 1_000_000_000) // 1_000_000}Z"
+    millis = str((time_nano() % 1_000_000_000) // 1_000_000).zfill(3)
+    return f"{strftime('%Y-%m-%dT%H:%M:%S')}.{millis}Z"
 
 def iso8601_to_unix(timestamp: str) -> int:
     """
