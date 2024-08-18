@@ -3,12 +3,12 @@ from numba.types import uint32, int64, float64
 from numba.experimental import jitclass
 from typing import Tuple
 
+from mm_toolbox.src.numba import nbisin
+
 @jitclass
 class RingBufferSingleDimFloat:
     """
-    A fixed-size circular buffer using Numba JIT compilation.
-
-    Can only support Float64 values.
+    A 1-dimensional fixed-size circular buffer for Float64 values.
 
     Parameters
     ----------
@@ -28,50 +28,18 @@ class RingBufferSingleDimFloat:
 
     @property
     def is_full(self) -> bool:
-        """
-        True if there is no more space in the buffer.
-
-        Returns
-        -------
-        bool
-            True if the buffer is full, False otherwise.
-        """
         return (self._right_index_ - self._left_index_) == self.capacity
 
     @property
     def is_empty(self) -> bool:
-        """
-        True if there are no elements in the buffer.
-
-        Returns
-        -------
-        bool
-            True if the buffer is empty, False otherwise.
-        """
         return self._left_index_ == 0 and self._right_index_ == 0
     
     @property
     def dtype(self) -> np.dtype:
-        """
-        Data type of the buffer elements.
-
-        Returns
-        -------
-        np.dtype
-            The data type of the buffer elements.
-        """
         return self._array_.dtype
 
     @property
     def shape(self) -> Tuple[int, ...]:
-        """
-        Shape of the buffer.
-
-        Returns
-        -------
-        tuple of int
-            The shape of the active buffer.
-        """
         return (len(self),)
 
     def as_array(self) -> np.ndarray:
@@ -105,7 +73,7 @@ class RingBufferSingleDimFloat:
             self._left_index_ += self.capacity
             self._right_index_ += self.capacity
 
-    def appendright(self, value) -> None:
+    def append(self, value) -> None:
         """
         Adds an element to the end of the buffer.
 
@@ -120,22 +88,6 @@ class RingBufferSingleDimFloat:
         self._array_[self._right_index_ % self.capacity] = value
         self._right_index_ += 1
         self._fix_indices_()
-
-    def appendleft(self, value) -> None:
-        """
-        Adds an element to the start of the buffer.
-
-        Parameters
-        ----------
-        value : scalar
-            The value to be added to the buffer.
-        """
-        if self.is_full:
-            self._right_index_ -= 1
-
-        self._left_index_ -= 1
-        self._fix_indices_()
-        self._array_[self._left_index_] = value
 
     def popright(self) -> np.ndarray:
         """
@@ -197,56 +149,19 @@ class RingBufferSingleDimFloat:
         return res
     
     def __contains__(self, num: float) -> bool:
-        """
-        Sum of all elements in the buffer.
-
-        Returns
-        -------
-        float
-            Sum of elements.
-        """
-        return num in self._array_
+        return nbisin(num, self._array_)
 
     def __eq__(self, ringbuffer: 'RingBufferSingleDimFloat') -> bool:
         assert isinstance(ringbuffer, RingBufferSingleDimFloat)
         return ringbuffer.as_array() == self.as_array()
     
     def __len__(self) -> int:
-        """
-        Number of elements in the buffer.
-
-        Returns
-        -------
-        int
-            The number of elements in the buffer.
-        """
         return self._right_index_ - self._left_index_
 
     def __getitem__(self, item: int) -> float:
-        """
-        Get an item from the buffer.
-
-        Parameters
-        ----------
-        item : int
-            The index retrieve from the buffer.
-
-        Returns
-        -------
-        float
-            The retrieved item.
-        """
         return self.as_array()[item]
     
     def __str__(self) -> str:
-        """
-        String representation of the RingBuffer.
-
-        Returns
-        -------
-        str
-            The string representation of the buffer.
-        """
         return (f"RingBufferSingleDimFloat(capacity={self.capacity}, "
                 f"dtype={self.dtype}, "
                 f"current_length={len(self)}, "
@@ -256,9 +171,7 @@ class RingBufferSingleDimFloat:
 @jitclass
 class RingBufferSingleDimInt:
     """
-    A fixed-size circular buffer using Numba JIT compilation.
-
-    Can only support Int64 values.
+    A 1-dimensional fixed-size circular buffer for Int64 values.
 
     Parameters
     ----------
@@ -278,50 +191,18 @@ class RingBufferSingleDimInt:
 
     @property
     def is_full(self) -> bool:
-        """
-        True if there is no more space in the buffer.
-
-        Returns
-        -------
-        bool
-            True if the buffer is full, False otherwise.
-        """
         return (self._right_index_ - self._left_index_) == self.capacity
 
     @property
     def is_empty(self) -> bool:
-        """
-        True if there are no elements in the buffer.
-
-        Returns
-        -------
-        bool
-            True if the buffer is empty, False otherwise.
-        """
         return self._left_index_ == 0 and self._right_index_ == 0
     
     @property
     def dtype(self) -> np.dtype:
-        """
-        Data type of the buffer elements.
-
-        Returns
-        -------
-        np.dtype
-            The data type of the buffer elements.
-        """
         return self._array_.dtype
 
     @property
     def shape(self) -> Tuple[int, ...]:
-        """
-        Shape of the buffer.
-
-        Returns
-        -------
-        tuple of int
-            The shape of the active buffer.
-        """
         return (len(self),)
 
     def as_array(self) -> np.ndarray:
@@ -446,46 +327,20 @@ class RingBufferSingleDimInt:
         self._right_index_ = 0
         return res
     
+    def __contains__(self, num: int) -> bool:
+        return nbisin(num, self._array_)
+    
     def __eq__(self, ringbuffer: 'RingBufferSingleDimInt') -> bool:
         assert isinstance(ringbuffer, RingBufferSingleDimInt)
         return ringbuffer.as_array() == self.as_array()
     
     def __len__(self) -> int:
-        """
-        Number of elements in the buffer.
-
-        Returns
-        -------
-        int
-            The number of elements in the buffer.
-        """
         return self._right_index_ - self._left_index_
 
     def __getitem__(self, item: int) -> int:
-        """
-        Get an item from the buffer.
-
-        Parameters
-        ----------
-        item : int
-            The index to retrieve from the buffer.
-
-        Returns
-        -------
-        int
-            The retrieved item.
-        """
         return self.as_array()[item]
     
     def __str__(self) -> str:
-        """
-        String representation of the RingBuffer.
-
-        Returns
-        -------
-        str
-            The string representation of the buffer.
-        """
         return (f"RingBufferSingleDimFloat(capacity={self.capacity}, "
                 f"dtype={self.dtype}, "
                 f"current_length={len(self)}, "
