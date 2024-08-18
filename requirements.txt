@@ -1,15 +1,12 @@
 # Compute
-numpy
-numba
+numpy==2.0.0
+numba==0.60.0
 
 # IO/Network
-orjson
-aiofiles
-aiosonic
-aiohttp
+orjson==3.10.0
+aiofiles==24.0.0
+aiosonic==0.20.0
+aiohttp==3.10.0
 
-# Time
-ciso8601
-
-# Developer
-setuptools
+# Misc
+ciso8601==2.3.1
