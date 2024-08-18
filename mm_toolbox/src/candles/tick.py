@@ -13,6 +13,7 @@ class TickCandles(BaseCandles):
 
         self.high_price = max(self.high_price, price)
         self.low_price = min(self.low_price, price)
+        self.close_price = price
 
         match side:
             case 0.0:
@@ -25,7 +26,6 @@ class TickCandles(BaseCandles):
         self.total_trades += 1
 
         if self.trade_count >= self.ticks_per_bucket:
-            self.close_price = price
             self.close_timestamp = timestamp
 
             self.insert_candle(

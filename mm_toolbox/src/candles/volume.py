@@ -13,7 +13,8 @@ class VolumeCandles(BaseCandles):
         
         self.high_price = max(self.high_price, price)
         self.low_price = min(self.low_price, price)
-        
+        self.close_price = price
+
         match side:
             case 0.0:
                 self.buy_volume += size
@@ -27,7 +28,6 @@ class VolumeCandles(BaseCandles):
         total_volume = self.buy_volume + self.sell_volume
 
         if total_volume >= self.volume_per_bucket:
-            self.close_price = price
             self.close_timestamp = timestamp
 
             remaining_volume = total_volume - self.volume_imbalance

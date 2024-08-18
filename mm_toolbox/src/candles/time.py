@@ -12,6 +12,7 @@ class TimeCandles(BaseCandles):
             self.open_price = price
             self.high_price = price
             self.low_price = price
+            self.close_price = price
 
             match side:
                 case 0.0:
@@ -26,7 +27,6 @@ class TimeCandles(BaseCandles):
             return None
         
         if (self.candle_start_time / 1000.0) + self.secs_per_bucket <= timestamp:
-            self.close_price = price
             self.close_timestamp = timestamp
 
             self.insert_candle(
@@ -46,6 +46,7 @@ class TimeCandles(BaseCandles):
 
         self.high_price = max(self.high_price, price)
         self.low_price = min(self.low_price, price)
+        self.close_price = price
         
         match side:
             case 0.0:
