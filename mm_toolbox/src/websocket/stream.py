@@ -54,9 +54,14 @@ class SingleWsConnection:
     error_count : int
         Counter for tracking errors.
     """
-    successful_msg = {WSMsgType.TEXT, WSMsgType.BINARY}
-    failed_msg = {WSMsgType.CLOSED, WSMsgType.ERROR}
-    fallback_timestamp_keys = ["time", "timestamp", "T", "ts"]
+    fallback_timestamp_paths = [
+        "/time", 
+        "/timestamp", 
+        "/T", 
+        "/data/time", 
+        "/data/timestamp", 
+        "/data/T", 
+    ]
 
     def __init__(self, logger: Logger) -> None:
         self.logging = logger
@@ -75,35 +80,32 @@ class SingleWsConnection:
         float
             The mean latency.
         """
-        return sum(self.latencies) / len(self.latencies)
-
-    def create_latency_handler_map(self, timestamp_keys: List[str]) -> Dict[str, Callable]:
+        return self.latencies._array_.sum() / len(self.latencies)
+    
+    def convert_paths_to_lists(paths: List[str]) -> List[List[str]]:
         """
-        Create a handler map for latency calculation.
+        Convert JSON pointer-like path strings into a lists of keys.
 
         Parameters
         ----------
-        timestamp_keys : List[str]
-            List of timestamp keys to search for in the message data.
+        paths : List[str]
+            The path strings, where each segment of the path is separated by a '/'.
 
         Returns
         -------
-        Dict[str, Callable]
-            A mapping of timestamp keys to their corresponding handlers.
+        List[str]
+            A list of keys extracted from each path string.
         """
-        return {
-            key: self.latencies.appendright
-            for key in timestamp_keys + self.fallback_timestamp_keys
-        }
-    
-    def record_latency(self, all_timestamp_keys: List[str], data: Dict[str, Any]) -> None:
+        return [path.strip('/').split('/') for path in paths]
+
+    def record_latency(self, all_timestamp_paths: List[List[str]], data: Dict[str, Any]) -> None:
         """
         Record the latency for the WebSocket message.
 
         Parameters
         ----------
-        all_timestamp_keys : List[str]
-            A list of possible keys for the timestamp.
+        all_timestamp_paths : List[List[str]]
+            A list of possible paths for indexing the timestamp, in order of possibility. 
 
         data : Dict[str, Any]
             The WebSocket message data.
@@ -113,11 +115,15 @@ class SingleWsConnection:
         KeyError
             If no valid timestamp key is found in the data.
         """
-        for key in all_timestamp_keys:
-            if key in data:
-                self.latencies.appendright(time_ms() - float(data[key]))
-                return
-        
+        for path in all_timestamp_path:
+            try:
+                indexed_timestamp = data
+                for key in path:
+                    indexed_timestamp = indexed_timestamp[key]
+                self.latencies.append(time_ms() - float(indexed_timestamp))
+            except KeyError:
+                continue
+                
         raise KeyError(f"Timestamp key not found in data - {data}")
 
     async def send(self, payload: Dict) -> None:
@@ -144,7 +150,7 @@ class SingleWsConnection:
                 msg=f"Failed to send WebSocket payload: {payload} - {e}",
             )
 
-    async def start(self, url: str, data_handler: Callable, timestamp_keys: List[str], on_connect: Optional[List[Dict]] = None) -> None:
+    async def start(self, url: str, data_handler: Callable, timestamp_paths: List[str], on_connect: Optional[List[Dict]] = None) -> None:
         """
         Start the WebSocket connection and handle incoming messages.
 
@@ -156,8 +162,8 @@ class SingleWsConnection:
         data_handler : Callable
             A function to handle incoming messages.
 
-        timestamp_keys : List[str]
-            A list of possible keys for indexing the timestamp.
+        timestamp_paths : List[str]
+            A list of possible keys for indexing the timestamp, in order of possibility. 
 
         on_connect : Optional[List[Dict]], optional
             A list of payloads to send upon connecting (default is None).
@@ -167,8 +173,8 @@ class SingleWsConnection:
                 topic="WS", msg=f"Starting stream on '{url}'."
             )
             
-            # Combine primary and fallback timestamp keys
-            all_timestamp_keys = timestamp_keys + list(self.fallback_timestamp_keys)
+            # Combine primary and fallback timestamp paths
+            all_timestamp_paths = self.convert_paths_to_lists(timestamp_paths + self.fallback_timestamp_paths)
 
             async with self.session.ws_connect(url) as ws:
                 self.ws_conn = ws  
@@ -178,19 +184,19 @@ class SingleWsConnection:
                         await self.send(payload)
 
                 async for msg in ws:
-                    if msg.type in self.successful_msg:
-                        try:
-                            data = orjson.loads(msg.data)
-                            data_handler(data)
-                            self.record_latency(all_timestamp_keys, data)
+                    try:
+                        data = orjson.loads(msg.data)
+                        data_handler(data)
+                        self.record_latency(all_timestamp_paths, data)
 
-                        except orjson.JSONDecodeError:
-                            await self.logging.warning(
-                                topic="WS", msg=f"Failed to decode payload: {msg.data}"
-                            )
+                    except orjson.JSONDecodeError:
+                        await self.logging.warning(
+                            topic="WS", msg=f"Failed to decode payload: {msg.data}"
+                        )
 
         except asyncio.CancelledError:
             # Session killed outside of context
+            await ws.close()
             return
         
         except Exception as e:
@@ -239,7 +245,7 @@ class WsPool:
         self.conn_pool = [SingleWsConnection(logger=self.logging) for _ in range(size)]
         self.eviction_task: Optional[asyncio.Task] = None
 
-    async def start(self, data_handler: Callable, timestamp_keys: List[str], on_connect: Optional[List[Dict]] = None) -> None:
+    async def start(self, data_handler: Callable, timestamp_paths: List[str], on_connect: Optional[List[Dict]] = None) -> None:
         """
         Start all WebSocket connections in the pool.
 
@@ -248,7 +254,7 @@ class WsPool:
         data_handler : Callable
             A function to handle incoming messages.
 
-        timestamp_keys : List[str]
+        timestamp_paths : List[str]
             A list of possible keys for indexing the timestamp.
 
         on_connect : Optional[List[Dict]], optional
@@ -258,7 +264,7 @@ class WsPool:
             await conn.start(
                 url=self.url,
                 data_handler=data_handler,
-                timestamp_keys=timestamp_keys,
+                timestamp_paths=timestamp_paths,
                 on_connect=on_connect
             )
 
@@ -326,7 +332,7 @@ class WsPool:
         await new_conn.start(
             url=self.url,
             data_handler=conn.data_handler,
-            timestamp_keys=conn.timestamp_keys,
+            timestamp_paths=conn.timestamp_paths,
             on_connect=conn.on_connect
         )
         self.conn_pool.append(new_conn)
@@ -406,7 +412,7 @@ class FastWebsocketStream:
             logger=self.logging
         )
     
-    async def start(self, data_handler: Callable, timestamp_keys: List[str]) -> None:
+    async def start(self, data_handler: Callable, timestamp_paths: List[str]) -> None:
         """
         Start the WebSocket streams within the pool.
 
@@ -415,12 +421,12 @@ class FastWebsocketStream:
         data_handler : Callable
             A function to handle incoming messages.
 
-        timestamp_keys : List[str]
+        timestamp_paths : List[str]
             A list of possible keys for indexing the timestamp.
         """
         await self.ws_pool.start(
             data_handler=data_handler,
-            timestamp_keys=timestamp_keys,
+            timestamp_paths=timestamp_paths,
             on_connect=self.on_connect
         )
 
