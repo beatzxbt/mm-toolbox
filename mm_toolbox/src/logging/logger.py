@@ -1,11 +1,10 @@
 import os
-import orjson
 import aiofiles
-import aiosonic
 import asyncio
 
-from discord import DiscordClient
-from telegram import TelegramClient
+from mm_toolbox.src.logging.discord import DiscordClient
+from mm_toolbox.src.logging.telegram import TelegramClient
+from mm_toolbox.src.time import time_iso8601
 
 class Logger:
     def __init__(
@@ -72,7 +71,7 @@ class Logger:
         -------
         None
         """
-        formatted_msg = f"{time_now()} | {level} | {topic} | {msg}"
+        formatted_msg = f"{time_iso8601()} | {level} | {topic} | {msg}"
 
         if self.send_to_discord:
             task = asyncio.create_task(self.discord_client.send(formatted_msg, flush_buffer))
@@ -127,6 +126,3 @@ class Logger:
 
         if self.msgs:
             await self._write_logs_to_file_()
-
-
-
