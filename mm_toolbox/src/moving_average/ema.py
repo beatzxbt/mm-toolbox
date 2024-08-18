@@ -77,7 +77,7 @@ class ExponentialMovingAverage:
         self.value = arr_in[0]
         
         if not self.fast:
-            self.ringbuffer.appendright(self.value)
+            self.ringbuffer.append(self.value)
 
         for value in arr_in[1:]:
             self.update(value)
@@ -93,7 +93,7 @@ class ExponentialMovingAverage:
         """
         self.value = self._recursive_ema_(new_val)
         if not self.fast:
-            self.ringbuffer.appendright(self.value)
+            self.ringbuffer.append(self.value)
 
     def __eq__(self, ema: 'ExponentialMovingAverage') -> bool:
         assert isinstance(ema, ExponentialMovingAverage)
