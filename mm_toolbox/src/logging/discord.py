@@ -1,4 +1,3 @@
-import os
 import orjson
 import aiosonic
 import asyncio
