@@ -160,7 +160,7 @@ class BaseCandles(ABC):
             open_timestamp,
             close_timestamp
         ])
-        self.ringbuffer.appendright(current_candle)
+        self.ringbuffer.append(current_candle)
         self.reset_current_candle()
 
     @abstractmethod
@@ -295,7 +295,7 @@ class BaseCandles(ABC):
 
         rs = avg_gain[period:] / avg_loss[period:]
         rsi = np.zeros_like(close_prices)
-        rsi[period:] = 100 - (100 / (1 + rs))
+        rsi[period:] = 100.0 - (100.0 / (1.0 + rs))
 
         return rsi[period:]
     
@@ -321,7 +321,7 @@ class BaseCandles(ABC):
         sma = np.convolve(close_prices, np.ones(period) / period, mode='valid')
         rolling_std = np.zeros_like(sma)
 
-        for i in range(len(sma)):
+        for i in range(sma.size):
             rolling_std[i] = np.std(close_prices[i:i + period])
 
         upper_band = sma + num_std_dev * rolling_std
