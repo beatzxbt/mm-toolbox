@@ -3,6 +3,6 @@ from .time import (
     time_ms,
     time_us,
     time_ns,
-    datetime_now,
+    time_iso8601,
     iso8601_to_unix
 )
