@@ -4,20 +4,20 @@ from numba.types import bool_
 from typing import Tuple, Union
 
 @njit
-def nblinspace(start: float, stop: float, num: int = 50, endpoint: bool = True) -> np.ndarray:
-    return np.linspace(start, stop, num, endpoint)
+def nblinspace(start: float, stop: float, num: int = 50) -> np.ndarray:
+    return np.linspace(start, stop, num)
 
 @njit
-def nbgeomspace(start: float, stop: float, num: int = 50, endpoint: bool = True) -> np.ndarray:
-    return np.geomspace(start, stop, num, endpoint)
+def nbgeomspace(start: float, stop: float, num: int = 50) -> np.ndarray:
+    return np.geomspace(start, stop, num)
 
 @njit
 def nbarange(start: float, stop: float = None, step: float = 1) -> np.ndarray:
     return np.arange(start, stop, step)
 
 @njit
-def nblogspace(start: float, stop: float, num: int = 50, endpoint: bool = True, base: float = 10.0) -> np.ndarray:
-    return np.logspace(start, stop, num, endpoint, base)
+def nblogspace(start: float, stop: float, num: int = 50) -> np.ndarray:
+    return np.logspace(start, stop, num)
 
 @njit
 def nbzeros(shape: Union[int, Tuple[int, ...]], dtype: np.dtype = np.float64) -> np.ndarray:
@@ -50,70 +50,93 @@ def nbisin(a: np.ndarray, b: np.ndarray) -> np.ndarray[bool]:
 
     return out
 
-@njit
+@njit(inline="always")
 def nbwhere(condition, x=None, y=None) -> np.ndarray:
     return np.where(condition, x, y)
 
-@njit
+@njit(inline="always")
 def nbdiff(a: np.ndarray, n: int = 1) -> np.ndarray:
-    return np.diff(a, n)
+    assert n >= 0, "'n' cannot be negative"
 
-@njit
+    if n == 0:
+        return a.copy()
+
+    a_size = a.size
+    out_size = max(a_size - n, 0)
+    out = np.empty(out_size, dtype=a.dtype)
+
+    if out_size == 0:
+        return out
+
+    work = np.empty_like(a)
+
+    # First iteration: diff a into work
+    for i in range(a_size - 1):
+        work[i] = a[i + 1] - a[i]
+
+    # Other iterations: diff work into itself
+    for niter in range(1, n):
+        for i in range(a_size - niter - 1):
+            work[i] = work[i + 1] - work[i]
+
+    # Copy final diff into out
+    out[:] = work[:out_size]
+
+    return out
+
+@njit(inline="always")
 def nbflip(a: np.ndarray) -> np.ndarray:
     return np.flip(a)
 
-@njit
+@njit(inline="always")
 def nbsort(a: np.ndarray) -> np.ndarray:
     return np.sort(a)
 
-@njit
-def nbargsort(a: np.ndarray) -> np.ndarray:
-    return np.argsort(a)
+@njit(inline="always")
+def nbargsort(a: np.ndarray, kind: str='quicksort') -> np.ndarray:
+    assert kind in {"quicksort", "mergesort"}
+    return np.argsort(a, kind)
 
-@njit
-def nbconcatenate(arrays: Tuple[np.ndarray, ...], axis: int = 0) -> np.ndarray:
-    return np.concatenate(arrays, axis)
+@njit(inline="always")
+def nbconcatenate(arrays: Tuple[np.ndarray, ...]) -> np.ndarray:
+    return np.concatenate(arrays)
 
-@njit
+@njit(inline="always")
 def nbravel(a: np.ndarray) -> np.ndarray:
     return np.ravel(a)
 
-@njit
+@njit(inline="always")
 def nbreshape(a: np.ndarray, newshape: Tuple[int, ...]) -> np.ndarray:
     return np.reshape(a, newshape)
 
-@njit
+@njit(inline="always")
 def nbtranspose(a: np.ndarray) -> np.ndarray:
     return np.transpose(a)
 
-@njit
+@njit(inline="always")
+def nbstack(tup: Tuple[np.ndarray, ...], axis: int) -> np.ndarray:
+    return np.stack(tup, axis)
+
+@njit(inline="always")
 def nbhstack(tup: Tuple[np.ndarray, ...]) -> np.ndarray:
     return np.hstack(tup)
 
-@njit
+@njit(inline="always")
 def nbvstack(tup: Tuple[np.ndarray, ...]) -> np.ndarray:
     return np.vstack(tup)
 
-@njit
+@njit(inline="always")
 def nbclip(a: np.ndarray, a_min: float, a_max: float) -> np.ndarray:
     return np.clip(a, a_min, a_max)
 
-@njit
+@njit(inline="always")
 def nbunique(a: np.ndarray) -> np.ndarray:
     return np.unique(a)
 
-@njit
-def nbtile(A: np.ndarray, reps: Union[int, Tuple[int, ...]]) -> np.ndarray:
-    return np.tile(A, reps)
+@njit(inline="always")
+def nbrepeat(a: np.ndarray, repeats: Union[int, np.ndarray]) -> np.ndarray:
+    return np.repeat(a, repeats)
 
-@njit
-def nbrepeat(a: np.ndarray, repeats: Union[int, np.ndarray], axis: int = None) -> np.ndarray:
-    return np.repeat(a, repeats, axis)
-
-@njit
-def nbstack(arrays: Tuple[np.ndarray, ...], axis: int = 0) -> np.ndarray:
-    return np.stack(arrays, axis)
-
-@njit
-def nbroll(a: np.ndarray, shift: int, axis: int = None) -> np.ndarray:
-    return np.roll(a, shift, axis)
+@njit(inline="always")
+def nbroll(a: np.ndarray, shift: int) -> np.ndarray:
+    return np.roll(a, shift)
