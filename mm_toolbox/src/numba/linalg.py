@@ -1,5 +1,11 @@
 import numpy as np
 from numba import njit
+from warnings import warn as warning
+
+warning(
+    message="Numba optimized linalg functions will *only* work with float/complex type arrays.",
+    category=UserWarning
+)
 
 @njit
 def nbdot(A: np.ndarray, B: np.ndarray) -> float:
@@ -26,8 +32,8 @@ def nbeig(A: np.ndarray):
     return np.linalg.eig(A)
 
 @njit
-def nbsvd(A: np.ndarray):
-    return np.linalg.svd(A)
+def nbsvd(A: np.ndarray, full_matrices: bool):
+    return np.linalg.svd(A, full_matrices)
 
 @njit
 def nbqr(A: np.ndarray):

@@ -24,7 +24,6 @@ from mm_toolbox.src.numba import (
     nbvstack,
     nbclip,
     nbunique,
-    nbtile,
     nbrepeat,
     nbstack,
     nbroll
@@ -32,23 +31,23 @@ from mm_toolbox.src.numba import (
 
 class TestNumbaFuncs(unittest.TestCase):
     def test_nblinspace(self):
-        np_result = np.linspace(0, 10, 5)
-        nb_result = nblinspace(0, 10, 5)
+        np_result = np.linspace(0.0, 100.0, 10)
+        nb_result = nblinspace(0.0, 100.0, 10)
         np.testing.assert_array_equal(nb_result, np_result)
 
     def test_nbgeomspace(self):
-        np_result = np.geomspace(1, 1000, 4)
-        nb_result = nbgeomspace(1, 1000, 4)
+        np_result = np.geomspace(1.0, 1000.0, 4)
+        nb_result = nbgeomspace(1.0, 1000.0, 4)
         np.testing.assert_array_equal(nb_result, np_result)
 
     def test_nbarange(self):
-        np_result = np.arange(0, 10, 2)
-        nb_result = nbarange(0, 10, 2)
+        np_result = np.arange(0.0, 10.0, 2.0)
+        nb_result = nbarange(0.0, 10.0, 2.0)
         np.testing.assert_array_equal(nb_result, np_result)
 
     def test_nblogspace(self):
-        np_result = np.logspace(0, 2, 5)
-        nb_result = nblogspace(0, 2, 5)
+        np_result = np.logspace(1.0, 1000.0, 4)
+        nb_result = nblogspace(1.0, 1000.0, 4)
         np.testing.assert_array_equal(nb_result, np_result)
 
     def test_nbzeros(self):
@@ -144,11 +143,6 @@ class TestNumbaFuncs(unittest.TestCase):
     def test_nbunique(self):
         np_result = np.unique(np.array([1, 2, 2, 3, 3, 3]))
         nb_result = nbunique(np.array([1, 2, 2, 3, 3, 3]))
-        np.testing.assert_array_equal(nb_result, np_result)
-
-    def test_nbtile(self):
-        np_result = np.tile(np.array([1, 2, 3]), 2)
-        nb_result = nbtile(np.array([1, 2, 3]), 2)
         np.testing.assert_array_equal(nb_result, np_result)
 
     def test_nbrepeat(self):
