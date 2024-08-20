@@ -93,9 +93,8 @@ def nbsort(a: np.ndarray) -> np.ndarray:
     return np.sort(a)
 
 @njit(inline="always")
-def nbargsort(a: np.ndarray, kind: str='quicksort') -> np.ndarray:
-    assert kind in {"quicksort", "mergesort"}
-    return np.argsort(a, kind)
+def nbargsort(a: np.ndarray) -> np.ndarray:
+    return np.argsort(a)
 
 @njit(inline="always")
 def nbconcatenate(arrays: Tuple[np.ndarray, ...]) -> np.ndarray:

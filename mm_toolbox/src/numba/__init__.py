@@ -33,7 +33,6 @@ from .array import (
     nbvstack,
     nbclip,
     nbunique,
-    nbtile,
     nbrepeat,
     nbstack,
     nbroll
