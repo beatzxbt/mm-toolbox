@@ -6,7 +6,7 @@ from mm_toolbox.src.moving_average.hma import HullMovingAverage as HMA
 class TestHMA(unittest.TestCase):
     def setUp(self):
         self.window = 10
-        self.data = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])
+        self.data = np.arange(0, 10, 1, dtype=np.float64)
         self.hma = HMA(self.window, fast=False)
         self.fast_hma = HMA(self.window, fast=True)
 
@@ -35,7 +35,7 @@ class TestHMA(unittest.TestCase):
         self.hma.long_ema.value = 2.0
 
         result = self.hma._recursive_hma_(initial_value)
-        expected_value = 3.0 * 2.0 - 2.0
+        expected_value = (3.0 * 2.0) - 2.0
         self.assertAlmostEqual(result, expected_value)
         self.assertEqual(self.hma.smooth_ema.value, expected_value)
         
@@ -69,7 +69,7 @@ class TestHMA(unittest.TestCase):
         self.assertEqual(len(self.fast_hma.ringbuffer), 0)
 
     # Dunders, as well as .as_array() are not tested. The underlying RingBuffer
-    # already extensively tests these functionalities and EMA only acts as a buffer 
+    # already extensively tests these functionalities and HMA only acts as a buffer 
     # and funnels arguments to the RingBuffer methods directly.
     
 if __name__ == '__main__':

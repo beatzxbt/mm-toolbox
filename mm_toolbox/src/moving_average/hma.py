@@ -8,7 +8,7 @@ from mm_toolbox.src.ringbuffer import RingBufferSingleDimFloat
 @jitclass
 class HullMovingAverage:
     window: uint32
-    slow: bool_
+    fast: bool_
     short_ema: EMA.class_type.instance_type
     long_ema: EMA.class_type.instance_type
     smooth_ema: EMA.class_type.instance_type
@@ -25,9 +25,22 @@ class HullMovingAverage:
         self.value = 0.0
 
     def _recursive_hma_(self, value: float) -> float:
+        """
+        Internal method to calculate the HMA given a new data point.
+
+        Parameters:
+        -----------
+        update : float
+            The new data point to include in the HMA calculation.
+
+        Returns:
+        --------
+        float
+            The updated HMA value.
+        """
         self.short_ema.update(value)
         self.long_ema.update(value)
-        self.smooth_ema.update(self.short_ema.value * 2.0 - self.long_ema.value)
+        self.smooth_ema.update((self.short_ema.value * 2.0) - self.long_ema.value)
         return self.smooth_ema.value
 
     def as_array(self) -> np.ndarray[float]:
@@ -56,6 +69,14 @@ class HullMovingAverage:
             self.update(val)
 
     def update(self, value: float) -> None:
+        """
+        Updates the HMA calculator with a new data point.
+
+        Parameters:
+        -----------
+        new_val : float
+            The new data point to include in the HMA calculation.
+        """
         self.value = self._recursive_hma_(value)
         if not self.fast:
             self.ringbuffer.append(self.value)
