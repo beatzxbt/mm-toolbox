@@ -8,7 +8,21 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 class RingBufferMultiDim:
     """
-    A multi-dimensional fixed-size circular buffer for any numpy dtype.
+    A multi-dimensional fixed-size circular buffer.
+
+    This implementation supports both 1D and 2D buffers, along with 
+    any numpy dtype in the list below:
+
+    * float16/float32/float64
+    * int8/int16/int32/int64
+    * string
+    * bytes
+
+    In contrast to the OneDim & TwoDim RingBuffers, MultiDim is 
+    easier to use, with a lower tolerance of type strictness for 
+    slightly lower performance. Make sure to use OneDim or TwoDim 
+    implementations if you need super high performance and can 
+    sacrifice some safety.
 
     Parameters
     ----------
@@ -76,6 +90,13 @@ class RingBufferMultiDim:
             self._left_index_ += self.capacity
             self._right_index_ += self.capacity
 
+    def verify_input_type(self, value: Union[int, float, str, bytes, np.ndarray]) -> bool:
+        if isinstance(value, np.ndarray) and value.dtype == self.dtype:
+            return True
+        elif np.issubdtype(type(value), self.dtype):
+            return True
+        raise TypeError(f"Value type {type(value)} does not match buffer dtype {self.dtype}")
+        
     def append(self, value: Union[int, float, str, bytes, np.ndarray]) -> None:
         """
         Add a value to the right end of the buffer.
@@ -90,12 +111,13 @@ class RingBufferMultiDim:
         IndexError
             If the buffer is full.
         """
-        if self.is_full:
-            self._left_index_ += 1
+        if self.verify_input_type(value):
+            if self.is_full:
+                self._left_index_ += 1
 
-        self._array_[self._right_index_ % self.capacity] = value
-        self._right_index_ += 1
-        self._fix_indices_()
+            self._array_[self._right_index_ % self.capacity] = value
+            self._right_index_ += 1
+            self._fix_indices_()
 
     def popright(self) -> Union[int, float, str, bytes, np.ndarray]:
         """
@@ -141,16 +163,12 @@ class RingBufferMultiDim:
         self._fix_indices_()
         return res
 
-    def __contains__(self, value: Union[np.dtype, np.ndarray]) -> bool:
+    def __contains__(self, value: Union[int, float, str, bytes, np.ndarray]) -> bool:
         if self.is_empty:
             return False
         
-        match type(value):
-            case self.dtype:
-                # Works for both 1D and 2D buffers
-                return nbisin(value, self._array_)
-
-            case np.ndarray:
+        if self.verify_input_type(value):
+            if isinstance(value, np.ndarray):
                 # If the buffer is 1D and value is 1D
                 if self._array_.ndim == 1 and value.ndim == 1:
                     return np.any(np.all(self._array_ == value))
@@ -161,13 +179,14 @@ class RingBufferMultiDim:
                         if np.array_equal(self._array_[i], value):
                             return True
                     return False
-                
-            case _:
-                raise TypeError("Only np.dtype/np.ndarray allowed.")
+
+            else:
+                # Works for both 1D and 2D buffers
+                return np.isin(value, self._array_)
                     
     def __eq__(self, ringbuffer: 'RingBufferMultiDim') -> bool:
         assert isinstance(ringbuffer, RingBufferMultiDim)
-        return ringbuffer.as_array() == self.as_array()
+        return np.array_equal(ringbuffer.as_array(), self.as_array())
     
     def __len__(self) -> int:
         return self._right_index_ - self._left_index_

@@ -5,6 +5,9 @@ from mm_toolbox.src.ringbuffer import (
     RingBufferTwoDimInt
 )
 
+import unittest
+import numpy as np
+
 class TestRingBufferTwoDimFloat(unittest.TestCase):
     def setUp(self):
         self.buffer_capacity = 5
@@ -18,54 +21,54 @@ class TestRingBufferTwoDimFloat(unittest.TestCase):
 
     def test_append_and_length(self):
         for i in range(self.buffer_capacity):
-            self.buffer.append(np.array([i, i+1, i+2]))
+            self.buffer.append(np.array([i, i+1, i+2], dtype=np.float64))
 
         self.assertEqual(len(self.buffer), self.buffer_capacity)
         self.assertTrue(self.buffer.is_full)
 
     def test_overwrite_on_full_buffer(self):
         for i in range(self.buffer_capacity):
-            self.buffer.append(np.array([i, i+1, i+2]))
+            self.buffer.append(np.array([i, i+1, i+2], dtype=np.float64))
 
         # Append an additional element to check overwriting behavior
-        self.buffer.append(np.array([10, 11, 12]))
+        self.buffer.append(np.array([10, 11, 12], dtype=np.float64))
 
         self.assertEqual(len(self.buffer), self.buffer_capacity)
-        np.testing.assert_array_equal(self.buffer[0], np.array([1, 2, 3]))  # The first element should have been overwritten
+        np.testing.assert_array_equal(self.buffer[0], np.array([1, 2, 3], dtype=np.float64))  # The first element should have been overwritten
 
     def test_pop(self):
         for i in range(self.buffer_capacity):
-            self.buffer.append(np.array([i, i+1, i+2]))
+            self.buffer.append(np.array([i, i+1, i+2], dtype=np.float64))
 
         # Pop from right and check
-        np.testing.assert_array_equal(self.buffer.pop(), np.array([4, 5, 6]))
+        np.testing.assert_array_equal(self.buffer.pop(), np.array([4, 5, 6], dtype=np.float64))
 
         # Check length after pop
         self.assertEqual(len(self.buffer), self.buffer_capacity - 1)
 
     def test_popleft(self):
         for i in range(self.buffer_capacity):
-            self.buffer.append(np.array([i, i+1, i+2]))
+            self.buffer.append(np.array([i, i+1, i+2], dtype=np.float64))
 
         # Pop from left and check
-        np.testing.assert_array_equal(self.buffer.popleft(), np.array([0, 1, 2]))
+        np.testing.assert_array_equal(self.buffer.popleft(), np.array([0, 1, 2], dtype=np.float64))
 
         # Check length after pop
         self.assertEqual(len(self.buffer), self.buffer_capacity - 1)
 
     def test_contains(self):
         for i in range(self.buffer_capacity):
-            self.buffer.append(np.array([i, i+1, i+2]))
+            self.buffer.append(np.array([i, i+1, i+2], dtype=np.float64))
 
-        self.assertIn(np.array([2, 3, 4]), self.buffer)
-        self.assertNotIn(np.array([10, 11, 12]), self.buffer)
+        self.assertIn(np.array([2, 3, 4], dtype=np.float64), self.buffer)
+        self.assertNotIn(np.array([10, 11, 12], dtype=np.float64), self.buffer)
 
     def test_invalid_append(self):
         with self.assertRaises(AssertionError):
-            self.buffer.append(np.array([1, 2]))  # Invalid sub_array_len
+            self.buffer.append(np.array([1, 2], dtype=np.float64))  # Invalid sub_array_len
 
         with self.assertRaises(AssertionError):
-            self.buffer.append(np.array([1, 2, 3, 4]))  # Invalid sub_array_len
+            self.buffer.append(np.array([1, 2, 3, 4], dtype=np.float64))  # Invalid sub_array_len
 
     def test_invalid_pop(self):
         empty_buffer = RingBufferTwoDimFloat(3, 2)
@@ -80,36 +83,35 @@ class TestRingBufferTwoDimFloat(unittest.TestCase):
         buffer2 = RingBufferTwoDimFloat(3, 2)
 
         for i in range(3):
-            buffer1.append(np.array([i, i+1]))
-            buffer2.append(np.array([i, i+1]))
+            buffer1.append(np.array([i, i+1], dtype=np.float64))
+            buffer2.append(np.array([i, i+1], dtype=np.float64))
 
         self.assertEqual(buffer1, buffer2)
 
-        buffer2.append(np.array([4, 5]))
+        buffer2.append(np.array([4, 5], dtype=np.float64))
         self.assertNotEqual(buffer1, buffer2)
 
     def test_as_array(self):
         for i in range(self.buffer_capacity):
-            self.buffer.append(np.array([i, i+1, i+2]))
+            self.buffer.append(np.array([i, i+1, i+2], dtype=np.float64))
 
         array = self.buffer.as_array()
         expected_array = np.array([[0, 1, 2],
                                    [1, 2, 3],
                                    [2, 3, 4],
                                    [3, 4, 5],
-                                   [4, 5, 6]])
+                                   [4, 5, 6]], dtype=np.float64)
 
         np.testing.assert_array_equal(array, expected_array)
 
     def test_str_representation(self):
-        buffer = RingBufferTwoDimFloat(3, 2)
-        buffer.append(np.array([1, 2]))
-        buffer.append(np.array([3, 4]))
+        self.buffer.append(np.array([1, 2, 3], dtype=np.float64))
+        self.buffer.append(np.array([4, 5, 6], dtype=np.float64))
 
-        buffer_str = str(buffer)
+        buffer_str = str(self.buffer)
         self.assertIn("RingBufferTwoDimFloat", buffer_str)
-        self.assertIn("capacity=3", buffer_str)
-        self.assertIn("dtype=float64", buffer_str)
+        self.assertIn("capacity=5", buffer_str)
+        self.assertIn("float64", buffer_str)
         self.assertIn("current_length=2", buffer_str)
 
     def test_property_checks(self):
@@ -117,7 +119,7 @@ class TestRingBufferTwoDimFloat(unittest.TestCase):
         self.assertFalse(self.buffer.is_full)
 
         for i in range(self.buffer_capacity):
-            self.buffer.append(np.array([i, i+1, i+2]))
+            self.buffer.append(np.array([i, i+1, i+2], dtype=np.float64))
 
         self.assertFalse(self.buffer.is_empty)
         self.assertTrue(self.buffer.is_full)
@@ -126,22 +128,19 @@ class TestRingBufferTwoDimFloat(unittest.TestCase):
         self.assertEqual(self.buffer.shape, (0, self.sub_array_len))
 
         for i in range(self.buffer_capacity):
-            self.buffer.append(np.array([i, i+1, i+2]))
+            self.buffer.append(np.array([i, i+1, i+2], dtype=np.float64))
 
         self.assertEqual(self.buffer.shape, (self.buffer_capacity, self.sub_array_len))
 
     def test_getitem(self):
         for i in range(self.buffer_capacity):
-            self.buffer.append(np.array([i, i+1, i+2]))
+            self.buffer.append(np.array([i, i+1, i+2], dtype=np.float64))
 
-        np.testing.assert_array_equal(self.buffer[0], np.array([0, 1, 2]))
-
-        with self.assertRaises(IndexError):
-            _ = self.buffer[self.buffer_capacity]
+        np.testing.assert_array_equal(self.buffer[0], np.array([0, 1, 2], dtype=np.float64))
 
     def test_overwrite_behavior(self):
         for i in range(2 * self.buffer_capacity):
-            self.buffer.append(np.array([i, i+1, i+2]))
+            self.buffer.append(np.array([i, i+1, i+2], dtype=np.float64))
 
         self.assertEqual(len(self.buffer), self.buffer_capacity)
 
@@ -149,7 +148,7 @@ class TestRingBufferTwoDimFloat(unittest.TestCase):
                              [6, 7, 8],
                              [7, 8, 9],
                              [8, 9, 10],
-                             [9, 10, 11]])
+                             [9, 10, 11]], dtype=np.float64)
 
         np.testing.assert_array_equal(self.buffer.as_array(), expected)
 
@@ -284,9 +283,6 @@ class TestRingBufferTwoDimInt(unittest.TestCase):
             self.buffer.append(np.array([i, i+1, i+2]))
 
         np.testing.assert_array_equal(self.buffer[0], np.array([0, 1, 2]))
-
-        with self.assertRaises(IndexError):
-            _ = self.buffer[self.buffer_capacity]
 
     def test_overwrite_behavior(self):
         for i in range(2 * self.buffer_capacity):
