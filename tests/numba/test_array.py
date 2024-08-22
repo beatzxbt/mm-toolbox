@@ -156,8 +156,8 @@ class TestNumbaFuncs(unittest.TestCase):
         np.testing.assert_array_equal(nb_result, np_result)
 
     def test_nbroll(self):
-        np_result = np.roll(np.array([1, 2, 3]), 1)
-        nb_result = nbroll(np.array([1, 2, 3]), 1)
+        np_result = np.roll(np.array([1, 2, 3]), 1, 0)
+        nb_result = nbroll(np.array([1, 2, 3]), 1, 0)
         np.testing.assert_array_equal(nb_result, np_result)
 
 if __name__ == "__main__":

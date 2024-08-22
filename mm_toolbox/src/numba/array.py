@@ -41,10 +41,16 @@ def nbdiag(v: np.ndarray, k: int = 0) -> np.ndarray:
 
 @njit(inline="always")
 def nbisin(a: np.ndarray, b: np.ndarray) -> np.ndarray[bool]:
+    """
+    Constaints:
+    * 'a': dim=1, dtype='same as other'
+    * 'b': dim=1, dtype='same as other'
+    """
+    assert a.ndim == 1 and b.ndim == 1, "2D arrays not supported."
+    
+    b_set = set(b)
     out_len = a.size
     out = np.empty(out_len, dtype=bool_)
-    b_set = set(b)
-    
     for i in range(out_len):
         out[i] = a[i] in b_set
 
@@ -56,7 +62,13 @@ def nbwhere(condition, x=None, y=None) -> np.ndarray:
 
 @njit(inline="always")
 def nbdiff(a: np.ndarray, n: int = 1) -> np.ndarray:
-    assert n >= 0, "'n' cannot be negative"
+    """
+    Constaints:
+    * 'a': dim=1, dtype='any numba supported'
+    * 'n': dim=1, dtype=int, value='>=0'.
+    """
+
+    assert n >= 0 and a.ndim == 1
 
     if n == 0:
         return a.copy()
@@ -137,5 +149,34 @@ def nbrepeat(a: np.ndarray, repeats: Union[int, np.ndarray]) -> np.ndarray:
     return np.repeat(a, repeats)
 
 @njit(inline="always")
-def nbroll(a: np.ndarray, shift: int) -> np.ndarray:
-    return np.roll(a, shift)
+def nbroll(a: np.ndarray, shift: int, axis: int) -> np.ndarray:
+    assert axis >= 0, "Axis must be positive."
+    
+    if shift == 0:
+        return a
+    
+    if a.ndim == 1:
+        if shift > 0:
+            return np.concat((a[-shift:], a[:-shift]))
+        else:
+            return np.concat((a[shift:], a[:shift]))
+    
+    # Numba throws index error without this. Seems that it cant
+    # infer the early return from ndim==1 branch and fails to 
+    # generate the memory map correctly for 'a'.
+    assert a.ndim > 1
+
+    shift = shift % a.shape[axis]
+    
+    out = np.empty_like(a)
+    axis_len = a.shape[axis]
+    
+    # Roll the array
+    for i in range(axis_len):
+        new_index = (i + shift) % axis_len
+        if axis == 0:
+            out[new_index, :] = a[i, :]
+        else:
+            out[:, new_index] = a[:, i]
+    
+    return out
