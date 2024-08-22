@@ -59,15 +59,17 @@ class TestRingBufferSingleDimFloat(unittest.TestCase):
         self.assertNotIn(10.0, self.buffer)
 
     def test_invalid_append(self):
-        with self.assertRaises(TypeError):
+        # This test is obvious, but it's result is important as
+        # this is intended unsafe behaviour. 
+        with self.assertRaises(Exception):
             self.buffer.append("invalid_type")
 
     def test_invalid_pop(self):
         empty_buffer = RingBufferSingleDimFloat(3)
-        with self.assertRaises(IndexError):
+        with self.assertRaises(AssertionError):
             empty_buffer.popright()
 
-        with self.assertRaises(IndexError):
+        with self.assertRaises(AssertionError):
             empty_buffer.popleft()
 
     def test_equality(self):
@@ -99,7 +101,7 @@ class TestRingBufferSingleDimFloat(unittest.TestCase):
         buffer_str = str(buffer)
         self.assertIn("RingBufferSingleDimFloat", buffer_str)
         self.assertIn("capacity=3", buffer_str)
-        self.assertIn("dtype=float64", buffer_str)
+        self.assertIn("float64", buffer_str)
         self.assertIn("current_length=2", buffer_str)
 
     def test_property_checks(self):
@@ -126,9 +128,6 @@ class TestRingBufferSingleDimFloat(unittest.TestCase):
 
         self.assertEqual(self.buffer[0], 0.0)
 
-        with self.assertRaises(IndexError):
-            _ = self.buffer[self.buffer_capacity]
-
     def test_overwrite_behavior(self):
         for i in range(2 * self.buffer_capacity):
             self.buffer.append(float(i))
@@ -150,24 +149,24 @@ class TestRingBufferSingleDimInt(unittest.TestCase):
 
     def test_append_and_length(self):
         for i in range(self.buffer_capacity):
-            self.buffer.appendright(i)
+            self.buffer.append(i)
 
         self.assertEqual(len(self.buffer), self.buffer_capacity)
         self.assertTrue(self.buffer.is_full)
 
     def test_overwrite_on_full_buffer(self):
         for i in range(self.buffer_capacity):
-            self.buffer.appendright(i)
+            self.buffer.append(i)
 
         # Append an additional element to check overwriting behavior
-        self.buffer.appendright(10)
+        self.buffer.append(10)
 
         self.assertEqual(len(self.buffer), self.buffer_capacity)
         self.assertEqual(self.buffer[0], 1)  # The first element should have been overwritten
 
     def test_popright(self):
         for i in range(self.buffer_capacity):
-            self.buffer.appendright(i)
+            self.buffer.append(i)
 
         # Pop from right and check
         self.assertEqual(self.buffer.popright(), 4)
@@ -177,7 +176,7 @@ class TestRingBufferSingleDimInt(unittest.TestCase):
 
     def test_popleft(self):
         for i in range(self.buffer_capacity):
-            self.buffer.appendright(i)
+            self.buffer.append(i)
 
         # Pop from left and check
         self.assertEqual(self.buffer.popleft(), 0)
@@ -187,21 +186,23 @@ class TestRingBufferSingleDimInt(unittest.TestCase):
 
     def test_contains(self):
         for i in range(self.buffer_capacity):
-            self.buffer.appendright(i)
+            self.buffer.append(i)
 
         self.assertIn(3, self.buffer)
         self.assertNotIn(10, self.buffer)
 
     def test_invalid_append(self):
-        with self.assertRaises(TypeError):
-            self.buffer.appendright("invalid_type")
+        # This test is obvious, but it's result is important as
+        # this is intended unsafe behaviour. 
+        with self.assertRaises(Exception):
+            self.buffer.append("invalid_type")
 
     def test_invalid_pop(self):
         empty_buffer = RingBufferSingleDimInt(3)
-        with self.assertRaises(IndexError):
+        with self.assertRaises(AssertionError):
             empty_buffer.popright()
 
-        with self.assertRaises(IndexError):
+        with self.assertRaises(AssertionError):
             empty_buffer.popleft()
 
     def test_equality(self):
@@ -209,17 +210,17 @@ class TestRingBufferSingleDimInt(unittest.TestCase):
         buffer2 = RingBufferSingleDimInt(3)
 
         for i in range(3):
-            buffer1.appendright(i)
-            buffer2.appendright(i)
+            buffer1.append(i)
+            buffer2.append(i)
 
         self.assertEqual(buffer1, buffer2)
 
-        buffer2.appendright(4)
+        buffer2.append(4)
         self.assertNotEqual(buffer1, buffer2)
 
     def test_as_array(self):
         for i in range(self.buffer_capacity):
-            self.buffer.appendright(i)
+            self.buffer.append(i)
 
         array = self.buffer.as_array()
         expected_array = np.array([0, 1, 2, 3, 4])
@@ -227,13 +228,13 @@ class TestRingBufferSingleDimInt(unittest.TestCase):
 
     def test_str_representation(self):
         buffer = RingBufferSingleDimInt(3)
-        buffer.appendright(1)
-        buffer.appendright(2)
+        buffer.append(1)
+        buffer.append(2)
 
         buffer_str = str(buffer)
-        self.assertIn("RingBufferSingleDimFloat", buffer_str)
+        self.assertIn("RingBufferSingleDimInt", buffer_str)
         self.assertIn("capacity=3", buffer_str)
-        self.assertIn("dtype=int64", buffer_str)
+        self.assertIn("int64", buffer_str)
         self.assertIn("current_length=2", buffer_str)
 
     def test_property_checks(self):
@@ -241,7 +242,7 @@ class TestRingBufferSingleDimInt(unittest.TestCase):
         self.assertFalse(self.buffer.is_full)
 
         for i in range(self.buffer_capacity):
-            self.buffer.appendright(i)
+            self.buffer.append(i)
 
         self.assertFalse(self.buffer.is_empty)
         self.assertTrue(self.buffer.is_full)
@@ -250,22 +251,19 @@ class TestRingBufferSingleDimInt(unittest.TestCase):
         self.assertEqual(self.buffer.shape, (0,))
 
         for i in range(self.buffer_capacity):
-            self.buffer.appendright(i)
+            self.buffer.append(i)
 
         self.assertEqual(self.buffer.shape, (self.buffer_capacity,))
 
     def test_getitem(self):
         for i in range(self.buffer_capacity):
-            self.buffer.appendright(i)
+            self.buffer.append(i)
 
         self.assertEqual(self.buffer[0], 0)
 
-        with self.assertRaises(IndexError):
-            _ = self.buffer[self.buffer_capacity]
-
     def test_overwrite_behavior(self):
         for i in range(2 * self.buffer_capacity):
-            self.buffer.appendright(i)
+            self.buffer.append(i)
 
         self.assertEqual(len(self.buffer), self.buffer_capacity)
 

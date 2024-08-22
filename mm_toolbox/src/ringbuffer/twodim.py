@@ -1,12 +1,14 @@
 import numpy as np
 from numba.types import uint32, float64, int64
 from numba.experimental import jitclass
-from typing import Tuple
+from typing import Tuple, Union
 
 @jitclass
 class RingBufferTwoDimFloat:
     """
-    A 2-dimensional fixed-size circular buffer for Float64 values.
+    A 2-dimensional fixed-size circular buffer, only supporting
+    floats. Optimized for super high performance, sacrificing 
+    safety and ease of use. Be careful!
 
     Parameters
     ----------
@@ -169,7 +171,7 @@ class RingBufferTwoDimFloat:
     
     def __str__(self) -> str:
         return (f"RingBufferTwoDimFloat(capacity={self.capacity}, "
-                f"dtype={self.dtype}, "
+                f"dtype=float64, "
                 f"current_length={len(self)}, "
                 f"data={self.as_array()})")
 
@@ -177,9 +179,9 @@ class RingBufferTwoDimFloat:
 @jitclass
 class RingBufferTwoDimInt:
     """
-    A 2-dimensional fixed-size circular buffer for Int64 values.
-
-    Can only support int64 values.
+    A 2-dimensional fixed-size circular buffer, only supporting
+    ints. Optimized for super high performance, sacrificing 
+    safety and ease of use. Be careful!
 
     Parameters
     ----------
@@ -250,13 +252,13 @@ class RingBufferTwoDimInt:
             self._left_index_ += self.capacity
             self._right_index_ += self.capacity
 
-    def append(self, values: np.ndarray) -> None:
+    def append(self, values: np.ndarray[np.int64]) -> None:
         """
         Add a 1D array to the end of the buffer.
 
         Parameters
         ----------
-        values : np.ndarray[np.int64]
+        values : np.ndarray
             The 1D array to be added to the buffer.
         """
         assert values.size == self.sub_array_len and values.ndim == 1
@@ -268,13 +270,13 @@ class RingBufferTwoDimInt:
         self._right_index_ += 1
         self._fix_indices_()
         
-    def pop(self) -> np.ndarray:
+    def pop(self) -> np.ndarray[np.int64]:
         """
         Remove and return the last value from the buffer.
 
         Returns
         -------
-        np.ndarray[np.int64]
+        np.ndarray
             The last value removed from the buffer.
 
         Raises
@@ -289,13 +291,13 @@ class RingBufferTwoDimInt:
         res = self._array_[self._right_index_ % self.capacity]
         return res
 
-    def popleft(self) -> np.ndarray:
+    def popleft(self) -> np.ndarray[np.int64]:
         """
         Remove and return the first value from the buffer.
 
         Returns
         -------
-        np.ndarray[np.int64]
+        np.ndarray
             The first value removed from the buffer.
 
         Raises
@@ -310,7 +312,7 @@ class RingBufferTwoDimInt:
         self._fix_indices_()
         return res
 
-    def __contains__(self, sub_array: np.ndarray) -> bool:
+    def __contains__(self, sub_array: np.ndarray[np.int64]) -> bool:
         assert sub_array.size == self.sub_array_len and sub_array.ndim == 1
         
         if self.is_empty:
@@ -329,8 +331,8 @@ class RingBufferTwoDimInt:
                 
         return False
 
-    def __eq__(self, ringbuffer: 'RingBufferTwoDimFloat') -> bool:
-        if isinstance(ringbuffer, RingBufferTwoDimFloat):
+    def __eq__(self, ringbuffer: 'RingBufferTwoDimInt') -> bool:
+        if isinstance(ringbuffer, RingBufferTwoDimInt):
             return np.array_equal(ringbuffer.as_array(), self.as_array())
         return False
         
@@ -342,6 +344,6 @@ class RingBufferTwoDimInt:
     
     def __str__(self) -> str:
         return (f"RingBufferTwoDimInt(capacity={self.capacity}, "
-                f"dtype={self.dtype}, "
+                f"dtype=int64, "
                 f"current_length={len(self)}, "
                 f"data={self.as_array()})")

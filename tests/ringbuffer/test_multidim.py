@@ -6,8 +6,8 @@ from mm_toolbox.src.ringbuffer import RingBufferMultiDim
 class TestRingBufferMultiDim(unittest.TestCase):
     def setUp(self):
         self.buffer_capacity = 5
-        self.single_dim_buffer = RingBufferMultiDim(self.buffer_capacity)
-        self.multi_dim_buffer = RingBufferMultiDim((self.buffer_capacity, 3))
+        self.single_dim_buffer = RingBufferMultiDim(self.buffer_capacity, dtype=np.int64)
+        self.multi_dim_buffer = RingBufferMultiDim((self.buffer_capacity, 3), dtype=np.int64)
 
     def test_initialization(self):
         self.assertEqual(self.single_dim_buffer.capacity, self.buffer_capacity)
@@ -94,8 +94,8 @@ class TestRingBufferMultiDim(unittest.TestCase):
             empty_buffer.popleft()
 
     def test_equality(self):
-        buffer1 = RingBufferMultiDim(3)
-        buffer2 = RingBufferMultiDim(3)
+        buffer1 = RingBufferMultiDim(3, dtype=np.int64)
+        buffer2 = RingBufferMultiDim(3, dtype=np.int64)
 
         for i in range(3):
             buffer1.append(i)
@@ -126,13 +126,13 @@ class TestRingBufferMultiDim(unittest.TestCase):
 
     def test_str_representation(self):
         buffer = RingBufferMultiDim(3)
-        buffer.append(1)
-        buffer.append(2)
+        buffer.append(1.0)
+        buffer.append(2.0)
 
         buffer_str = str(buffer)
         self.assertIn("RingBufferMultiDim", buffer_str)
         self.assertIn("capacity=3", buffer_str)
-        self.assertIn("dtype=float64", buffer_str)
+        self.assertIn("float64", buffer_str)
         self.assertIn("current_length=2", buffer_str)
 
     def test_property_checks(self):
