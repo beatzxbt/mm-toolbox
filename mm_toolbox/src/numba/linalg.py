@@ -1,11 +1,14 @@
 import numpy as np
 from numba import njit
-from warnings import warn as warning
 
-warning(
-    message="Numba optimized linalg functions will *only* work with float/complex type arrays.",
-    category=UserWarning
-)
+# This warning may be enabled in the future if it's function is still
+# unclear. Currently, this is annoying for those who dont need linalg funcs.
+
+# from warnings import warn as warning
+# warning(
+#     message="Numba optimized linalg functions will *only* work with float/complex type arrays.",
+#     category=UserWarning
+# )
 
 @njit
 def nbdot(A: np.ndarray, B: np.ndarray) -> float:
