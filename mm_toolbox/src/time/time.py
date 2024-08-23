@@ -1,6 +1,7 @@
 import ciso8601
 from time import (
     strftime,
+    gmtime,
     time_ns as time_nano, 
     time as time_sec,
 )
@@ -59,9 +60,9 @@ def time_iso8601() -> str:
         An ISO 8601 formatted date-time string (e.g., "2023-04-04T00:28:50.516Z").
     """
     millis = str((time_nano() % 1_000_000_000) // 1_000_000).zfill(3)
-    return f"{strftime('%Y-%m-%dT%H:%M:%S')}.{millis}Z"
+    return f"{strftime('%Y-%m-%dT%H:%M:%S', gmtime())}.{millis}Z"
 
-def iso8601_to_unix(timestamp: str) -> int:
+def iso8601_to_unix(timestamp: str) -> float:
     """
     Converts an ISO 8601 formatted timestamp to a Unix timestamp.
 
@@ -72,7 +73,7 @@ def iso8601_to_unix(timestamp: str) -> int:
 
     Returns
     -------
-    int
+    float
         The Unix timestamp corresponding to the provided ISO 8601 date-time.
     """
-    return int(ciso8601.parse_datetime(timestamp).timestamp())
+    return ciso8601.parse_datetime(timestamp).timestamp()

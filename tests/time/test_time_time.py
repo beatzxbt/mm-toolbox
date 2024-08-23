@@ -5,7 +5,7 @@ from mm_toolbox.src.time import (
     iso8601_to_unix,
 ) 
 
-class TestTimeFunctions(unittest.TestCase):
+class TestTime(unittest.TestCase):
     def test_time_iso8601(self):
         time_s_now = time_s()
         result = time_iso8601()
