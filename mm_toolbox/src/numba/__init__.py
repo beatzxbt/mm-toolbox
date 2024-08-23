@@ -1,14 +1,4 @@
-from .linalg import (
-    nbdot,
-    nbnorm,
-    nbsolve,
-    nbinv,
-    nbdet,
-    nbeig,
-    nbsvd,
-    nbqr,
-    nbcholesky
-)
+from .linalg import nbdot, nbnorm, nbsolve, nbinv, nbdet, nbeig, nbsvd, nbqr, nbcholesky
 from .array import (
     nblinspace,
     nbgeomspace,
@@ -35,5 +25,5 @@ from .array import (
     nbunique,
     nbrepeat,
     nbstack,
-    nbroll
+    nbroll,
 )

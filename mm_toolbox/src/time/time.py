@@ -2,9 +2,10 @@ import ciso8601
 from time import (
     strftime,
     gmtime,
-    time_ns as time_nano, 
+    time_ns as time_nano,
     time as time_sec,
 )
+
 
 def time_s() -> float:
     """
@@ -17,6 +18,7 @@ def time_s() -> float:
     """
     return time_sec()
 
+
 def time_ms() -> float:
     """
     Get the current time in milliseconds since the epoch.
@@ -27,6 +29,7 @@ def time_ms() -> float:
         The current time in milliseconds.
     """
     return time_sec() * 1_000.0
+
 
 def time_us() -> float:
     """
@@ -39,6 +42,7 @@ def time_us() -> float:
     """
     return time_sec() * 1_000_000.0
 
+
 def time_ns() -> int:
     """
     Get the current time in nanoseconds since the epoch.
@@ -49,6 +53,7 @@ def time_ns() -> int:
         The current time in nanoseconds.
     """
     return time_nano()
+
 
 def time_iso8601() -> str:
     """
@@ -61,6 +66,7 @@ def time_iso8601() -> str:
     """
     millis = str((time_nano() % 1_000_000_000) // 1_000_000).zfill(3)
     return f"{strftime('%Y-%m-%dT%H:%M:%S', gmtime())}.{millis}Z"
+
 
 def iso8601_to_unix(timestamp: str) -> float:
     """

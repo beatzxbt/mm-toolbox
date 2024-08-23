@@ -9,6 +9,7 @@ from mm_toolbox.src.logging import Logger
 from mm_toolbox.src.time import time_ms
 from mm_toolbox.src.ringbuffer import RingBufferSingleDimFloat
 
+
 @dataclass
 class WsConnectionEvictionPolicy:
     """
@@ -18,13 +19,14 @@ class WsConnectionEvictionPolicy:
     ----------
     max_errors : int
         Maximum number of errors allowed before eviction.
-        
+
     max_avg_latency_ms : float
         Maximum average latency (in milliseconds) allowed before eviction.
-        
+
     interval_s : float
         Interval (in seconds) to check the eviction conditions.
     """
+
     max_errors: int = 20
     max_avg_latency_ms: float = 1000.0
     interval_s: float = 60.0
@@ -54,13 +56,14 @@ class SingleWsConnection:
     error_count : int
         Counter for tracking errors.
     """
+
     fallback_timestamp_paths = [
-        "/time", 
-        "/timestamp", 
-        "/T", 
-        "/data/time", 
-        "/data/timestamp", 
-        "/data/T", 
+        "/time",
+        "/timestamp",
+        "/T",
+        "/data/time",
+        "/data/timestamp",
+        "/data/T",
     ]
 
     def __init__(self, logger: Logger) -> None:
@@ -81,7 +84,7 @@ class SingleWsConnection:
             The mean latency.
         """
         return self.latencies._array_.sum() / len(self.latencies)
-    
+
     def convert_paths_to_lists(paths: List[str]) -> List[List[str]]:
         """
         Convert JSON pointer-like path strings into a lists of keys.
@@ -96,16 +99,18 @@ class SingleWsConnection:
         List[str]
             A list of keys extracted from each path string.
         """
-        return [path.strip('/').split('/') for path in paths]
+        return [path.strip("/").split("/") for path in paths]
 
-    def record_latency(self, all_timestamp_paths: List[List[str]], data: Dict[str, Any]) -> None:
+    def record_latency(
+        self, all_timestamp_paths: List[List[str]], data: Dict[str, Any]
+    ) -> None:
         """
         Record the latency for the WebSocket message.
 
         Parameters
         ----------
         all_timestamp_paths : List[List[str]]
-            A list of possible paths for indexing the timestamp, in order of possibility. 
+            A list of possible paths for indexing the timestamp, in order of possibility.
 
         data : Dict[str, Any]
             The WebSocket message data.
@@ -123,7 +128,7 @@ class SingleWsConnection:
                 self.latencies.append(time_ms() - float(indexed_timestamp))
             except KeyError:
                 continue
-                
+
         raise KeyError(f"Timestamp key not found in data - {data}")
 
     async def send(self, payload: Dict) -> None:
@@ -137,11 +142,10 @@ class SingleWsConnection:
         """
         try:
             await self.ws_conn.send_bytes(orjson.dumps(payload))
-        
+
         except orjson.JSONEncodeError as e:
             await self.logging.warning(
-                topic="WS",
-                msg=f"Failed to encode payload: {payload} - {e}"
+                topic="WS", msg=f"Failed to encode payload: {payload} - {e}"
             )
 
         except Exception as e:
@@ -150,7 +154,13 @@ class SingleWsConnection:
                 msg=f"Failed to send WebSocket payload: {payload} - {e}",
             )
 
-    async def start(self, url: str, data_handler: Callable, timestamp_paths: List[str], on_connect: Optional[List[Dict]] = None) -> None:
+    async def start(
+        self,
+        url: str,
+        data_handler: Callable,
+        timestamp_paths: List[str],
+        on_connect: Optional[List[Dict]] = None,
+    ) -> None:
         """
         Start the WebSocket connection and handle incoming messages.
 
@@ -163,21 +173,21 @@ class SingleWsConnection:
             A function to handle incoming messages.
 
         timestamp_paths : List[str]
-            A list of possible keys for indexing the timestamp, in order of possibility. 
+            A list of possible keys for indexing the timestamp, in order of possibility.
 
         on_connect : Optional[List[Dict]], optional
             A list of payloads to send upon connecting (default is None).
         """
         try:
-            await self.logging.debug(
-                topic="WS", msg=f"Starting stream on '{url}'."
-            )
-            
+            await self.logging.debug(topic="WS", msg=f"Starting stream on '{url}'.")
+
             # Combine primary and fallback timestamp paths
-            all_timestamp_paths = self.convert_paths_to_lists(timestamp_paths + self.fallback_timestamp_paths)
+            all_timestamp_paths = self.convert_paths_to_lists(
+                timestamp_paths + self.fallback_timestamp_paths
+            )
 
             async with self.session.ws_connect(url) as ws:
-                self.ws_conn = ws  
+                self.ws_conn = ws
 
                 if on_connect:
                     for payload in on_connect:
@@ -198,10 +208,10 @@ class SingleWsConnection:
             # Session killed outside of context
             await ws.close()
             return
-        
+
         except Exception as e:
             await self.logging.error(topic="WS", msg=f"'{url}': {e}")
-    
+
     async def close(self) -> None:
         """
         Close the WebSocket connection and cancel any ongoing tasks.
@@ -231,12 +241,13 @@ class WsPool:
     conn_pool : List[SingleWsConnection]
         List of active WebSocket connections.
     """
+
     def __init__(
-        self, 
-        size: int, 
-        url: str, 
+        self,
+        size: int,
+        url: str,
         eviction_policy: WsConnectionEvictionPolicy,
-        logger: Logger
+        logger: Logger,
     ) -> None:
         self.size = size
         self.url = url
@@ -245,7 +256,12 @@ class WsPool:
         self.conn_pool = [SingleWsConnection(logger=self.logging) for _ in range(size)]
         self.eviction_task: Optional[asyncio.Task] = None
 
-    async def start(self, data_handler: Callable, timestamp_paths: List[str], on_connect: Optional[List[Dict]] = None) -> None:
+    async def start(
+        self,
+        data_handler: Callable,
+        timestamp_paths: List[str],
+        on_connect: Optional[List[Dict]] = None,
+    ) -> None:
         """
         Start all WebSocket connections in the pool.
 
@@ -265,7 +281,7 @@ class WsPool:
                 url=self.url,
                 data_handler=data_handler,
                 timestamp_paths=timestamp_paths,
-                on_connect=on_connect
+                on_connect=on_connect,
             )
 
         self.eviction_task = asyncio.create_task(self.enforce_eviction_policy())
@@ -316,7 +332,7 @@ class WsPool:
         self.conn_pool.remove(conn)
         await self.logging.info(
             topic="WS",
-            msg=f"Connection evicted: AvgLatency={conn.get_mean_latency()}, Errors={conn.error_count}"
+            msg=f"Connection evicted: AvgLatency={conn.get_mean_latency()}, Errors={conn.error_count}",
         )
 
     async def replace_connection(self, conn: SingleWsConnection) -> None:
@@ -333,7 +349,7 @@ class WsPool:
             url=self.url,
             data_handler=conn.data_handler,
             timestamp_paths=conn.timestamp_paths,
-            on_connect=conn.on_connect
+            on_connect=conn.on_connect,
         )
         self.conn_pool.append(new_conn)
 
@@ -384,23 +400,26 @@ class FastWebsocketStream:
     ws_pool : WsPool
         The pool of WebSocket connections.
     """
+
     def __init__(
-        self, 
-        url: str, 
-        on_connect: Optional[List[Dict]] = None, 
-        num_streams: int = 5, 
+        self,
+        url: str,
+        on_connect: Optional[List[Dict]] = None,
+        num_streams: int = 5,
         eviction_policy: Optional[WsConnectionEvictionPolicy] = None,
-        logger: Optional[Logger] = None
+        logger: Optional[Logger] = None,
     ) -> None:
         self.url = url
         self.on_connect = on_connect if on_connect else []
-        self.eviction_policy = eviction_policy if eviction_policy else WsConnectionEvictionPolicy()
+        self.eviction_policy = (
+            eviction_policy if eviction_policy else WsConnectionEvictionPolicy()
+        )
         self.num_streams = max(num_streams, 2)
 
         if logger is None:
             warning(
                 message="Custom loggers are strongly recommended for full functionality.",
-                category=RuntimeWarning
+                category=RuntimeWarning,
             )
             logger = Logger()
         self.logging = logger
@@ -409,9 +428,9 @@ class FastWebsocketStream:
             size=self.num_streams,
             url=self.url,
             eviction_policy=self.eviction_policy,
-            logger=self.logging
+            logger=self.logging,
         )
-    
+
     async def start(self, data_handler: Callable, timestamp_paths: List[str]) -> None:
         """
         Start the WebSocket streams within the pool.
@@ -427,7 +446,7 @@ class FastWebsocketStream:
         await self.ws_pool.start(
             data_handler=data_handler,
             timestamp_paths=timestamp_paths,
-            on_connect=self.on_connect
+            on_connect=self.on_connect,
         )
 
     async def send(self, payload: Dict) -> None:

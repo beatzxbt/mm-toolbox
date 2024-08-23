@@ -26,8 +26,9 @@ from mm_toolbox.src.numba import (
     nbunique,
     nbrepeat,
     nbstack,
-    nbroll
+    nbroll,
 )
+
 
 class TestNumbaFuncs(unittest.TestCase):
     def test_nblinspace(self):
@@ -81,8 +82,12 @@ class TestNumbaFuncs(unittest.TestCase):
         np.testing.assert_array_equal(nb_result, np_result)
 
     def test_nbwhere(self):
-        np_result = np.where(np.array([True, False, True]), np.array([1, 2, 3]), np.array([4, 5, 6]))
-        nb_result = nbwhere(np.array([True, False, True]), np.array([1, 2, 3]), np.array([4, 5, 6]))
+        np_result = np.where(
+            np.array([True, False, True]), np.array([1, 2, 3]), np.array([4, 5, 6])
+        )
+        nb_result = nbwhere(
+            np.array([True, False, True]), np.array([1, 2, 3]), np.array([4, 5, 6])
+        )
         np.testing.assert_array_equal(nb_result, np_result)
 
     def test_nbdiff(self):
@@ -159,6 +164,7 @@ class TestNumbaFuncs(unittest.TestCase):
         np_result = np.roll(np.array([1, 2, 3]), 1, 0)
         nb_result = nbroll(np.array([1, 2, 3]), 1, 0)
         np.testing.assert_array_equal(nb_result, np_result)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,11 +13,12 @@ class VerifyWsPayload:
     strict : bool, optional
         If True, enforce strict type checking on the values of the keys (default is False).
     """
+
     def __init__(self, sample: Dict, strict: bool = False) -> None:
         self.sample = sample
         self.strict = strict
         self.type_map = self._create_type_map_(sample)
-    
+
     def verify(self, payload: Dict) -> bool:
         """
         Check if the payload matches the structure of the sample.
@@ -33,7 +34,7 @@ class VerifyWsPayload:
             True if the payload matches the sample structure, False otherwise.
         """
         return self._check_structure_(self.type_map, payload)
-    
+
     def _create_type_map_(self, sample: Dict) -> Dict:
         """
         Creates a type map for the sample dictionary.
@@ -89,5 +90,5 @@ class VerifyWsPayload:
             else:
                 if self.strict and not isinstance(payload[key], type_map[key]):
                     return False
-                    
+
         return True

@@ -2,6 +2,7 @@ import orjson
 import aiosonic
 import asyncio
 
+
 class TelegramClient:
     """
     A client for sending messages to a Telegram channel using a bot token and chat ID with buffering capabilities.

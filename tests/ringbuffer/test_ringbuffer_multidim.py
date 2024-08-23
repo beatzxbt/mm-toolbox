@@ -1,13 +1,15 @@
 import unittest
 import numpy as np
-from mm_toolbox.src.ringbuffer import RingBufferMultiDim 
+from mm_toolbox.src.ringbuffer import RingBufferMultiDim
 
 
 class TestRingBufferMultiDim(unittest.TestCase):
     def setUp(self):
         self.buffer_capacity = 5
         self.single_dim_buffer = RingBufferMultiDim(self.buffer_capacity, dtype=np.int64)
-        self.multi_dim_buffer = RingBufferMultiDim((self.buffer_capacity, 3), dtype=np.int64)
+        self.multi_dim_buffer = RingBufferMultiDim(
+            (self.buffer_capacity, 3), dtype=np.int64
+        )
 
     def test_initialization(self):
         self.assertEqual(self.single_dim_buffer.capacity, self.buffer_capacity)
@@ -18,7 +20,7 @@ class TestRingBufferMultiDim(unittest.TestCase):
     def test_append_and_length(self):
         for i in range(self.buffer_capacity):
             self.single_dim_buffer.append(i)
-            self.multi_dim_buffer.append(np.array([i, i+1, i+2]))
+            self.multi_dim_buffer.append(np.array([i, i + 1, i + 2]))
 
         self.assertEqual(len(self.single_dim_buffer), self.buffer_capacity)
         self.assertEqual(len(self.multi_dim_buffer), self.buffer_capacity)
@@ -28,7 +30,7 @@ class TestRingBufferMultiDim(unittest.TestCase):
     def test_overwrite_on_full_buffer(self):
         for i in range(self.buffer_capacity):
             self.single_dim_buffer.append(i)
-            self.multi_dim_buffer.append(np.array([i, i+1, i+2]))
+            self.multi_dim_buffer.append(np.array([i, i + 1, i + 2]))
 
         # Append additional elements to check overwriting behavior
         self.single_dim_buffer.append(10)
@@ -44,11 +46,13 @@ class TestRingBufferMultiDim(unittest.TestCase):
     def test_popright(self):
         for i in range(self.buffer_capacity):
             self.single_dim_buffer.append(i)
-            self.multi_dim_buffer.append(np.array([i, i+1, i+2]))
+            self.multi_dim_buffer.append(np.array([i, i + 1, i + 2]))
 
         # Pop from right and check
         self.assertEqual(self.single_dim_buffer.popright(), 4)
-        np.testing.assert_array_equal(self.multi_dim_buffer.popright(), np.array([4, 5, 6]))
+        np.testing.assert_array_equal(
+            self.multi_dim_buffer.popright(), np.array([4, 5, 6])
+        )
 
         # Check length after pop
         self.assertEqual(len(self.single_dim_buffer), self.buffer_capacity - 1)
@@ -57,11 +61,13 @@ class TestRingBufferMultiDim(unittest.TestCase):
     def test_popleft(self):
         for i in range(self.buffer_capacity):
             self.single_dim_buffer.append(i)
-            self.multi_dim_buffer.append(np.array([i, i+1, i+2]))
+            self.multi_dim_buffer.append(np.array([i, i + 1, i + 2]))
 
         # Pop from left and check
         self.assertEqual(self.single_dim_buffer.popleft(), 0)
-        np.testing.assert_array_equal(self.multi_dim_buffer.popleft(), np.array([0, 1, 2]))
+        np.testing.assert_array_equal(
+            self.multi_dim_buffer.popleft(), np.array([0, 1, 2])
+        )
 
         # Check length after pop
         self.assertEqual(len(self.single_dim_buffer), self.buffer_capacity - 1)
@@ -70,7 +76,7 @@ class TestRingBufferMultiDim(unittest.TestCase):
     def test_contains(self):
         for i in range(self.buffer_capacity):
             self.single_dim_buffer.append(i)
-            self.multi_dim_buffer.append(np.array([i, i+1, i+2]))
+            self.multi_dim_buffer.append(np.array([i, i + 1, i + 2]))
 
         self.assertIn(3, self.single_dim_buffer)
         self.assertNotIn(10, self.single_dim_buffer)
@@ -109,17 +115,15 @@ class TestRingBufferMultiDim(unittest.TestCase):
     def test_as_array(self):
         for i in range(self.buffer_capacity):
             self.single_dim_buffer.append(i)
-            self.multi_dim_buffer.append(np.array([i, i+1, i+2]))
+            self.multi_dim_buffer.append(np.array([i, i + 1, i + 2]))
 
         single_array = self.single_dim_buffer.as_array()
         multi_array = self.multi_dim_buffer.as_array()
 
         expected_single_array = np.array([0, 1, 2, 3, 4])
-        expected_multi_array = np.array([[0, 1, 2],
-                                         [1, 2, 3],
-                                         [2, 3, 4],
-                                         [3, 4, 5],
-                                         [4, 5, 6]])
+        expected_multi_array = np.array(
+            [[0, 1, 2], [1, 2, 3], [2, 3, 4], [3, 4, 5], [4, 5, 6]]
+        )
 
         np.testing.assert_array_equal(single_array, expected_single_array)
         np.testing.assert_array_equal(multi_array, expected_multi_array)
@@ -151,7 +155,7 @@ class TestRingBufferMultiDim(unittest.TestCase):
 
         for i in range(self.buffer_capacity):
             self.single_dim_buffer.append(i)
-            self.multi_dim_buffer.append(np.array([i, i+1, i+2]))
+            self.multi_dim_buffer.append(np.array([i, i + 1, i + 2]))
 
         self.assertEqual(self.single_dim_buffer.shape, (self.buffer_capacity,))
         self.assertEqual(self.multi_dim_buffer.shape, (self.buffer_capacity, 3))
@@ -159,7 +163,7 @@ class TestRingBufferMultiDim(unittest.TestCase):
     def test_getitem(self):
         for i in range(self.buffer_capacity):
             self.single_dim_buffer.append(i)
-            self.multi_dim_buffer.append(np.array([i, i+1, i+2]))
+            self.multi_dim_buffer.append(np.array([i, i + 1, i + 2]))
 
         self.assertEqual(self.single_dim_buffer[0], 0)
         np.testing.assert_array_equal(self.multi_dim_buffer[0], np.array([0, 1, 2]))
@@ -170,20 +174,19 @@ class TestRingBufferMultiDim(unittest.TestCase):
     def test_overwrite_behavior(self):
         for i in range(2 * self.buffer_capacity):
             self.single_dim_buffer.append(i)
-            self.multi_dim_buffer.append(np.array([i, i+1, i+2]))
+            self.multi_dim_buffer.append(np.array([i, i + 1, i + 2]))
 
         self.assertEqual(len(self.single_dim_buffer), self.buffer_capacity)
         self.assertEqual(len(self.multi_dim_buffer), self.buffer_capacity)
 
         expected_single = np.array([5, 6, 7, 8, 9])
-        expected_multi = np.array([[5, 6, 7],
-                                   [6, 7, 8],
-                                   [7, 8, 9],
-                                   [8, 9, 10],
-                                   [9, 10, 11]])
+        expected_multi = np.array(
+            [[5, 6, 7], [6, 7, 8], [7, 8, 9], [8, 9, 10], [9, 10, 11]]
+        )
 
         np.testing.assert_array_equal(self.single_dim_buffer.as_array(), expected_single)
         np.testing.assert_array_equal(self.multi_dim_buffer.as_array(), expected_multi)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

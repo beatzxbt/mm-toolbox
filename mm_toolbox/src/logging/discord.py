@@ -2,6 +2,7 @@ import orjson
 import aiosonic
 import asyncio
 
+
 class DiscordClient:
     """
     A client for sending messages to a Discord channel using a webhook URL with buffering capabilities.

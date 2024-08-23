@@ -2,6 +2,7 @@ import unittest
 import numpy as np
 from mm_toolbox.src.weights import ema_weights
 
+
 class TestEmaWeights(unittest.TestCase):
     def test_default_alpha(self):
         window = 5
@@ -16,15 +17,26 @@ class TestEmaWeights(unittest.TestCase):
 
     def test_larger_window_size(self):
         result = ema_weights(10, alpha=0.5)
-        expected = np.array([
-            0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625, 
-            0.0078125, 0.00390625, 0.00195312, 0.00097656
-        ])
+        expected = np.array(
+            [
+                0.5,
+                0.25,
+                0.125,
+                0.0625,
+                0.03125,
+                0.015625,
+                0.0078125,
+                0.00390625,
+                0.00195312,
+                0.00097656,
+            ]
+        )
         np.testing.assert_almost_equal(result, expected, decimal=8)
 
     def test_invalid_window(self):
         with self.assertRaises(AssertionError):
             ema_weights(1)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

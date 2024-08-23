@@ -5,6 +5,7 @@ from numba.types import bool_, uint32, float64
 from mm_toolbox.src.moving_average.ema import ExponentialMovingAverage as EMA
 from mm_toolbox.src.ringbuffer import RingBufferSingleDimFloat
 
+
 @jitclass
 class HullMovingAverage:
     window: uint32
@@ -15,12 +16,12 @@ class HullMovingAverage:
     ringbuffer: RingBufferSingleDimFloat.class_type.instance_type
     value: float64
 
-    def __init__(self, window: int, fast: bool=True):
+    def __init__(self, window: int, fast: bool = True):
         self.window = window
         self.fast = fast
         self.short_ema = EMA(self.window // 2, 0.0, True)
         self.long_ema = EMA(window, 0.0, True)
-        self.smooth_ema = EMA(int(window ** 0.5), 0.0, True)
+        self.smooth_ema = EMA(int(window**0.5), 0.0, True)
         self.ringbuffer = RingBufferSingleDimFloat(window)
         self.value = 0.0
 
@@ -48,7 +49,7 @@ class HullMovingAverage:
         Compatibility with underlying ringbuffer for unwrapping.
         """
         return self.ringbuffer.as_array()
-    
+
     def initialize(self, arr_in: np.ndarray[float]) -> None:
         """
         Initializes the HMA calculator with a series of data points.
@@ -63,7 +64,7 @@ class HullMovingAverage:
         self.smooth_ema.ringbuffer.reset()
         self.long_ema.ringbuffer.reset()
         self.ringbuffer.reset()
-        
+
         self.value = arr_in[0]
         for val in arr_in:
             self.update(val)
@@ -81,12 +82,12 @@ class HullMovingAverage:
         if not self.fast:
             self.ringbuffer.append(self.value)
 
-    def __eq__(self, ema: 'HullMovingAverage') -> bool:
+    def __eq__(self, ema: "HullMovingAverage") -> bool:
         assert isinstance(ema, HullMovingAverage)
         return ema.as_array() == self.as_array()
-    
+
     def __len__(self) -> int:
         return len(self.ringbuffer)
-    
+
     def __getitem__(self, index: int) -> float:
         return self.ringbuffer[index]

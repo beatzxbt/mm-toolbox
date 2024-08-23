@@ -5,6 +5,7 @@ from typing import Optional
 
 from mm_toolbox.src.ringbuffer import RingBufferSingleDimFloat
 
+
 @jitclass
 class ExponentialMovingAverage:
     """
@@ -27,20 +28,20 @@ class ExponentialMovingAverage:
     ringbuffer : RingBufferF64
         A ring buffer to store EMA values history, activated if `fast` is False.
     """
-    
+
     window: uint32
     alpha: float64
     fast: bool_
     value: float64
     ringbuffer: RingBufferSingleDimFloat.class_type.instance_type
 
-    def __init__(self, window: int, alpha: Optional[float]=0.0, fast: bool=True):
+    def __init__(self, window: int, alpha: Optional[float] = 0.0, fast: bool = True):
         self.window = window
         self.alpha = alpha if alpha != 0.0 else 3.0 / (self.window + 1)
         self.fast = fast
         self.value = 0.0
         self.ringbuffer = RingBufferSingleDimFloat(self.window)
-    
+
     def _recursive_ema_(self, update: float) -> float:
         """
         Internal method to calculate the EMA given a new data point.
@@ -62,7 +63,7 @@ class ExponentialMovingAverage:
         Compatibility with underlying ringbuffer for unwrapping.
         """
         return self.ringbuffer.as_array()
-    
+
     def initialize(self, arr_in: np.ndarray[float]) -> None:
         """
         Initializes the EMA calculator with a series of data points.
@@ -75,7 +76,7 @@ class ExponentialMovingAverage:
         assert arr_in.ndim == 1
         self.ringbuffer.reset()
         self.value = arr_in[0]
-        
+
         if not self.fast:
             self.ringbuffer.append(self.value)
 
@@ -95,14 +96,12 @@ class ExponentialMovingAverage:
         if not self.fast:
             self.ringbuffer.append(self.value)
 
-    def __eq__(self, ema: 'ExponentialMovingAverage') -> bool:
+    def __eq__(self, ema: "ExponentialMovingAverage") -> bool:
         assert isinstance(ema, ExponentialMovingAverage)
         return ema.as_array() == self.as_array()
-    
+
     def __len__(self) -> int:
         return len(self.ringbuffer)
-    
+
     def __getitem__(self, index: int) -> float:
         return self.ringbuffer[index]
-    
-    

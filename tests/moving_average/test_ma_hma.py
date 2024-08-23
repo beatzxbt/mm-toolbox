@@ -3,6 +3,7 @@ import numpy as np
 
 from mm_toolbox.src.moving_average.hma import HullMovingAverage as HMA
 
+
 class TestHMA(unittest.TestCase):
     def setUp(self):
         self.window = 10
@@ -17,7 +18,7 @@ class TestHMA(unittest.TestCase):
         self.assertEqual(self.hma.value, 0.0)
         self.assertEqual(self.hma.short_ema.window, self.window // 2)
         self.assertEqual(self.hma.long_ema.window, self.window)
-        self.assertEqual(self.hma.smooth_ema.window, int(self.window ** 0.5))
+        self.assertEqual(self.hma.smooth_ema.window, int(self.window**0.5))
         self.assertEqual(len(self.hma.ringbuffer), 0)
 
     def test_class_initialization_fast(self):
@@ -26,7 +27,7 @@ class TestHMA(unittest.TestCase):
         self.assertEqual(self.fast_hma.value, 0.0)
         self.assertEqual(self.fast_hma.short_ema.window, self.window // 2)
         self.assertEqual(self.fast_hma.long_ema.window, self.window)
-        self.assertEqual(self.fast_hma.smooth_ema.window, int(self.window ** 0.5))
+        self.assertEqual(self.fast_hma.smooth_ema.window, int(self.window**0.5))
         self.assertEqual(len(self.fast_hma.ringbuffer), 0)
 
     def test_recursive_hma(self):
@@ -63,8 +64,9 @@ class TestHMA(unittest.TestCase):
         self.assertEqual(len(self.fast_hma.ringbuffer), 0)
 
     # Dunders, as well as .as_array() are not tested. The underlying RingBuffer
-    # already extensively tests these functionalities and HMA only acts as a buffer 
+    # already extensively tests these functionalities and HMA only acts as a buffer
     # and funnels arguments to the RingBuffer methods directly.
-    
-if __name__ == '__main__':
+
+
+if __name__ == "__main__":
     unittest.main()

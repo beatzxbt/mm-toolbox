@@ -24,12 +24,12 @@
 #         self.num_levels = 10
 #         self.orderbook = HFTOrderbook(self.tick_size, self.lot_size, self.num_levels)
 
-#     def helper_reset_warmup_orderbook(self): 
+#     def helper_reset_warmup_orderbook(self):
 #         self.orderbook.reset()
 #         self.orderbook.warmup_asks(101.0, 10.0)
 #         self.orderbook.warmup_bids(99.0, 10.0)
 #         self.orderbook.warmed_up = True
-    
+
 #     def test_initialization(self):
 #         # Tests that the order book initializes correctly
 #         self.assertEqual(self.orderbook.tick_size, 0.01)
@@ -60,14 +60,14 @@
 #         self.assertTrue(np.all(self.orderbook.bids == 0))
 #         self.assertEqual(self.orderbook.asks.shape, (10, 2))
 #         self.assertEqual(self.orderbook.bids.shape, (10, 2))
-    
+
 #     def test_warmup_asks(self):
 #         # Tests the warming up of the ask levels
 #         self.orderbook.reset()
 #         self.orderbook.warmup_asks(101.0, 0.9)
 
 #         self.assertTrue(self.orderbook.warmed_up)
-    
+
 #         # Check best ask is correct
 #         self.assertEqual(self.orderbook.asks[0, 0], self.orderbook.normalize(101.0, self.tick_size))
 #         self.assertEqual(self.orderbook.asks[0, 1], self.orderbook.normalize(0.9, self.lot_size))
@@ -75,14 +75,14 @@
 #         # Check worst ask is exactly best ask + number of levels & size is zero
 #         self.assertEqual(self.orderbook.asks[self.num_levels-1, 0], self.orderbook.asks[0, 0] - self.num_levels)
 #         self.assertEqual(self.orderbook.asks[self.num_levels-1, 1], self.orderbook.normalize(0.0, self.lot_size))
-        
+
 #     def test_warmup_bids(self):
 #         # Tests the warming up of the bid levels
 #         self.orderbook.warmup_bids(99.0, 7.1)
 #         self.orderbook.reset()
 
 #         self.assertTrue(self.orderbook.warmed_up)
-        
+
 #         # Check best bid is correct
 #         self.assertEqual(self.orderbook.bids[-1, 0], self.orderbook.normalize(99.0, self.tick_size))
 #         self.assertEqual(self.orderbook.bids[-1, 1], self.orderbook.normalize(7.1, self.lot_size))
@@ -112,26 +112,26 @@
 #         asks = np.array([[101.1, 9.3], [101.5, 95.0], [103.3, 59.1]], dtype=np.float64)
 #         bids = np.array([[99.0, 15.1], [98.4, 9.1], [97.9, 0.9]], dtype=np.float64)
 #         self.orderbook.ingest_l2_update(time_ms(), asks, bids)
-        
+
 #         # Define expected results for the first three levels of bids and asks
 #         expected_bids = [
 #             (self.orderbook.normalize(99.0, self.tick_size), self.orderbook.normalize(15.1, self.lot_size)),
 #             (self.orderbook.normalize(98.4, self.tick_size), self.orderbook.normalize(9.1, self.lot_size)),
 #             (self.orderbook.normalize(97.9, self.tick_size), self.orderbook.normalize(0.9, self.lot_size))
 #         ]
-        
+
 #         expected_asks = [
 #             (self.orderbook.normalize(101.1, self.tick_size), self.orderbook.normalize(9.3, self.lot_size)),
 #             (self.orderbook.normalize(101.5, self.tick_size), self.orderbook.normalize(95.0, self.lot_size)),
 #             (self.orderbook.normalize(103.3, self.tick_size), self.orderbook.normalize(59.1, self.lot_size))
 #         ]
-        
+
 #         # Check the first three levels of bids and asks
 #         for level in range(3):
 #             with self.subTest(level=level):
 #                 self.assertEqual(self.orderbook.bids[level, 0], expected_bids[level][0], "Bid price mismatch at level {level}")
 #                 self.assertEqual(self.orderbook.bids[level, 1], expected_bids[level][1], "Bid size mismatch at level {level}")
-                
+
 #                 self.assertEqual(self.orderbook.asks[level, 0], expected_asks[level][0], "Ask price mismatch at level {level}")
 #                 self.assertEqual(self.orderbook.asks[level, 1], expected_asks[level][1], "Ask size mismatch at level {level}")
 
@@ -140,7 +140,7 @@
 #         self.helper_reset_warmup_orderbook()
 #         ts, isBuy, price, size = (time_ms(), True, 101.0, 2.0)
 #         self.orderbook.ingest_trade_update(ts, isBuy, price, size)
-        
+
 #         self.assertEqual(self.orderbook.asks[0, 0], self.orderbook.normalize(101.0, self.tick_size))
 #         self.assertEqual(self.orderbook.asks[0, 1], self.orderbook.normalize(10.0-2.0, self.lot_size))
 
@@ -149,7 +149,7 @@
 #         self.helper_reset_warmup_orderbook()
 #         ts, isBuy, price, size = (time_ms(), False, 99.0, 2.0)
 #         self.orderbook.ingest_trade_update(ts, isBuy, price, size)
-        
+
 #         self.assertEqual(self.orderbook.asks[0, 0], self.orderbook.normalize(99.0, self.tick_size))
 #         self.assertEqual(self.orderbook.asks[0, 1], self.orderbook.normalize(10.0-2.0, self.lot_size))
 
@@ -187,7 +187,7 @@
 #         self.orderbook.ingest_trade_update(time_ms(), False, 98.4, 5.3)
 #         self.orderbook.ingest_trade_update(time_ms(), False, 98.2, 0.4) # NOTE: Simulating out of orderbook trade
 
-#         # Large L2 update 
+#         # Large L2 update
 #         asks = np.array([[98.5, 1.0], [98.7, 8.1], [98.9, 0.0], [99.7, 18.8]], dtype=np.float64)
 #         bids = np.array([[98.2, 3.1], [97.5, 5.3], [97.2, 0.19]], dtype=np.float64)
 #         self.orderbook.ingest_l2_update(time_ms(), asks, bids)
@@ -198,19 +198,19 @@
 #             (self.orderbook.normalize(97.5, self.tick_size), self.orderbook.normalize(5.3, self.lot_size)),
 #             (self.orderbook.normalize(97.2, self.tick_size), self.orderbook.normalize(0.19, self.lot_size))
 #         ]
-        
+
 #         expected_asks = [
 #             (self.orderbook.normalize(98.5, self.tick_size), self.orderbook.normalize(1.0, self.lot_size)),
 #             (self.orderbook.normalize(98.7, self.tick_size), self.orderbook.normalize(8.1, self.lot_size)),
 #             (self.orderbook.normalize(98.9, self.tick_size), self.orderbook.normalize(0.0, self.lot_size))
 #         ]
-        
+
 #         # Check the first three levels of bids and asks
 #         for level in range(3):
 #             with self.subTest(level=level):
 #                 self.assertEqual(self.orderbook.bids[level, 0], expected_bids[level][0], f"Bid price mismatch at level {level}")
 #                 self.assertEqual(self.orderbook.bids[level, 1], expected_bids[level][1], f"Bid size mismatch at level {level}")
-                
+
 #                 self.assertEqual(self.orderbook.asks[level, 0], expected_asks[level][0], f"Ask price mismatch at level {level}")
 #                 self.assertEqual(self.orderbook.asks[level, 1], expected_asks[level][1], f"Ask size mismatch at level {level}")
 
@@ -267,7 +267,7 @@
 #         asks = np.array([[101.1, 9.3], [101.5, 95.0], [103.3, 59.1]], dtype=np.float64)
 #         bids = np.array([[99.0, 15.1], [98.4, 9.1], [97.9, 7.9]], dtype=np.float64)
 #         self.orderbook.ingest_l2_update(time_ms(), asks, bids)
-#         slippage_bid = self.orderbook.get_slippage(self.orderbook.bids[::-1], 2500.0)  
+#         slippage_bid = self.orderbook.get_slippage(self.orderbook.bids[::-1], 2500.0)
 #         slippage_ask = self.orderbook.get_slippage(self.orderbook.asks, 2500.0)
 
 #         self.assertTrue(isinstance(slippage_bid, float))

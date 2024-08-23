@@ -9,8 +9,9 @@ from mm_toolbox.src.numba import (
     nbeig,
     nbsvd,
     nbqr,
-    nbcholesky
+    nbcholesky,
 )
+
 
 class TestNumbaLinalgFuncs(unittest.TestCase):
     def test_nbdot(self):
@@ -72,6 +73,7 @@ class TestNumbaLinalgFuncs(unittest.TestCase):
         np_result = np.linalg.cholesky(A)
         nb_result = nbcholesky(A)
         np.testing.assert_array_almost_equal(nb_result, np_result)
+
 
 if __name__ == "__main__":
     unittest.main()

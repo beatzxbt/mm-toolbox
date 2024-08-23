@@ -1,11 +1,12 @@
-import asyncio 
+import asyncio
 import unittest
 from unittest.mock import patch, AsyncMock
 
-from mm_toolbox.src.logging import Logger 
+from mm_toolbox.src.logging import Logger
 
-# Two commented out tests need working on, i'm finding difficultly to properly 
+# Two commented out tests need working on, i'm finding difficultly to properly
 # ensure their function. Any help is much appreciated!
+
 
 class TestLogger(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -28,7 +29,9 @@ class TestLogger(unittest.IsolatedAsyncioTestCase):
     @patch("mm_toolbox.src.logging.logger.Logger._message_", new_callable=AsyncMock)
     async def test_critical(self, mock_message):
         await self.logger.critical("test_topic", "test_message")
-        mock_message.assert_called_once_with("CRITICAL", "TEST_TOPIC", "test_message", flush_buffer=True)
+        mock_message.assert_called_once_with(
+            "CRITICAL", "TEST_TOPIC", "test_message", flush_buffer=True
+        )
 
     @patch("mm_toolbox.src.logging.logger.Logger._message_", new_callable=AsyncMock)
     async def test_debug(self, mock_message):
@@ -80,7 +83,9 @@ class TestLogger(unittest.IsolatedAsyncioTestCase):
         self.logger.tasks = [asyncio.create_task(asyncio.sleep(0))]
         self.logger.msgs = ["log message"]
 
-        with patch.object(self.logger, "_write_logs_to_file_", new_callable=AsyncMock) as mock_write_logs:
+        with patch.object(
+            self.logger, "_write_logs_to_file_", new_callable=AsyncMock
+        ) as mock_write_logs:
             await self.logger.shutdown()
 
             self.logger.discord_client.shutdown.assert_called_once()
@@ -88,7 +93,9 @@ class TestLogger(unittest.IsolatedAsyncioTestCase):
             mock_write_logs.assert_called_once()
 
     async def test_shutdown_no_clients(self):
-        with patch.object(self.logger, "_write_logs_to_file_", new_callable=AsyncMock) as mock_write_logs:
+        with patch.object(
+            self.logger, "_write_logs_to_file_", new_callable=AsyncMock
+        ) as mock_write_logs:
             await self.logger.shutdown()
             mock_write_logs.assert_not_called()
 

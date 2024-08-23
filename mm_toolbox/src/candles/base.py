@@ -7,11 +7,11 @@ from mm_toolbox.src.ringbuffer import RingBufferMultiDim
 
 class BaseCandles(ABC):
     """
-    A class to aggregate trades into pre-defined fixed buckets. 
-    
+    A class to aggregate trades into pre-defined fixed buckets.
+
     Format
     ---------
-    Candle[]: 
+    Candle[]:
         [0] = Open Price
         [1] = High Price
         [2] = Low Price
@@ -28,12 +28,13 @@ class BaseCandles(ABC):
     num_candles : int
         The number of candles to maintain in the ring buffer
     """
+
     def __init__(self, num_candles: int) -> None:
         self.num_candles = num_candles
 
         self.open_price = 0.0
-        self.high_price = -np.inf  
-        self.low_price = np.inf  
+        self.high_price = -np.inf
+        self.low_price = np.inf
         self.close_price = 0.0
         self.buy_volume = 0.0
         self.sell_volume = 0.0
@@ -45,10 +46,7 @@ class BaseCandles(ABC):
         self._cum_price_volume_ = 0.0
         self._total_volume_ = 0.0
 
-        self.ringbuffer = RingBufferMultiDim(
-            shape=(num_candles, 10),
-            dtype=np.float64
-        )
+        self.ringbuffer = RingBufferMultiDim(shape=(num_candles, 10), dtype=np.float64)
 
     def as_array(self) -> np.ndarray[np.ndarray]:
         """
@@ -61,35 +59,41 @@ class BaseCandles(ABC):
         """
         if not self.ringbuffer.is_empty:
             if self.open_timestamp != 0.0:
-                return np.concatenate((
-                    self.ringbuffer.as_array(),
-                    np.array([[
-                        self.open_price,
-                        self.high_price,
-                        self.low_price,
-                        self.close_price,
-                        self.buy_volume,
-                        self.sell_volume,
-                        self.vwap_price,
-                        self.total_trades,
-                        self.open_timestamp,
-                        self.close_timestamp
-                    ]])
-                ))
-            
+                return np.concatenate(
+                    (
+                        self.ringbuffer.as_array(),
+                        np.array(
+                            [
+                                [
+                                    self.open_price,
+                                    self.high_price,
+                                    self.low_price,
+                                    self.close_price,
+                                    self.buy_volume,
+                                    self.sell_volume,
+                                    self.vwap_price,
+                                    self.total_trades,
+                                    self.open_timestamp,
+                                    self.close_timestamp,
+                                ]
+                            ]
+                        ),
+                    )
+                )
+
             else:
                 return self.ringbuffer.as_array()
-        
+
         else:
             return np.array([[]], dtype=np.float64)
-    
+
     def reset_current_candle(self) -> None:
         """
         Resets the current candle data to its initial state.
         """
         self.open_price = 0.0
-        self.high_price = -np.inf  
-        self.low_price = np.inf  
+        self.high_price = -np.inf
+        self.low_price = np.inf
         self.close_price = 0.0
         self.buy_volume = 0.0
         self.sell_volume = 0.0
@@ -101,19 +105,19 @@ class BaseCandles(ABC):
 
         self._cum_price_volume_ = 0.0
         self._total_volume_ = 0.0
-    
+
     def insert_candle(
-        self, 
-        open_price: float, 
-        high_price: float, 
-        low_price: float, 
-        close_price: float, 
-        buy_volume: float, 
+        self,
+        open_price: float,
+        high_price: float,
+        low_price: float,
+        close_price: float,
+        buy_volume: float,
         sell_volume: float,
         vwap_price: float,
         total_trades: float,
         open_timestamp: float,
-        close_timestamp: float
+        close_timestamp: float,
     ) -> None:
         """
         Inserts a completed candle into the ring buffer and resets the current candle.
@@ -150,23 +154,27 @@ class BaseCandles(ABC):
         close_timestamp : float
             The close timestamp of the candle.
         """
-        current_candle = np.array([
-            open_price,
-            high_price,
-            low_price,
-            close_price,
-            buy_volume,
-            sell_volume,
-            vwap_price,
-            total_trades,
-            open_timestamp,
-            close_timestamp
-        ])
+        current_candle = np.array(
+            [
+                open_price,
+                high_price,
+                low_price,
+                close_price,
+                buy_volume,
+                sell_volume,
+                vwap_price,
+                total_trades,
+                open_timestamp,
+                close_timestamp,
+            ]
+        )
         self.ringbuffer.append(current_candle)
         self.reset_current_candle()
 
     @abstractmethod
-    def process_trade(self, timestamp: float, side: bool, price: float, size: float) -> None:
+    def process_trade(
+        self, timestamp: float, side: bool, price: float, size: float
+    ) -> None:
         """
         Processes a single trade tick and updates the current candle data.
 
@@ -185,7 +193,7 @@ class BaseCandles(ABC):
             The size (volume) of the trade.
         """
         pass
-    
+
     def initialize(self, trades: np.ndarray) -> None:
         """
         Initializes the candle data with a batch of trades.
@@ -200,8 +208,8 @@ class BaseCandles(ABC):
 
     def update(self, timestamp: float, side: bool, price: float, size: float) -> None:
         """
-        Updates the candle data with a new trade. Checks if the update is 
-        as a result of stale data being recieved or not. 
+        Updates the candle data with a new trade. Checks if the update is
+        as a result of stale data being recieved or not.
 
         Parameters
         ----------
@@ -224,15 +232,15 @@ class BaseCandles(ABC):
         self._cum_price_volume_ += price * size
         self._total_volume_ += size
         return self._cum_price_volume_ / self._total_volume_
-    
+
     def durations(self) -> np.ndarray[float]:
         candles = self.as_array()
         return candles[:, 9] - candles[:, 8]
-    
+
     def imbalances(self) -> np.ndarray[float]:
         candles = self.as_array()
         return candles[:, 4] / candles[:, 5]
-    
+
     def average_true_range(self) -> np.ndarray[float]:
         """
         Calculate the true range of a trading price bar.
@@ -252,19 +260,17 @@ class BaseCandles(ABC):
         if len(candles) < 2:
             return np.array([], dtype=np.float64)
 
-        high_low_diff = candles[:, 1] - candles[:, 2]  
-        high_prev_close_diff = np.abs(candles[1:, 1] - candles[:-1, 3])  
-        low_prev_close_diff = np.abs(candles[1:, 2] - candles[:-1, 3])  
+        high_low_diff = candles[:, 1] - candles[:, 2]
+        high_prev_close_diff = np.abs(candles[1:, 1] - candles[:-1, 3])
+        low_prev_close_diff = np.abs(candles[1:, 2] - candles[:-1, 3])
 
         # True Range is the maximum of the three calculated differences
-        true_range = np.maximum.reduce([
-            high_low_diff[1:], 
-            high_prev_close_diff, 
-            low_prev_close_diff
-        ])
+        true_range = np.maximum.reduce(
+            [high_low_diff[1:], high_prev_close_diff, low_prev_close_diff]
+        )
 
         return true_range
-    
+
     def rsi(self, period: int = 14) -> np.ndarray[float]:
         """
         Calculate the Relative Strength Index (RSI) for the given period.
@@ -282,7 +288,9 @@ class BaseCandles(ABC):
         close_prices = self.close_prices
 
         if period >= close_prices.size:
-            raise RuntimeWarning(f"Not enough candles for period {period}, calculating partial RSI only.")
+            raise RuntimeWarning(
+                f"Not enough candles for period {period}, calculating partial RSI only."
+            )
 
         delta = np.diff(close_prices, 1)
         gain = np.where(delta > 0.0, delta, 0.0)
@@ -302,10 +310,12 @@ class BaseCandles(ABC):
 
         rs = np.divide(avg_gain[1:], avg_loss[1:], where=avg_loss[1:] != 0)
         rsi = 100.0 - (100.0 / (1.0 + rs))
-        
+
         return rsi
-    
-    def bollinger_bands(self, period: int = 20, num_std_dev: float = 2.0) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+
+    def bollinger_bands(
+        self, period: int = 20, num_std_dev: float = 2.0
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Calculate Bollinger Bands (BB) for the given period.
 
@@ -324,32 +334,34 @@ class BaseCandles(ABC):
         """
         close_prices = self.as_array()[:, 3]
 
-        sma = np.convolve(close_prices, np.ones(period) / period, mode='valid')
+        sma = np.convolve(close_prices, np.ones(period) / period, mode="valid")
         rolling_std = np.zeros_like(sma)
 
         for i in range(sma.size):
-            rolling_std[i] = np.std(close_prices[i:i + period])
+            rolling_std[i] = np.std(close_prices[i : i + period])
 
         upper_band = sma + num_std_dev * rolling_std
         lower_band = sma - num_std_dev * rolling_std
 
         return lower_band, sma, upper_band
-    
+
     @property
     def current_candle(self) -> np.ndarray[float]:
-        return np.array([
-            self.open_price,
-            self.high_price,
-            self.low_price,
-            self.close_price,
-            self.buy_volume,
-            self.sell_volume,
-            self.vwap_price,
-            self.total_trades,
-            self.open_timestamp,
-            self.close_timestamp
-        ])
-    
+        return np.array(
+            [
+                self.open_price,
+                self.high_price,
+                self.low_price,
+                self.close_price,
+                self.buy_volume,
+                self.sell_volume,
+                self.vwap_price,
+                self.total_trades,
+                self.open_timestamp,
+                self.close_timestamp,
+            ]
+        )
+
     @property
     def open_prices(self) -> np.ndarray[float]:
         if not self.ringbuffer.is_empty:
@@ -389,12 +401,12 @@ class BaseCandles(ABC):
     def all_trades(self) -> np.ndarray[float]:
         if not self.ringbuffer.is_empty:
             return self.as_array()[:, 7]
-    
+
     def __getitem__(self, index: Union[int, Tuple]) -> np.ndarray:
         return self.as_array()[index]
-    
+
     def __len__(self) -> int:
         return len(self.ringbuffer)
-    
+
     def __iter__(self) -> Iterator[np.ndarray]:
         return iter(self.as_array())
