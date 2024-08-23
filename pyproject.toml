@@ -28,9 +28,9 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = ">=3.10.0,<3.13"
-numpy = "^2.1.0"
-numba = "^0.60.0"
-scipy = "^1.14.0"
+numpy = "2.0.0"
+numba = "0.60.0"
+scipy = "1.14.0"
 orjson = "^3.10.7"
 aiofiles = "^24.1.0"
 aiosonic = "^0.21.0"
