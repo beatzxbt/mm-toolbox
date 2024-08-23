@@ -14,7 +14,7 @@ def read_requirements() -> List[str]:
 
 NAME = "mm_toolbox"
 VERSION = __VERSION__
-DESCRIPTION = "python toolbox of fast mm-related funcs"
+DESCRIPTION = "high-performance python tools for market making strategies."
 LONG_DESCRIPTION = readme()
 LONG_DESCRIPTION_CONTENT_TYPE = "text/markdown"
 URL = "https://github.com/beatzxbt/mm-toolbox"
