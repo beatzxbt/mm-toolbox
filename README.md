@@ -58,7 +58,7 @@ ob = Orderbook(size=100)
 ## Planned additions/upgrades
 
 ### v0.2.0
-**Numba**: Complete coverage of [Numba's top-level functions](https://numba.readthedocs.io/en/stable/reference/numpysupported.html#other-functions)
+**Numba**: Complete coverage of [Numba's top-level functions](https://numba.readthedocs.io/en/stable/reference/numpysupported.html#other-functions) (with custom implementation if faster).
 
 **Orderbook**: Directly update BBA, Imbalance Feature, ++Performance
 
