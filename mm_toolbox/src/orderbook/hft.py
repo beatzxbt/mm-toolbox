@@ -79,7 +79,7 @@
 #         else:
 #             return mid
 
-#     return max_len  
+#     return max_len
 
 # @njit(["void(uint32[:, :], uint32[:, :], uint32[:, :])"], error_model="numpy", fastmath=True)
 # def process_full_l2_bids(bids: np.ndarray, asks: np.ndarray, updates: np.ndarray) -> None:
@@ -112,10 +112,10 @@
 #     None
 #     """
 
-#     bid_len = bids.shape[0]            
-#     best_price = bids[-1, 0]               
-#     worst_price = bids[0, 0]               
-#     start_idx = bid_len - 1         
+#     bid_len = bids.shape[0]
+#     best_price = bids[-1, 0]
+#     worst_price = bids[0, 0]
+#     start_idx = bid_len - 1
 
 #     # Hard assumption that its ordered low -> high
 #     for update in updates[::-1]:
@@ -142,19 +142,19 @@
 #                 bids[idx, 1] = 0
 
 #             bids[-1, 1] = size
-            
+
 #             # If price overlaps with any asks, roll asks to the right
 #             best_ask_price = asks[0, 0]
 
 #             if price > best_ask_price:
-#                 num_new_levels = price - best_ask_price        
-#                 asks[:-num_new_levels] = asks[num_new_levels:] 
+#                 num_new_levels = price - best_ask_price
+#                 asks[:-num_new_levels] = asks[num_new_levels:]
 #                 start_idx = asks.shape[0] - num_new_levels
 
-#                 for i in range(1, num_new_levels + 1):   
-#                     idx = start_idx + i     
-#                     asks[idx, 0] = asks[idx-1, 0] + 1            
-#                     asks[idx, 1] = 0                             
+#                 for i in range(1, num_new_levels + 1):
+#                     idx = start_idx + i
+#                     asks[idx, 0] = asks[idx-1, 0] + 1
+#                     asks[idx, 1] = 0
 
 #         # Check (c)
 #         elif price >= worst_price:
@@ -225,19 +225,19 @@
 #                 asks[idx, 0] = best_price - i
 #                 asks[idx, 1] = 0
 
-#             asks[0, 1] = size 
-            
+#             asks[0, 1] = size
+
 #             # If price overlaps with any bids, roll bids to the left
 #             best_bid_price = bids[0, 0]
 
 #             if price < best_bid_price:
-#                 num_new_levels = best_bid_price - price   
+#                 num_new_levels = best_bid_price - price
 #                 bids[num_new_levels:] = bids[:-num_new_levels]
 
-#                 for i in range(1, num_new_levels + 1):      
-#                     idx = num_new_levels - i   
-#                     bids[idx, 0] = bids[idx+1, 0] - 1          
-#                     bids[idx, 1] = 0  
+#                 for i in range(1, num_new_levels + 1):
+#                     idx = num_new_levels - i
+#                     bids[idx, 0] = bids[idx+1, 0] - 1
+#                     bids[idx, 1] = 0
 
 #         # Step (c)
 #         elif price < worst_price:
@@ -326,7 +326,7 @@
 
 #     if sides_updated == 2:
 #         return None
-    
+
 #     bid_price_greater = best_bid_price > updated_bid_price
 #     ask_price_greater = best_ask_price > updated_ask_price
 #     bid_price_lower = best_bid_price < updated_bid_price
@@ -341,19 +341,19 @@
 #             asks[idx, 0] = best_price - i
 #             asks[idx, 1] = 0
 
-#         asks[0, 1] = updated_size 
-            
+#         asks[0, 1] = updated_size
+
 #         # If price overlaps with any bids, roll bids to the left
 #         best_bid_price = bids[0, 0]
 
 #         if updated_price < best_bid_price:
-#             num_new_levels = best_bid_price - updated_price   
+#             num_new_levels = best_bid_price - updated_price
 #             bids[num_new_levels:] = bids[:-num_new_levels]
 
-#             for i in range(1, num_new_levels + 1):      
-#                 idx = num_new_levels - i   
-#                 bids[idx, 0] = bids[idx+1, 0] - 1          
-#                 bids[idx, 1] = 0  
+#             for i in range(1, num_new_levels + 1):
+#                 idx = num_new_levels - i
+#                 bids[idx, 0] = bids[idx+1, 0] - 1
+#                 bids[idx, 1] = 0
 
 
 # @jitclass
@@ -374,10 +374,10 @@
 #         ----------
 #         tick_size : float
 #             The tick size for price normalization.
-            
+
 #         lot_size : float
 #             The lot size for size normalization.
-            
+
 #         num_levels : int
 #             The number of price levels to maintain in the order book.
 #         """
@@ -420,7 +420,7 @@
 #             The normalized integer value.
 #         """
 #         return round(num / step)
-    
+
 #     def normalize_book(self, orderbook: np.ndarray) -> np.ndarray:
 #         """
 #         Normalizes the order book array by normalizing the prices and sizes.
@@ -438,7 +438,7 @@
 #         orderbook[:, 0] = np.rint(orderbook[:, 0] / self.tick_size)
 #         orderbook[:, 1] = np.rint(orderbook[:, 1] / self.lot_size)
 #         return orderbook.astype(uint32)
-    
+
 #     def denormalize(self, num: int, step: float) -> float:
 #         """
 #         Denormalizes a number by multiplying it with a step value.
@@ -447,13 +447,13 @@
 #         ----------
 #         num : int
 #             The integer to be denormalized.
-            
+
 #         step : float
 #             The step size used for denormalization.
 
 #         Returns
 #         -------
-#         float 
+#         float
 #             The denormalized float value.
 #         """
 #         return num * step
@@ -476,7 +476,7 @@
 #         denormalized_book[:, 0] = self.denormalize(orderbook[:, 0], self.tick_size)
 #         denormalized_book[:, 1] = self.denormalize(orderbook[:, 1], self.lot_size)
 #         return denormalized_book
-        
+
 #     def warmup(self, new_bids: np.ndarray, new_asks: np.ndarray) -> None:
 #         """
 #         Initializes the order book with initial bid and ask updates.
@@ -486,31 +486,31 @@
 #         1. Identify the best bid and best ask prices and sizes from the updates.
 #         - The best bid is the bid with the highest price.
 #         - The best ask is the ask with the lowest price.
-        
+
 #         2. Normalize the best bid and best ask prices using the tick size.
 #         - Normalization involves dividing the prices by the tick size and rounding to the nearest integer.
-        
+
 #         3. Initialize the bid side of the order book.
 #         - Set the starting bid price as the normalized best bid price.
 #         - Set the stopping bid price as the starting bid price minus the number of levels.
 #         - Create a range of bid prices from the starting bid price to the stopping bid price, in reverse order.
 #         - Assign these prices to the first column of the bids array.
 #         - Set the size of the best bid level (last level) to the normalized best bid size.
-        
+
 #         4. Initialize the ask side of the order book.
 #         - Set the starting ask price as the normalized best ask price.
 #         - Set the stopping ask price as the starting ask price plus the number of levels.
 #         - Create a range of ask prices from the starting ask price to the stopping ask price.
 #         - Assign these prices to the first column of the asks array.
 #         - Set the size of the best ask level (first level) to the normalized best ask size.
-        
+
 #         5. Mark the order book as warmed up by setting the warmed_up attribute to True.
 
 #         Parameters
 #         ----------
 #         new_bids : np.ndarray
 #             An array of initial bid prices and sizes.
-            
+
 #         new_asks : np.ndarray
 #             An array of initial ask prices and sizes.
 
@@ -536,9 +536,9 @@
 #     def ingest_bbo_update(self, bid_price: float, bid_size: float, ask_price: float, ask_size: float) -> None:
 #         if not self.warmed_up:
 #             raise Exception("Orderbook is not warmed up!")
-        
+
 #         process_bbo_l2(
-#             bids=self.bids, 
+#             bids=self.bids,
 #             asks=self.asks,
 #             updated_bid_price=self.normalize(bid_price),
 #             updated_bid_size=self.normalize(bid_size),
@@ -563,7 +563,7 @@
 #             raise Exception("Orderbook is not warmed up!")
 
 #         process_full_l2_bids(
-#             bids=self.bids, 
+#             bids=self.bids,
 #             asks=self.asks,
 #             updates=self.normalize_book(update_bids)
 #         )
@@ -583,16 +583,16 @@
 #         """
 #         if not self.warmed_up:
 #             raise Exception("Orderbook is not warmed up!")
-        
+
 #         process_full_l2_asks(
-#             bids=self.bids, 
+#             bids=self.bids,
 #             asks=self.asks,
 #             updates=self.normalize_book(update_asks)
 #         )
 
 #     def get_bids(self) -> np.ndarray:
 #         return self.denormalize_book(self.bids)
-    
+
 #     def get_asks(self) -> np.ndarray:
 #         return self.denormalize_book(self.asks)
 
@@ -606,10 +606,10 @@
 #             A tuple containing the best bid price and size, both denormalized.
 #         """
 #         return (
-#             self.round.bid(self.denormalize(self.bids[-1, 0], self.tick_size)), 
+#             self.round.bid(self.denormalize(self.bids[-1, 0], self.tick_size)),
 #             self.round.size(self.denormalize(self.bids[-1, 1], self.lot_size))
 #         )
-    
+
 #     def get_best_ask(self) -> Tuple[float, float]:
 #         """
 #         Retrieves the best ask price and size from the order book.
@@ -620,7 +620,7 @@
 #             A tuple containing the best ask price and size, both denormalized.
 #         """
 #         return (
-#             self.denormalize(self.asks[0, 0], self.tick_size), 
+#             self.denormalize(self.asks[0, 0], self.tick_size),
 #             self.denormalize(self.asks[0, 1], self.lot_size)
 #         )
 
@@ -638,7 +638,7 @@
 
 #     def get_wmid_price(self) -> float:
 #         """
-#         Calculates the weighted mid price of the order book, considering the volume imbalance 
+#         Calculates the weighted mid price of the order book, considering the volume imbalance
 #         between the best bid and best ask.
 
 #         Returns
@@ -649,7 +649,7 @@
 #         imb = self.bids[-1, 1] / (self.bids[-1, 1] + self.asks[0, 1])
 #         wmid_price = self.bids[-1, 0] * imb + self.asks[0, 0] * (1.0 - imb)
 #         return self.denormalize(wmid_price, self.tick_size)
-    
+
 #     def get_vamp(self, dollar_depth: float) -> float:
 #         """
 #         Calculates the volume-weighted average market price (VAMP) up to a specified dollar depth for both bids and asks.
@@ -668,9 +668,9 @@
 #         ask_dollar_weighted_sum = 0.0
 #         bid_dollar_cum = 0.0
 #         ask_dollar_cum = 0.0
-        
+
 #         # Indexed backwards for best -> worst order
-#         for price, size in self.denormalize_book(self.bids[::-1]): 
+#         for price, size in self.denormalize_book(self.bids[::-1]):
 #             order_value = price * size
 #             if bid_dollar_cum + order_value > dollar_depth:
 #                 remaining_value = dollar_depth - bid_dollar_cum
@@ -680,10 +680,10 @@
 
 #             bid_dollar_weighted_sum += order_value
 #             bid_dollar_cum += order_value
-            
+
 #             if bid_dollar_cum >= dollar_depth:
 #                 break
-        
+
 #         for price, size in self.denormalize_book(self.asks):
 #             order_value = price * size
 #             if ask_dollar_cum + order_value > dollar_depth:
@@ -702,7 +702,7 @@
 
 #         if total_dollar == 0:
 #             return 0.0
-        
+
 #         return (bid_dollar_weighted_sum + ask_dollar_weighted_sum) / total_dollar
 
 #     def get_spread(self) -> float:
@@ -715,7 +715,7 @@
 #             The spread, defined as the difference between the best ask and the best bid prices.
 #         """
 #         return self.denormalize(self.asks[0, 0] - self.bids[-1, 0], self.tick_size)
-    
+
 #     def get_slippage(self, book: np.ndarray, dollar_depth: float) -> float:
 #         """
 #         Calculates the slippage cost for a hypothetical order of a given dollar depth, based on either the bid or ask side of the book.

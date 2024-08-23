@@ -1,9 +1,7 @@
 import unittest
 import numpy as np
-from mm_toolbox.src.ringbuffer import (
-    RingBufferSingleDimFloat, 
-    RingBufferSingleDimInt
-)
+from mm_toolbox.src.ringbuffer import RingBufferSingleDimFloat, RingBufferSingleDimInt
+
 
 class TestRingBufferSingleDimFloat(unittest.TestCase):
     def setUp(self):
@@ -29,7 +27,9 @@ class TestRingBufferSingleDimFloat(unittest.TestCase):
         self.buffer.append(10.0)
 
         self.assertEqual(len(self.buffer), self.buffer_capacity)
-        self.assertEqual(self.buffer[0], 1.0)  # The first element should have been overwritten
+        self.assertEqual(
+            self.buffer[0], 1.0
+        )  # The first element should have been overwritten
 
     def test_popright(self):
         for i in range(self.buffer_capacity):
@@ -60,7 +60,7 @@ class TestRingBufferSingleDimFloat(unittest.TestCase):
 
     def test_invalid_append(self):
         # This test is obvious, but it's result is important as
-        # this is intended unsafe behaviour. 
+        # this is intended unsafe behaviour.
         with self.assertRaises(Exception):
             self.buffer.append("invalid_type")
 
@@ -162,7 +162,9 @@ class TestRingBufferSingleDimInt(unittest.TestCase):
         self.buffer.append(10)
 
         self.assertEqual(len(self.buffer), self.buffer_capacity)
-        self.assertEqual(self.buffer[0], 1)  # The first element should have been overwritten
+        self.assertEqual(
+            self.buffer[0], 1
+        )  # The first element should have been overwritten
 
     def test_popright(self):
         for i in range(self.buffer_capacity):
@@ -193,7 +195,7 @@ class TestRingBufferSingleDimInt(unittest.TestCase):
 
     def test_invalid_append(self):
         # This test is obvious, but it's result is important as
-        # this is intended unsafe behaviour. 
+        # this is intended unsafe behaviour.
         with self.assertRaises(Exception):
             self.buffer.append("invalid_type")
 
@@ -270,5 +272,6 @@ class TestRingBufferSingleDimInt(unittest.TestCase):
         expected = np.array([5, 6, 7, 8, 9])
         np.testing.assert_array_equal(self.buffer.as_array(), expected)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

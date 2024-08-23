@@ -3,6 +3,7 @@ from numba import njit
 from numba.types import float64
 from typing import Optional
 
+
 @njit(error_model="numpy", fastmath=True)
 def geometric_weights(num: int, r: Optional[float] = 0.75) -> np.ndarray[float]:
     """

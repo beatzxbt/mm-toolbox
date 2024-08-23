@@ -3,11 +3,12 @@ from numba.types import uint32, int64, float64
 from numba.experimental import jitclass
 from typing import Tuple
 
+
 @jitclass
 class RingBufferSingleDimFloat:
     """
     A 1-dimensional fixed-size circular buffer, only supporting
-    floats. Optimized for super high performance, sacrificing 
+    floats. Optimized for super high performance, sacrificing
     safety and ease of use. Be careful!
 
     Parameters
@@ -16,11 +17,12 @@ class RingBufferSingleDimFloat:
         The shape of the ring buffer. If an integer is provided, it
         specifies the capacity. If a tuple is provided, it specifies
         the shape including the capacity as the first element.
-        
+
     dtype : data-type, optional
         Desired type of buffer elements. Use a type like (float, 2) to
         produce a buffer with shape (N, 2). Default is np.float64.
     """
+
     capacity: uint32
     _left_index_: uint32
     _right_index_: uint32
@@ -39,7 +41,7 @@ class RingBufferSingleDimFloat:
     @property
     def is_empty(self) -> bool:
         return self._left_index_ == 0 and self._right_index_ == 0
-    
+
     @property
     def dtype(self) -> np.dtype:
         return np.float64
@@ -58,12 +60,14 @@ class RingBufferSingleDimFloat:
             A numpy array containing the unwrapped buffer data.
         """
         if self._right_index_ <= self.capacity:
-            return self._array_[self._left_index_:self._right_index_]
-        
-        return np.concatenate((
-            self._array_[self._left_index_:], 
-            self._array_[:self._right_index_ % self.capacity]
-        ))
+            return self._array_[self._left_index_ : self._right_index_]
+
+        return np.concatenate(
+            (
+                self._array_[self._left_index_ :],
+                self._array_[: self._right_index_ % self.capacity],
+            )
+        )
 
     def _fix_indices_(self) -> None:
         """
@@ -151,32 +155,34 @@ class RingBufferSingleDimFloat:
         self._left_index_ = 0
         self._right_index_ = 0
         return res
-    
+
     def __contains__(self, num: float) -> bool:
         return np.any(num == self._array_)
 
-    def __eq__(self, ringbuffer: 'RingBufferSingleDimFloat') -> bool:
+    def __eq__(self, ringbuffer: "RingBufferSingleDimFloat") -> bool:
         assert isinstance(ringbuffer, RingBufferSingleDimFloat)
         return np.array_equal(ringbuffer.as_array(), self.as_array())
-    
+
     def __len__(self) -> int:
         return self._right_index_ - self._left_index_
 
     def __getitem__(self, item: int) -> float:
         return self.as_array()[item]
-    
+
     def __str__(self) -> str:
-        return (f"RingBufferSingleDimFloat(capacity={self.capacity}, "
-                f"dtype=float64, "
-                f"current_length={len(self)}, "
-                f"data={self.as_array()})")
-    
+        return (
+            f"RingBufferSingleDimFloat(capacity={self.capacity}, "
+            f"dtype=float64, "
+            f"current_length={len(self)}, "
+            f"data={self.as_array()})"
+        )
+
 
 @jitclass
 class RingBufferSingleDimInt:
     """
     A 1-dimensional fixed-size circular buffer, only supporting
-    ints. Optimized for super high performance, sacrificing 
+    ints. Optimized for super high performance, sacrificing
     safety and ease of use. Be careful!
 
     Parameters
@@ -185,11 +191,12 @@ class RingBufferSingleDimInt:
         The shape of the ring buffer. If an integer is provided, it
         specifies the capacity. If a tuple is provided, it specifies
         the shape including the capacity as the first element.
-        
+
     dtype : data-type, optional
         Desired type of buffer elements. Use a type like (int, 2) to
         produce a buffer with shape (N, 2). Default is np.int64.
     """
+
     capacity: uint32
     _left_index_: uint32
     _right_index_: uint32
@@ -208,7 +215,7 @@ class RingBufferSingleDimInt:
     @property
     def is_empty(self) -> bool:
         return self._left_index_ == 0 and self._right_index_ == 0
-    
+
     @property
     def dtype(self) -> np.dtype:
         return np.int64
@@ -227,12 +234,14 @@ class RingBufferSingleDimInt:
             A numpy array containing the unwrapped buffer data.
         """
         if self._right_index_ <= self.capacity:
-            return self._array_[self._left_index_:self._right_index_]
-        
-        return np.concatenate((
-            self._array_[self._left_index_:], 
-            self._array_[:self._right_index_ % self.capacity]
-        ))
+            return self._array_[self._left_index_ : self._right_index_]
+
+        return np.concatenate(
+            (
+                self._array_[self._left_index_ :],
+                self._array_[: self._right_index_ % self.capacity],
+            )
+        )
 
     def _fix_indices_(self) -> None:
         """
@@ -320,22 +329,24 @@ class RingBufferSingleDimInt:
         self._left_index_ = 0
         self._right_index_ = 0
         return res
-    
+
     def __contains__(self, num: int) -> bool:
         return np.any(num == self._array_)
 
-    def __eq__(self, ringbuffer: 'RingBufferSingleDimInt') -> bool:
+    def __eq__(self, ringbuffer: "RingBufferSingleDimInt") -> bool:
         assert isinstance(ringbuffer, RingBufferSingleDimInt)
         return np.array_equal(ringbuffer.as_array(), self.as_array())
-    
+
     def __len__(self) -> int:
         return self._right_index_ - self._left_index_
 
     def __getitem__(self, item: int) -> int:
         return self.as_array()[item]
-    
+
     def __str__(self) -> str:
-        return (f"RingBufferSingleDimInt(capacity={self.capacity}, "
-                f"dtype=int64, "
-                f"current_length={len(self)}, "
-                f"data={self.as_array()})")
+        return (
+            f"RingBufferSingleDimInt(capacity={self.capacity}, "
+            f"dtype=int64, "
+            f"current_length={len(self)}, "
+            f"data={self.as_array()})"
+        )

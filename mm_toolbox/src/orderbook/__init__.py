@@ -10,7 +10,7 @@
 # -> faster normalization/denormalization: https://tbetcke.github.io/hpc_lecture_notes/working_with_numba.html (specifically for div)
 # -> hybrid linear-binary search algorithms (cutoff point ~70?)
 # -> bug-fixing for orderbook.display_internal() in denormalizing arrays prior to display
-# -> get_bids() and get_asks() funcs which auto denormalize all arrays 
+# -> get_bids() and get_asks() funcs which auto denormalize all arrays
 # -> perform orderbook indicators on pure uints before final, single denormalization
 # -> assert array shape at compile time for better memory access: https://stackoverflow.com/questions/67743726/numba-fast-math-does-not-improve-speed
 

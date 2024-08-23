@@ -6,6 +6,7 @@ from mm_toolbox.src.logging.discord import DiscordClient
 from mm_toolbox.src.logging.telegram import TelegramClient
 from mm_toolbox.src.time import time_iso8601
 
+
 class Logger:
     def __init__(
         self,
@@ -19,9 +20,7 @@ class Logger:
         self.send_to_discord = bool(os.getenv("DISCORD_WEBHOOK"))
         if self.send_to_discord:
             self.discord_client = DiscordClient()
-            self.discord_client.start(
-                webhook=os.getenv("DISCORD_WEBHOOK")
-            )
+            self.discord_client.start(webhook=os.getenv("DISCORD_WEBHOOK"))
 
         self.send_to_telegram = bool(
             os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_CHAT_ID")
@@ -29,8 +28,8 @@ class Logger:
         if self.send_to_telegram:
             self.telegram_client = TelegramClient()
             self.telegram_client.start(
-                bot_token=os.getenv("TELEGRAM_BOT_TOKEN"), 
-                chat_id=os.getenv("TELEGRAM_CHAT_ID")
+                bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),
+                chat_id=os.getenv("TELEGRAM_CHAT_ID"),
             )
 
         self.tasks = []
@@ -52,7 +51,9 @@ class Logger:
         finally:
             self.msgs.clear()
 
-    async def _message_(self, level: str, topic: str, msg: str, flush_buffer: bool=False) -> None:
+    async def _message_(
+        self, level: str, topic: str, msg: str, flush_buffer: bool = False
+    ) -> None:
         """
         Log a message with a specified logging level.
 
@@ -74,11 +75,15 @@ class Logger:
         formatted_msg = f"{time_iso8601()} | {level} | {topic} | {msg}"
 
         if self.send_to_discord:
-            task = asyncio.create_task(self.discord_client.send(formatted_msg, flush_buffer))
+            task = asyncio.create_task(
+                self.discord_client.send(formatted_msg, flush_buffer)
+            )
             self.tasks.append(task)
 
         if self.send_to_telegram:
-            task = asyncio.create_task(self.telegram_client.send(formatted_msg, flush_buffer))
+            task = asyncio.create_task(
+                self.telegram_client.send(formatted_msg, flush_buffer)
+            )
             self.tasks.append(task)
 
         print(formatted_msg)

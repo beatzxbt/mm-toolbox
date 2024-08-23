@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
-from mm_toolbox.src.weights import geometric_weights  
+from mm_toolbox.src.weights import geometric_weights
+
 
 class TestGeometricWeights(unittest.TestCase):
     def test_default_ratio(self):
@@ -26,5 +27,6 @@ class TestGeometricWeights(unittest.TestCase):
         self.assertEqual(len(result), 100)
         self.assertAlmostEqual(result.sum(), 1.0)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
