@@ -60,23 +60,25 @@ class BaseCandles(ABC):
             The array of aggregated candle data.
         """
         if not self.ringbuffer.is_empty:
-            current_candle = np.array([[
-                self.open_price,
-                self.high_price,
-                self.low_price,
-                self.close_price,
-                self.buy_volume,
-                self.sell_volume,
-                self.vwap_price,
-                self.total_trades,
-                self.open_timestamp,
-                self.close_timestamp
-            ]])
-
-            return np.concatenate((
-                self.ringbuffer.as_array(),
-                current_candle
-            ))
+            if self.open_timestamp != 0.0:
+                return np.concatenate((
+                    self.ringbuffer.as_array(),
+                    np.array([[
+                        self.open_price,
+                        self.high_price,
+                        self.low_price,
+                        self.close_price,
+                        self.buy_volume,
+                        self.sell_volume,
+                        self.vwap_price,
+                        self.total_trades,
+                        self.open_timestamp,
+                        self.close_timestamp
+                    ]])
+                ))
+            
+            else:
+                return self.ringbuffer.as_array()
         
         else:
             return np.array([[]], dtype=np.float64)
@@ -277,27 +279,31 @@ class BaseCandles(ABC):
         np.ndarray
             The RSI values for each candle.
         """
-        close_prices = self.as_array()[:, 3]
+        close_prices = self.close_prices
 
-        delta = np.diff(close_prices)
+        if period >= close_prices.size:
+            raise RuntimeWarning(f"Not enough candles for period {period}, calculating partial RSI only.")
+
+        delta = np.diff(close_prices, 1)
         gain = np.where(delta > 0.0, delta, 0.0)
         loss = np.where(delta < 0.0, -delta, 0.0)
 
         avg_gain = np.zeros_like(close_prices)
         avg_loss = np.zeros_like(close_prices)
 
-        avg_gain[period] = np.mean(gain[:period])
-        avg_loss[period] = np.mean(loss[:period])
+        for i in range(1, period):
+            # Partial RSI is just previous price's SMA
+            avg_gain[i] = gain[:i].mean()
+            avg_loss[i] = loss[:i].mean()
 
-        for i in range(period, len(delta)):
+        for i in range(period, len(close_prices) - 1):
             avg_gain[i] = (avg_gain[i - 1] * (period - 1.0) + gain[i]) / period
             avg_loss[i] = (avg_loss[i - 1] * (period - 1.0) + loss[i]) / period
 
-        rs = avg_gain[period:] / avg_loss[period:]
-        rsi = np.zeros_like(close_prices)
-        rsi[period:] = 100.0 - (100.0 / (1.0 + rs))
-
-        return rsi[period:]
+        rs = np.divide(avg_gain[1:], avg_loss[1:], where=avg_loss[1:] != 0)
+        rsi = 100.0 - (100.0 / (1.0 + rs))
+        
+        return rsi
     
     def bollinger_bands(self, period: int = 20, num_std_dev: float = 2.0) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -344,20 +350,51 @@ class BaseCandles(ABC):
             self.close_timestamp
         ])
     
+    @property
+    def open_prices(self) -> np.ndarray[float]:
+        if not self.ringbuffer.is_empty:
+            return self.as_array()[:, 0]
+
+    @property
+    def high_prices(self) -> np.ndarray[float]:
+        if not self.ringbuffer.is_empty:
+            return self.as_array()[:, 1]
+
+    @property
+    def low_prices(self) -> np.ndarray[float]:
+        if not self.ringbuffer.is_empty:
+            return self.as_array()[:, 2]
+
+    @property
+    def close_prices(self) -> np.ndarray[float]:
+        if not self.ringbuffer.is_empty:
+            return self.as_array()[:, 3]
+
+    @property
+    def buy_volumes(self) -> np.ndarray[float]:
+        if not self.ringbuffer.is_empty:
+            return self.as_array()[:, 4]
+
+    @property
+    def sell_volumes(self) -> np.ndarray[float]:
+        if not self.ringbuffer.is_empty:
+            return self.as_array()[:, 5]
+
+    @property
+    def vwap_prices(self) -> np.ndarray[float]:
+        if not self.ringbuffer.is_empty:
+            return self.as_array()[:, 6]
+
+    @property
+    def all_trades(self) -> np.ndarray[float]:
+        if not self.ringbuffer.is_empty:
+            return self.as_array()[:, 7]
+    
     def __getitem__(self, index: Union[int, Tuple]) -> np.ndarray:
-        return self.ringbuffer.as_array()[index]
+        return self.as_array()[index]
     
     def __len__(self) -> int:
         return len(self.ringbuffer)
     
     def __iter__(self) -> Iterator[np.ndarray]:
-        """
-        Return an iterator over the candles.
-
-        Returns
-        -------
-        iterator
-            An iterator over the candles.
-        """
         return iter(self.as_array())
-    

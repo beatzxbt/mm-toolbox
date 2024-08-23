@@ -7,7 +7,7 @@ class TickCandles(BaseCandles):
         super().__init__(num_candles)
         
     def process_trade(self, timestamp: float, side: bool, price: float, size: float) -> None:
-        if self.trade_count == 0.0:
+        if self.total_trades == 0.0:
             self.open_timestamp = timestamp
             self.open_price = price
 
@@ -24,10 +24,9 @@ class TickCandles(BaseCandles):
 
         self.vwap_price = self.calculate_vwap(price, size) 
         self.total_trades += 1
+        self.close_timestamp = timestamp
 
-        if self.trade_count >= self.ticks_per_bucket:
-            self.close_timestamp = timestamp
-
+        if self.total_trades >= self.ticks_per_bucket:
             self.insert_candle(
                 open_price=self.open_price,
                 high_price=self.high_price,

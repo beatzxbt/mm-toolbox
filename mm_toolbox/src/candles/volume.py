@@ -24,13 +24,12 @@ class VolumeCandles(BaseCandles):
 
         self.vwap_price = self.calculate_vwap(price, size) 
         self.total_trades += 1.0
-
+        self.close_timestamp = timestamp
+        
         total_volume = self.buy_volume + self.sell_volume
 
         if total_volume >= self.volume_per_bucket:
-            self.close_timestamp = timestamp
-
-            remaining_volume = total_volume - self.volume_imbalance
+            remaining_volume = total_volume - self.volume_per_bucket
 
             match side:
                 case 0.0:
