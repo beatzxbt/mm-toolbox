@@ -1,59 +1,90 @@
-# mm-toolbox
-toolbox of fast mm-related funcs
+# MM Toolbox
+
+**MM Toolbox** is a Python library designed to provide high-performance tools for market making strategies.
+
+## Contents
+
+```plaintext
+mm-toolbox/
+├── mm_toolbox/
+│   ├── src/
+│   │   ├── candles/            # Tools for handling and aggregating candlestick data
+│   │   ├── logging/            # Lightweight logging utilities
+│   │   ├── moving_average/     # Implementations of various moving averages
+│   │   ├── numba/              # Numba-optimized functions and utilities
+│   │   ├── orderbook/          # Multiple orderbook implementations & tools
+│   │   ├── ringbuffer/         # Efficient fixed-size circular buffers
+│   │   ├── rounding/           # Utilities for rounding prices and sizes
+│   │   ├── time/               # High-performance time utilities
+│   │   ├── websocket/          # WebSocket handling utilities
+│   │   ├── weights/            # Weight generators 
+│   ├── __init__.py             # Package initialization
+├── tests/                      # Unit tests for all the modules
+├── .gitignore                  # Git ignore file
+├── LICENSE                     # License information
+├── README.md                   # Main documentation file
+├── requirements.txt            # Python dependencies
+└── setup.py                    # Setup script for pip installation
+```
 
 ## Installation
 
-To install `mm_toolbox`, follow these steps:
+MM Toolbox is available on PyPI and can be installed using pip:
 
-1. _Optional: If you are familiar with virtual environments, create one now and activate it. If not, this step is not necessary:_
-
-```console
-$ virtualenv venv
-$ source venv/bin/activate
+```bash
+pip install mm_toolbox
 ```
 
-2. Clone the repository or download the source code to your local machine.
-   
-3. With your virtual environment activated, navigate to the root directory of `mm_toolbox` (where `setup.py` is located) and run:
-    ```bash
-    python setup.py install
-    ```
-
-This will install `mm_toolbox` and its dependencies into your virtual environment.
+To install directly from the source, clone the repository and install the dependencies:
+```bash
+git clone https://github.com/beatzxbt/mm-toolbox.git
+cd mm-toolbox
+pip install poetry
+poetry install
+```
 
 ## Usage
 
-After installing `mm_toolbox`, you can start using it in your projects by importing the necessary modules and functions. Here's an example:
-
+After installation, you can start using MM Toolbox by importing the necessary modules:
 ```python
-from mm_toolbox.orderbook.orderbook import Orderbook
+from mm_toolbox import Orderbook
+from mm_toolbox import ExponentialMovingAverage
+from mm_toolbox import time_iso8601
 
-# Example usage of the orderbook from mm_toolbox
-base_orderbook = Orderbook(size=500)
+# Example usage:
+orderbook = Orderbook(size=100)
 ```
 
-## Contributing
+## Planned additions/upgrades
 
-Please create [issues](https://github.com/beatzxbt/mm-toolbox/issues) to flag bugs or suggest new features and feel free to create a [pull request](https://github.com/beatzxbt/mm-toolbox/pulls) with any improvements.
+### v0.2.0
+**Numba**: Complete coverage of [Numba's top-level functions](https://numba.readthedocs.io/en/stable/reference/numpysupported.html#other-functions) (with custom implementation if faster).
+
+**Orderbook**: Directly update BBA, Imbalance Feature, ++Performance
+
+**Candles**: ++Performance
+
+**Websocket**: Fast websocket pool + auto swapping latency mechanism.
+
+### v0.3.0
+**Candles**: Multi-trigger candle (time/tick/volume).
+
+**Logger**: High performance logger w/Database support integrated.
+
+**Moving Average**: Weighted Moving Average (WMA).
+
+### v0.4.0
+**Orderbook**: [HFT Orderbook](/mm_toolbox/src/orderbook/hft.py), aiming to be fastest Python orderbook on GitHub.
 
 ## License
 
-`mm_toolbox` is licensed under the MIT License. See the [LICENSE](LICENSE) file in the repository for more details.
+MM Toolbox is licensed under the MIT License. See the [LICENSE](/LICENSE) file for more information.
 
-## Performance tricks for Numba
+## Contributing
 
-1. Look at https://numba.pydata.org/numba-doc/dev/reference/envvars.html
-   - Set NUMBA_OPT: max
-   - Set NUMBA_ENABLE_AVX: 1
+Contributions are welcome! Please read the [CONTRIBUTING.md](/CONTRIBUTING.md) for guidelines on how to contribute to this project.
 
-2. Read https://tbetcke.github.io/hpc_lecture_notes/simd.html, TLDR:
-      - Ex. Doing 2.0 rather than 2 in a long calculation
-      - @njit(error_model="numpy") when working with div 
-      - Examine ASM/LLVM generation for autovectorization debugging
-      - @njit(fastmath=True) in for loops if execution order doesn't matter
+## Contact
 
-### Contact 
-
-If you have any questions/suggestions regarding the repository, or just want to have a chat, my handles are below 👇🏼
-
-Twitter: [@beatzXBT](https://twitter.com/BeatzXBT) | Discord: gamingbeatz
+For questions or support, please open an [issue](https://github.com/beatzxbt/mm-toolbox/issues). 
+I can also be reached on [Twitter](https://twitter.com/BeatzXBT) and [Discord](@gamingbeatz) :D
