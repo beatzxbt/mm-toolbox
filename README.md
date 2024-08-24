@@ -39,20 +39,20 @@ To install directly from the source, clone the repository and install the depend
 ```bash
 git clone https://github.com/beatzxbt/mm-toolbox.git
 cd mm-toolbox
-pip install -r requirements.txt
-python setup.py install
+pip install poetry
+poetry install
 ```
 
 ## Usage
 
 After installation, you can start using MM Toolbox by importing the necessary modules:
 ```python
-from mm_toolbox.src.orderbook import Orderbook
-from mm_toolbox.src.moving_average import ExponentialMovingAverage
-from mm_toolbox.src.time import time_iso8601
+from mm_toolbox import Orderbook
+from mm_toolbox import ExponentialMovingAverage
+from mm_toolbox import time_iso8601
 
 # Example usage:
-ob = Orderbook(size=100)
+orderbook = Orderbook(size=100)
 ```
 
 ## Planned additions/upgrades
