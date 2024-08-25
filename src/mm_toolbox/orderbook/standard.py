@@ -3,7 +3,7 @@ from numba.types import int32, float64, bool_
 from numba.experimental import jitclass
 from typing import Dict, Union
 
-from mm_toolbox.src.numba import nbisin, nbroll
+from src.mm_toolbox.numba import nbisin, nbroll
 
 
 @jitclass

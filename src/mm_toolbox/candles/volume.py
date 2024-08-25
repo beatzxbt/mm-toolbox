@@ -1,9 +1,9 @@
-from mm_toolbox.src.candles.base import BaseCandles
+from src.mm_toolbox.candles.base import BaseCandles
 
 
-class TickCandles(BaseCandles):
-    def __init__(self, ticks_per_bucket: float, num_candles: int) -> None:
-        self.ticks_per_bucket = ticks_per_bucket
+class VolumeCandles(BaseCandles):
+    def __init__(self, volume_per_bucket: float, num_candles: int) -> None:
+        self.volume_per_bucket = volume_per_bucket
         super().__init__(num_candles)
 
     def process_trade(
@@ -25,10 +25,21 @@ class TickCandles(BaseCandles):
                 self.sell_volume += size
 
         self.vwap_price = self.calculate_vwap(price, size)
-        self.total_trades += 1
+        self.total_trades += 1.0
         self.close_timestamp = timestamp
 
-        if self.total_trades >= self.ticks_per_bucket:
+        total_volume = self.buy_volume + self.sell_volume
+
+        if total_volume >= self.volume_per_bucket:
+            remaining_volume = total_volume - self.volume_per_bucket
+
+            match side:
+                case 0.0:
+                    self.buy_volume -= remaining_volume
+
+                case 1.0:
+                    self.sell_volume -= remaining_volume
+
             self.insert_candle(
                 open_price=self.open_price,
                 high_price=self.high_price,
@@ -41,3 +52,5 @@ class TickCandles(BaseCandles):
                 open_timestamp=self.open_timestamp,
                 close_timestamp=self.close_timestamp,
             )
+
+            self.process_trade(timestamp, side, price, remaining_volume)

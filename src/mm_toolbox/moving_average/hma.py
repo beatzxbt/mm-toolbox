@@ -2,8 +2,8 @@ import numpy as np
 from numba.experimental import jitclass
 from numba.types import bool_, uint32, float64
 
-from mm_toolbox.src.moving_average.ema import ExponentialMovingAverage as EMA
-from mm_toolbox.src.ringbuffer import RingBufferSingleDimFloat
+from src.mm_toolbox.moving_average.ema import ExponentialMovingAverage as EMA
+from src.mm_toolbox.ringbuffer import RingBufferSingleDimFloat
 
 
 @jitclass

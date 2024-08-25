@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from aiohttp import ClientSession, ClientWebSocketResponse, WSMsgType
 from typing import List, Dict, Callable, Any, Optional
 
-from mm_toolbox.src.logging import Logger
-from mm_toolbox.src.time import time_ms
-from mm_toolbox.src.ringbuffer import RingBufferSingleDimFloat
+from src.mm_toolbox.logging import Logger
+from src.mm_toolbox.time import time_ms
+from src.mm_toolbox.ringbuffer import RingBufferSingleDimFloat
 
 
 @dataclass
