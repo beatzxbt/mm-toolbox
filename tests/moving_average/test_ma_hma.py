@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 
-from mm_toolbox.src.moving_average.hma import HullMovingAverage as HMA
+from src.mm_toolbox.moving_average.hma import HullMovingAverage as HMA
 
 
 class TestHMA(unittest.TestCase):

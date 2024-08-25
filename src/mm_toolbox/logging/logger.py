@@ -2,9 +2,9 @@ import os
 import aiofiles
 import asyncio
 
-from mm_toolbox.src.logging.discord import DiscordClient
-from mm_toolbox.src.logging.telegram import TelegramClient
-from mm_toolbox.src.time import time_iso8601
+from src.mm_toolbox.logging.discord import DiscordClient
+from src.mm_toolbox.logging.telegram import TelegramClient
+from src.mm_toolbox.time import time_iso8601
 
 
 class Logger:

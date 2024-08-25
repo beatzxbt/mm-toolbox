@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from mm_toolbox.src.weights import ema_weights
+from src.mm_toolbox.weights import ema_weights
 
 
 class TestEmaWeights(unittest.TestCase):

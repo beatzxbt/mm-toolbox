@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from mm_toolbox.src.numba import (
+from src.mm_toolbox.numba import (
     nblinspace,
     nbgeomspace,
     nbarange,
