@@ -2,7 +2,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 from typing import Tuple, Iterator, Union
 
-from src.mm_toolbox.ringbuffer import RingBufferMultiDim
+from src.mm_toolbox.ringbuffer import RingBufferTwoDimFloat
 
 
 class BaseCandles(ABC):
@@ -46,7 +46,7 @@ class BaseCandles(ABC):
         self._cum_price_volume_ = 0.0
         self._total_volume_ = 0.0
 
-        self.ringbuffer = RingBufferMultiDim(shape=(num_candles, 10), dtype=np.float64)
+        self.ringbuffer = RingBufferTwoDimFloat(capacity=self.num_candles, sub_array_len=10)
 
     def as_array(self) -> np.ndarray[np.ndarray]:
         """
@@ -332,7 +332,7 @@ class BaseCandles(ABC):
         Tuple[np.ndarray, np.ndarray, np.ndarray]
             The lower band, middle band (SMA), and upper band.
         """
-        close_prices = self.as_array()[:, 3]
+        close_prices = self.close_prices
 
         sma = np.convolve(close_prices, np.ones(period) / period, mode="valid")
         rolling_std = np.zeros_like(sma)
@@ -366,41 +366,57 @@ class BaseCandles(ABC):
     def open_prices(self) -> np.ndarray[float]:
         if not self.ringbuffer.is_empty:
             return self.as_array()[:, 0]
+        else:
+            return np.array([[]], dtype=np.float64)
 
     @property
     def high_prices(self) -> np.ndarray[float]:
         if not self.ringbuffer.is_empty:
             return self.as_array()[:, 1]
+        else:
+            return np.array([[]], dtype=np.float64)
 
     @property
     def low_prices(self) -> np.ndarray[float]:
         if not self.ringbuffer.is_empty:
             return self.as_array()[:, 2]
+        else:
+            return np.array([[]], dtype=np.float64)
 
     @property
     def close_prices(self) -> np.ndarray[float]:
         if not self.ringbuffer.is_empty:
             return self.as_array()[:, 3]
+        else:
+            return np.array([[]], dtype=np.float64)
 
     @property
     def buy_volumes(self) -> np.ndarray[float]:
         if not self.ringbuffer.is_empty:
             return self.as_array()[:, 4]
+        else:
+            return np.array([[]], dtype=np.float64)
 
     @property
     def sell_volumes(self) -> np.ndarray[float]:
         if not self.ringbuffer.is_empty:
             return self.as_array()[:, 5]
+        else:
+            return np.array([[]], dtype=np.float64)
 
     @property
     def vwap_prices(self) -> np.ndarray[float]:
         if not self.ringbuffer.is_empty:
             return self.as_array()[:, 6]
+        else:
+            return np.array([[]], dtype=np.float64)
 
     @property
     def all_trades(self) -> np.ndarray[float]:
         if not self.ringbuffer.is_empty:
             return self.as_array()[:, 7]
+        else:
+            return np.array([[]], dtype=np.float64)
 
     def __getitem__(self, index: Union[int, Tuple]) -> np.ndarray:
         return self.as_array()[index]
