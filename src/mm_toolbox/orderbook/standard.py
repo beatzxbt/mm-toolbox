@@ -132,7 +132,9 @@ class Orderbook:
         if new_seq_id > self._seq_id_:
             self._seq_id_ = new_seq_id
             self._bids_ = self._bids_[~nbisin(self._bids_[:, 0], bids[:, 0])]
-            self._bids_ = np.vstack((self._bids_, bids[bids[:, 1] != 0.0]))
+            self._bids_ = np.vstack(
+                (self._bids_[self._bids_[:, 1] != 0.0], bids[bids[:, 1] != 0.0])
+            )
             self._sort_bids_()
 
     def update_asks(self, asks: np.ndarray, new_seq_id: int) -> None:
@@ -151,7 +153,9 @@ class Orderbook:
         if new_seq_id > self._seq_id_:
             self._seq_id_ = new_seq_id
             self._asks_ = self._asks_[~nbisin(self._asks_[:, 0], asks[:, 0])]
-            self._asks_ = np.vstack((self._asks_, asks[asks[:, 1] != 0.0]))
+            self._asks_ = np.vstack(
+                (self._asks_[self._asks_[:, 1] != 0.0], asks[asks[:, 1] != 0.0])
+            )
             self._sort_asks_()
 
     def update_full(self, asks: np.ndarray, bids: np.ndarray, new_seq_id: int) -> None:
