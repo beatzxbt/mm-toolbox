@@ -1,8 +1,8 @@
 import unittest
 import numpy as np
 
-from mm_toolbox.src.ringbuffer import RingBufferSingleDimFloat
-from mm_toolbox.src.moving_average import ExponentialMovingAverage as EMA
+from src.mm_toolbox.ringbuffer import RingBufferSingleDimFloat
+from src.mm_toolbox.moving_average import ExponentialMovingAverage as EMA
 
 
 class TestEMA(unittest.TestCase):

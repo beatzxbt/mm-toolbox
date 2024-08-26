@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from mm_toolbox.src.ringbuffer import RingBufferMultiDim
+from src.mm_toolbox.ringbuffer import RingBufferMultiDim
 
 
 class TestRingBufferMultiDim(unittest.TestCase):

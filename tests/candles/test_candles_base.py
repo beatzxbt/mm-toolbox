@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from mm_toolbox.src.candles.base import BaseCandles
+from src.mm_toolbox.candles.base import BaseCandles
 
 
 class MockBaseCandle(BaseCandles):

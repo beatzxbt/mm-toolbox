@@ -3,7 +3,7 @@ from numba.types import bool_, uint32, float64
 from numba.experimental import jitclass
 from typing import Optional
 
-from mm_toolbox.src.ringbuffer import RingBufferSingleDimFloat
+from src.mm_toolbox.ringbuffer import RingBufferSingleDimFloat
 
 
 @jitclass

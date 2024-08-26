@@ -1,6 +1,6 @@
 import unittest
-from mm_toolbox.src.candles import VolumeCandles
-from mm_toolbox.src.time import time_ms
+from src.mm_toolbox.candles import VolumeCandles
+from src.mm_toolbox.time import time_ms
 
 
 class TestVolumeCandles(unittest.TestCase):
