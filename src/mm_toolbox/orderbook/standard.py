@@ -45,22 +45,31 @@ class Orderbook:
 
     def _reset_(self) -> None:
         """
-        Sets all attribute values back to 0
+        Sets all attribute values back to default.
         """
         self._warmed_up_ = False
         self._seq_id_ = 0
         self._asks_.fill(0.0)
         self._bids_.fill(0.0)
 
-    def _sort_bids_(self) -> None:
+    def _sort_bids_(self, bids: np.ndarray) -> None:
         """
-        Sorts the bid orders in descending order of price and updates the best bid.
+        Removes entries with matching prices in update, regardless of size, and then 
+        adds non-zero quantity data from update to the book.
+
+        Sorts the bid orders in descending order of price.
 
         If the best bid is higher than any asks, remove those asks by:
          - Filling the to-be removed arrays with zeros.
          - Rolling it to the back of the orderbook
         """
-        self._bids_ = self._bids_[self._bids_[:, 0].argsort()][::-1][: self.size]
+        removed_old_prices = self._bids_[~nbisin(self._bids_[:, 0], bids[:, 0])]
+        new_full_bids = np.vstack((
+            removed_old_prices[removed_old_prices[:, 1] != 0.0], 
+            bids[bids[:, 1] != 0.0]
+        ))
+
+        self._bids_ = new_full_bids[new_full_bids[:, 0].argsort()][::-1][: self.size]
 
         if self._bids_[0, 0] >= self._asks_[0, 0]:
             overlapping_asks = self._asks_[
@@ -69,15 +78,24 @@ class Orderbook:
             self._asks_[:overlapping_asks].fill(0.0)
             self._asks_[:, :] = nbroll(self._asks_, -overlapping_asks, 0)
 
-    def _sort_asks_(self) -> None:
+    def _sort_asks_(self, asks: np.ndarray) -> None:
         """
-        Sorts the ask orders in ascending order of price and updates the best ask.
+        Removes entries with matching prices in update, regardless of size, and then 
+        adds non-zero quantity data from update to the book.
 
-        If the best ask is lower than any bids, remove those bids.
+        Sorts the ask orders in ascending order of price.
+
+        If the best ask is lower than any bids, remove those bids by:
          - Filling the to-be removed arrays with zeros.
          - Rolling it to the back of the orderbook
         """
-        self._asks_ = self._asks_[self._asks_[:, 0].argsort()][: self.size]
+        removed_old_prices = self._asks_[~nbisin(self._asks_[:, 0], asks[:, 0])]
+        new_full_asks = np.vstack((
+            removed_old_prices[removed_old_prices[:, 1] != 0.0], 
+            asks[asks[:, 1] != 0.0]
+        ))
+        
+        self._asks_ = new_full_asks[new_full_asks[:, 0].argsort()][: self.size]
 
         if self._asks_[0, 0] <= self._bids_[0, 0]:
             overlapping_bids = self._bids_[
@@ -107,52 +125,44 @@ class Orderbook:
 
         self._reset_()
 
-        # Prefer to broadcast onto internal arrays, not overwrite
-        self._asks_[:, :] = asks[:, :]
-        self._bids_[:, :] = bids[:, :]
-        self._sort_bids_()
-        self._sort_asks_()
+        # Prefer to broadcast onto internal arrays, not overwrite.
+        # We also assume that they come in without any overlapping bids/asks,
+        # skipping that check and previous array stacking for perf.  
+        self._asks_[:, :] = asks[asks[:, 0].argsort()]
+        self._bids_[:, :] = bids[bids[:, 0].argsort()[::-1]]
 
         self._seq_id_ = new_seq_id
         self._warmed_up_ = True
 
     def update_bids(self, bids: np.ndarray, new_seq_id: int) -> None:
         """
-        Updates the current bids with new data. Removes entries with matching
-        prices in update, regardless of size, and then adds non-zero quantity
-        data from update to the book.
+        Updates the current bids with new data.
 
         Parameters
         ----------
         bids : np.ndarray
             New bid orders data, formatted as [[price, size], ...].
         """
-        assert bids.shape[0] > 0 and bids.ndim == 2
+        assert bids.shape[0] > 0 and bids.ndim == 2 and self._warmed_up_ == True
 
         if new_seq_id > self._seq_id_:
             self._seq_id_ = new_seq_id
-            self._bids_ = self._bids_[~nbisin(self._bids_[:, 0], bids[:, 0])]
-            self._bids_ = np.vstack((self._bids_, bids[bids[:, 1] != 0.0]))
-            self._sort_bids_()
+            self._sort_bids_(bids)
 
     def update_asks(self, asks: np.ndarray, new_seq_id: int) -> None:
         """
-        Updates the current asks with new data. Removes entries with matching
-        prices in update, regardless of size, and then adds non-zero quantity
-        data from update to the book.
+        Updates the current asks with new data.
 
         Parameters
         ----------
         asks : np.ndarray
             New ask orders data, formatted as [[price, size], ...].
         """
-        assert asks.shape[0] > 0 and asks.ndim == 2
+        assert asks.shape[0] > 0 and asks.ndim == 2 and self._warmed_up_ == True
 
         if new_seq_id > self._seq_id_:
             self._seq_id_ = new_seq_id
-            self._asks_ = self._asks_[~nbisin(self._asks_[:, 0], asks[:, 0])]
-            self._asks_ = np.vstack((self._asks_, asks[asks[:, 1] != 0.0]))
-            self._sort_asks_()
+            self._sort_asks_(asks)
 
     def update_full(self, asks: np.ndarray, bids: np.ndarray, new_seq_id: int) -> None:
         """
@@ -166,22 +176,12 @@ class Orderbook:
         bids : np.ndarray
             New bid orders data, formatted as [[price, size], ...].
         """
-        assert bids.size > 0 and bids.ndim == 2 and asks.size > 0 and asks.ndim == 2
+        assert bids.size > 0 and bids.ndim == 2 and asks.size > 0 and asks.ndim == 2 and self._warmed_up_ == True
 
         if new_seq_id > self._seq_id_:
             self._seq_id_ = new_seq_id
-
-            self._bids_ = self._bids_[~nbisin(self._bids_[:, 0], bids[:, 0])]
-            self._bids_ = np.vstack(
-                (self._bids_[self._bids_[:, 1] != 0.0], bids[bids[:, 1] != 0.0])
-            )
-            self._sort_bids_()
-
-            self._asks_ = self._asks_[~nbisin(self._asks_[:, 0], asks[:, 0])]
-            self._asks_ = np.vstack(
-                (self._asks_[self._asks_[:, 1] != 0.0], asks[asks[:, 1] != 0.0])
-            )
-            self._sort_asks_()
+            self._sort_bids_(bids)
+            self._sort_asks_(asks)
 
     def get_vamp(self, depth: float) -> float:
         """
