@@ -1,2 +1,2 @@
-from .ema import ExponentialMovingAverage
-from .hma import HullMovingAverage
+from .ema import ExponentialMovingAverage as ExponentialMovingAverage
+from .hma import HullMovingAverage as HullMovingAverage

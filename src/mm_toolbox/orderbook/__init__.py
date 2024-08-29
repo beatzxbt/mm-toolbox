@@ -15,4 +15,4 @@
 # -> assert array shape at compile time for better memory access: https://stackoverflow.com/questions/67743726/numba-fast-math-does-not-improve-speed
 
 # from .hft import HFTOrderbook
-from .standard import Orderbook
+from .standard import Orderbook as Orderbook

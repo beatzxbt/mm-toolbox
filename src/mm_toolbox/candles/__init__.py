@@ -1,3 +1,3 @@
-from .tick import TickCandles
-from .volume import VolumeCandles
-from .time import TimeCandles
+from .tick import TickCandles as TickCandles
+from .volume import VolumeCandles as VolumeCandles
+from .time import TimeCandles as TimeCandles

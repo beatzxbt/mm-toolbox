@@ -1,1 +1,1 @@
-from .rounding import Round
+from .rounding import Round as Round
