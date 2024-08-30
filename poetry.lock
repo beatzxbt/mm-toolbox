@@ -1437,7 +1437,7 @@ files = [
 name = "scipy"
 version = "1.14.1"
 description = "Fundamental algorithms for scientific computing in Python"
-optional = true
+optional = false
 python-versions = ">=3.10"
 files = [
     {file = "scipy-1.14.1-cp310-cp310-macosx_10_13_x86_64.whl", hash = "sha256:b28d2ca4add7ac16ae8bb6632a3c86e4b9e4d52d3e34267f6e1b0c1f8d87e389"},
@@ -1688,4 +1688,4 @@ linalg = []
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10.0,<3.13"
-content-hash = "afb7af9c632d7db5bbe055b003b69ecf1d7dd9bdb9e8e10d2547846709840c8f"
+content-hash = "cd871fcef13aacaa4a109977619043f84ae8ce8d95ba85182009db12d24348f1"
