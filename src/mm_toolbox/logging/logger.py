@@ -1,133 +1,189 @@
-import os
-import aiofiles
 import asyncio
+from dataclasses import dataclass
+from typing import List
+from mm_toolbox.time import time_iso8601, time_s
 
-from src.mm_toolbox.logging.discord import DiscordClient
-from src.mm_toolbox.logging.telegram import TelegramClient
-from src.mm_toolbox.time import time_iso8601
+from .handlers import *
 
+LOG_LEVEL_MAP = {
+    10: "DEBUG",
+    20: "INFO",
+    30: "WARNING",
+    40: "ERROR",
+    50: "CRITICAL"
+}
 
+LOG_LEVELS = {10, 20, 30, 40, 50}
+
+@dataclass 
+class LoggerConfig(LogConfig):
+    """
+    Core configuration for the Logger.
+
+    Parameters
+    ----------
+    base_level : str
+        The minimum log level to record. Default is "WARNING".
+
+    stout : bool
+        Whether to print logs to stdout. Default is True.
+
+    max_buffer_size : int
+        Maximum number of log messages to buffer. Default is 10.
+
+    max_buffer_age : int
+        Maximum age (in seconds) before flushing the buffer. Default is 10.
+    """
+    base_level: str = "WARNING"
+    stout: bool = True
+    max_buffer_size: int = 10
+    max_buffer_age: int = 10
+
+    def validate(self) -> None:
+        if self.base_level not in LOG_LEVEL_MAP.values():
+            raise ValueError(f"Invalid base log level name: {self.base_level}")
+        if self.max_buffer_size < 1:
+            raise ValueError(f"Max buffer size must be positive.")
+        if self.max_buffer_age < 1:
+            raise ValueError(f"Max buffer age must be positive.")
+    
 class Logger:
     def __init__(
-        self,
-        debug_mode: bool = False,
+        self, 
+        logger_config: LoggerConfig = None, 
+        file_config: FileLogConfig = None,
+        discord_config: DiscordLogConfig = None, 
+        telegram_config: TelegramLogConfig = None,
     ) -> None:
-        self.debug_mode = debug_mode
+        self.logger_config = logger_config if logger_config else LoggerConfig()
+        self.logger_config.validate()
+        
+        self.base_level = self._get_log_level_(self.logger_config.base_level)
+        self.stout = self.logger_config.stout
+        self.max_buffer_size = self.logger_config.max_buffer_size
+        self.max_buffer_age = self.logger_config.max_buffer_age
 
-        self.discord_client = None
-        self.telegram_client = None
+        self.log_handlers: List[LogHandler] = []
 
-        self.send_to_discord = bool(os.getenv("DISCORD_WEBHOOK"))
-        if self.send_to_discord:
-            self.discord_client = DiscordClient()
-            self.discord_client.start(webhook=os.getenv("DISCORD_WEBHOOK"))
+        if file_config:
+            file_config.validate()
+            self.log_handlers.append(FileLogHandler(file_config))
 
-        self.send_to_telegram = bool(
-            os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_CHAT_ID")
-        )
-        if self.send_to_telegram:
-            self.telegram_client = TelegramClient()
-            self.telegram_client.start(
-                bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),
-                chat_id=os.getenv("TELEGRAM_CHAT_ID"),
-            )
+        if discord_config:
+            discord_config.validate()
+            self.log_handlers.append(DiscordLogHandler(discord_config))
 
-        self.tasks = []
-        self.msgs = []
+        if telegram_config:
+            telegram_config.validate()
+            self.log_handlers.append(TelegramLogHandler(telegram_config))
 
-    async def _write_logs_to_file_(self) -> None:
+        self.log_message_buffer: List[str] = []
+        self.current_buffer_size = 0
+        self.last_flush_time = time_s()
+
+        self.queue = asyncio.Queue()
+        self.loop = asyncio.get_event_loop()
+        self.shutdown_flag = False
+
+        self.loop.create_task(self._log_ingestor_())
+
+    def _get_log_level_(self, level_name: str) -> int:
         """
-        Asynchronously write log messages to a file.
-
-        Returns
-        -------
-        None
-        """
-        try:
-            async with aiofiles.open("logs.txt", "a") as file:
-                await file.writelines(f"{line}\n" for line in self.msgs)
-        except Exception as e:
-            await self.error(f"Error writing logs to file: {e}")
-        finally:
-            self.msgs.clear()
-
-    async def _message_(
-        self, level: str, topic: str, msg: str, flush_buffer: bool = False
-    ) -> None:
-        """
-        Log a message with a specified logging level.
+        Converts a log level name to its corresponding integer value.
 
         Parameters
         ----------
-        level : str
-            The logging level of the message.
-
-        topic : str
-            The topic of the message to log.
-
-        msg : str
-            The message to log.
+        level_name : str
+            The name of the log level (e.g., "DEBUG", "INFO").
 
         Returns
         -------
-        None
+        int
+            The integer value of the log level.
         """
-        formatted_msg = f"{time_iso8601()} | {level} | {topic} | {msg}"
+        for level, name in LOG_LEVEL_MAP.items():
+            if name == level_name:
+                return level
 
-        if self.send_to_discord:
-            task = asyncio.create_task(
-                self.discord_client.send(formatted_msg, flush_buffer)
-            )
-            self.tasks.append(task)
+    async def _flush_buffer_(self) -> None:
+        """
+        Flushes the log message buffer to all handlers.
+        """
+        for handler in self.log_handlers:
+            await handler.flush(self.log_message_buffer)
+        self.log_message_buffer.clear()
+        self.current_buffer_size = 0
+        self.last_flush_time = time_s()
 
-        if self.send_to_telegram:
-            task = asyncio.create_task(
-                self.telegram_client.send(formatted_msg, flush_buffer)
-            )
-            self.tasks.append(task)
+    async def _log_ingestor_(self):
+        """
+        Asynchronous loop that processes log messages from the queue.
 
-        print(formatted_msg)
+        Raises
+        ------
+        Exception
+            If there is an error during the log writing process.
+        """
+        while not self.shutdown_flag or not self.queue.empty():
+            try:
+                log_entry, level = await self.queue.get()
 
-        self.msgs.append(formatted_msg)
+                self.log_message_buffer.append(log_entry)
+                self.current_buffer_size += 1
+                
+                if self.stout:
+                    print(log_entry)
+                    
+                # Immediate flush for ERROR or CRITICAL levels
+                if level >= 40:
+                    await self._flush_buffer_()
 
-        if len(self.msgs) >= 1000 or flush_buffer:
-            await self._write_logs_to_file_()
+                # Buffer messages below ERROR level
+                else:
+                    is_buffer_full = self.current_buffer_size >= self.max_buffer_size
+                    is_buffer_old = time_s() - self.last_flush_time >= self.max_buffer_age
+                    
+                    # Flush buffer if it's full or aged enough
+                    if is_buffer_full or is_buffer_old:
+                        await self._flush_buffer_()
 
-    async def success(self, topic: str, msg: str) -> None:
-        await self._message_("SUCCESS", topic.upper(), msg)
+                self.queue.task_done()
 
-    async def info(self, topic: str, msg: str) -> None:
-        await self._message_("INFO", topic.upper(), msg)
+            except Exception as e:
+                raise Exception(f"Log writer loop: {e}")
 
-    async def debug(self, topic: str, msg: str) -> None:
-        if self.debug_mode:
-            await self._message_("DEBUG", topic.upper(), msg)
+    def _submit_log_(self, level: int, message: str) -> None:
+        try:
+            if level >= self.base_level:
+                log_entry = f"{time_iso8601()} - {LOG_LEVEL_MAP[level]} - {message}"
+                self.loop.call_soon_threadsafe(self.queue.put_nowait, (log_entry, level))
 
-    async def warning(self, topic: str, msg: str) -> None:
-        await self._message_("WARNING", topic.upper(), msg)
+        except Exception as e:
+            raise Exception(f"Failed to submit log: {e}")
+        
+    def debug(self, message: str) -> None:
+        self._submit_log_(10, message)
 
-    async def error(self, topic: str, msg: str) -> None:
-        await self._message_("ERROR", topic.upper(), msg)
+    def info(self, message: str) -> None:
+        self._submit_log_(20, message)
 
-    async def critical(self, topic: str, msg: str) -> None:
-        await self._message_("CRITICAL", topic.upper(), msg, flush_buffer=True)
+    def warning(self, message: str) -> None:
+        self._submit_log_(30, message)
+
+    def error(self, message: str) -> None:
+        self._submit_log_(40, message)
+
+    def critical(self, message: str) -> None:
+        self._submit_log_(50, message)
 
     async def shutdown(self) -> None:
         """
-        Shutdown the logger by ensuring all clients are closed and all tasks are complete.
-
-        Returns
-        -------
-        None
+        Shuts down the logger, flushing all buffers and closing handlers.
         """
-        if self.discord_client:
-            await self.discord_client.shutdown()
-
-        if self.telegram_client:
-            await self.telegram_client.shutdown()
-
-        if self.tasks:
-            await asyncio.gather(*self.tasks)
-
-        if self.msgs:
-            await self._write_logs_to_file_()
+        self.shutdown_flag = True # Kills the ingestor task.
+        await self.queue.join()   
+        if self.log_message_buffer:
+            await self._flush_buffer_()
+        for handler in self.log_handlers:
+            await handler.close()
+        
