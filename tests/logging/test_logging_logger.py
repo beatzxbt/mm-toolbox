@@ -148,6 +148,8 @@ class TestLogger(unittest.TestCase):
         # Add an ERROR message which should bypass the buffer
         self.logger.error("This is an error message")
 
+        self.loop.run_until_complete(asyncio.sleep(0.1))
+
         log_content = self.read_log_file()
         self.assertIn("This is an error message", log_content)
         self.assertIn("Buffered message 1", log_content)
@@ -155,9 +157,10 @@ class TestLogger(unittest.TestCase):
         # Add a CRITICAL message which should also bypass the buffer
         self.logger.critical("This is a critical message")
 
+        self.loop.run_until_complete(asyncio.sleep(0.1))
+
         log_content = self.read_log_file()
         self.assertIn("This is a critical message", log_content)
-        self.assertNotIn("Buffered message 1", log_content)
 
         # Now shutdown the logger to flush the buffer
         self.loop.run_until_complete(self.logger.shutdown())
