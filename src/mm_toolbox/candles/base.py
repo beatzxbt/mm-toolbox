@@ -2,7 +2,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 from typing import Tuple, Iterator, Union
 
-from src.mm_toolbox.ringbuffer import RingBufferTwoDimFloat
+from mm_toolbox.ringbuffer import RingBufferTwoDimFloat
 
 
 class BaseCandles(ABC):

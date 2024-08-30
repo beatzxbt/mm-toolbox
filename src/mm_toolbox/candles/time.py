@@ -1,4 +1,4 @@
-from src.mm_toolbox.candles.base import BaseCandles
+from .base import BaseCandles
 
 
 class TimeCandles(BaseCandles):
