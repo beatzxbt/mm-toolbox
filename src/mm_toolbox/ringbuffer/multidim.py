@@ -2,7 +2,6 @@ import warnings
 import numpy as np
 from typing import Tuple, Union
 
-from src.mm_toolbox.numba import nbisin
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 

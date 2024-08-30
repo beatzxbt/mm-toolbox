@@ -1,7 +1,7 @@
 import numpy as np
 from numba.types import uint32, float64, int64
 from numba.experimental import jitclass
-from typing import Tuple, Union
+from typing import Tuple
 
 
 @jitclass

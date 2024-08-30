@@ -1,4 +1,3 @@
-import re
 import asyncio
 import aiosonic
 import orjson
@@ -16,7 +15,7 @@ class TelegramLogConfig(LogConfig):
         Validates the Telegram configuration.
         """
         if not self.bot_token:
-            raise ValueError(f"Missing bot token.")
+            raise ValueError("Missing bot token.")
 
         if not self.chat_id.isnumeric():
             raise ValueError(f"Invalid chat ID: {self.chat_id}")
