@@ -1,4 +1,3 @@
-from typing import List
 from dataclasses import dataclass
 from .base import LogConfig, LogHandler
 
@@ -10,7 +9,7 @@ class FileLogConfig(LogConfig):
 
     def validate(self) -> None:
         if not self.filepath or not self.filepath.endswith(".txt"):
-            raise ValueError(f"Missing/Invalid filepath.")
+            raise ValueError("Missing/Invalid filepath.")
         if self.buffer_size <= 0:
             raise ValueError("Buffer size must be greater than 0")
         if self.flush_interval <= 0:

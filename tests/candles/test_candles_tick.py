@@ -1,5 +1,4 @@
 import unittest
-import numpy as np
 
 from src.mm_toolbox.candles import TickCandles
 from src.mm_toolbox.time import time_ms

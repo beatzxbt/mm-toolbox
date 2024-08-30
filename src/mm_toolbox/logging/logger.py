@@ -3,7 +3,16 @@ from dataclasses import dataclass
 from typing import List
 from mm_toolbox.time import time_iso8601, time_s
 
-from .handlers import *
+from .handlers import (
+    LogConfig, 
+    LogHandler, 
+    FileLogConfig, 
+    FileLogHandler, 
+    DiscordLogConfig, 
+    DiscordLogHandler, 
+    TelegramLogConfig, 
+    TelegramLogHandler
+)
 
 LOG_LEVEL_MAP = {
     10: "DEBUG",
@@ -43,9 +52,9 @@ class LoggerConfig(LogConfig):
         if self.base_level not in LOG_LEVEL_MAP.values():
             raise ValueError(f"Invalid base log level name: {self.base_level}")
         if self.max_buffer_size < 1:
-            raise ValueError(f"Max buffer size must be positive.")
+            raise ValueError("Max buffer size must be positive.")
         if self.max_buffer_age < 1:
-            raise ValueError(f"Max buffer age must be positive.")
+            raise ValueError("Max buffer age must be positive.")
     
 class Logger:
     def __init__(

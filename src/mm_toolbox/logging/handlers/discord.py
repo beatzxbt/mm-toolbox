@@ -11,7 +11,7 @@ class DiscordLogConfig(LogConfig):
 
     def validate(self) -> None:
         if not self.webhook or self.webhook.find("https://discord.com/api/webhooks/") == -1:
-            raise ValueError(f"Missing or invalid webhook url.")
+            raise ValueError("Missing or invalid webhook url.")
 
 class DiscordLogHandler(LogHandler):
     def __init__(self, config: DiscordLogConfig) -> None:
