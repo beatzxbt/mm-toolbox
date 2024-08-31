@@ -1,7 +1,6 @@
 from .tools import VerifyWsPayload as VerifyWsPayload
-from .stream import (
-    WsConnectionEvictionPolicy as WsConnectionEvictionPolicy, 
+from .client import (
     SingleWsConnection as SingleWsConnection, 
+    WsPoolEvictionPolicy as WsPoolEvictionPolicy, 
     WsPool as WsPool, 
-    FastWebsocketStream as FastWebsocketStream
 )
