@@ -39,7 +39,6 @@ orjson = "^3.10.7"
 poetry = "^1.8.3"
 pytest = "^8.3.2"
 ruff = "^0.6.2"
-black = "^24.8.0"
 
 
 [tool.poetry.group.linalg.dependencies]
