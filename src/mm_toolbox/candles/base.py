@@ -46,7 +46,9 @@ class BaseCandles(ABC):
         self._cum_price_volume = 0.0
         self._total_volume = 0.0
 
-        self.ringbuffer = RingBufferTwoDimFloat(capacity=self.num_candles, sub_array_len=10)
+        self.ringbuffer = RingBufferTwoDimFloat(
+            capacity=self.num_candles, sub_array_len=10
+        )
 
     def as_array(self) -> np.ndarray[np.ndarray]:
         """

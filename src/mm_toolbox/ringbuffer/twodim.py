@@ -31,9 +31,7 @@ class RingBufferTwoDimFloat:
         self.sub_array_len = sub_array_len
         self._left_index = 0
         self._right_index = 0
-        self._array = np.zeros(
-            shape=(self.capacity, self.sub_array_len), dtype=float64
-        )
+        self._array = np.zeros(shape=(self.capacity, self.sub_array_len), dtype=float64)
 
     @property
     def is_full(self) -> bool:

@@ -5,6 +5,7 @@ from typing import List, Coroutine
 from dataclasses import dataclass
 from .base import LogConfig, LogHandler
 
+
 @dataclass
 class TelegramLogConfig(LogConfig):
     bot_token: str = ""
@@ -20,7 +21,7 @@ class TelegramLogConfig(LogConfig):
         if not self.chat_id.isnumeric():
             raise ValueError(f"Invalid chat ID: {self.chat_id}")
 
-        
+
 class TelegramLogHandler(LogHandler):
     def __init__(self, config: TelegramLogConfig) -> None:
         self.chat_id = config.chat_id
@@ -29,7 +30,7 @@ class TelegramLogHandler(LogHandler):
         self.headers = {"Content-Type": "application/json"}
 
         self.client = aiosonic.HTTPClient()
-        
+
     async def flush(self, buffer) -> None:
         try:
             tasks: List[Coroutine] = []

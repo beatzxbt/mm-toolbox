@@ -17,7 +17,7 @@ class VerifyWsPayload:
     def __init__(self, sample: Dict, strict: bool = False) -> None:
         self.sample = sample
         self.strict = strict
-        
+
         self._type_map = self._create_type_map(sample)
 
     def verify(self, payload: Dict) -> bool:

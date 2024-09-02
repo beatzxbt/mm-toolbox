@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from .base import LogConfig, LogHandler
 
+
 @dataclass
 class FileLogConfig(LogConfig):
     filepath: str = ""
@@ -18,7 +19,7 @@ class FileLogConfig(LogConfig):
 
 class FileLogHandler(LogHandler):
     def __init__(self, config: FileLogConfig) -> None:
-        self.log_file = open(config.filepath, 'w')
+        self.log_file = open(config.filepath, "w")
         self.buffer_size = config.buffer_size
         self.flush_interval = config.flush_interval
 

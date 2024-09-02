@@ -3,12 +3,20 @@ import os
 import asyncio
 from io import StringIO
 from contextlib import redirect_stdout
-from mm_toolbox.logging import Logger, LoggerConfig, FileLogConfig, DiscordLogConfig, TelegramLogConfig
+from mm_toolbox.logging import (
+    Logger,
+    LoggerConfig,
+    FileLogConfig,
+    DiscordLogConfig,
+    TelegramLogConfig,
+)
 
 
 class TestLoggerConfig(unittest.TestCase):
     def test_valid_config(self):
-        config = LoggerConfig(base_level="INFO", stout=True, max_buffer_size=20, max_buffer_age=15)
+        config = LoggerConfig(
+            base_level="INFO", stout=True, max_buffer_size=20, max_buffer_age=15
+        )
         config.validate()
 
     def test_invalid_log_level(self):
@@ -30,7 +38,7 @@ class TestLoggerConfig(unittest.TestCase):
 class TestFileLogConfig(unittest.TestCase):
     def test_valid_config(self):
         config = FileLogConfig(filepath="logs.txt", buffer_size=10, flush_interval=5)
-        config.validate()  
+        config.validate()
 
     def test_invalid_filepath(self):
         config = FileLogConfig(filepath="invalid_log")
@@ -50,8 +58,10 @@ class TestFileLogConfig(unittest.TestCase):
 
 class TestDiscordLogConfig(unittest.TestCase):
     def test_valid_config(self):
-        config = DiscordLogConfig(webhook="https://discord.com/api/webhooks/12345/abcdefg")
-        config.validate()  
+        config = DiscordLogConfig(
+            webhook="https://discord.com/api/webhooks/12345/abcdefg"
+        )
+        config.validate()
 
     def test_invalid_webhook(self):
         config = DiscordLogConfig(webhook="invalid_webhook")
@@ -61,8 +71,10 @@ class TestDiscordLogConfig(unittest.TestCase):
 
 class TestTelegramLogConfig(unittest.TestCase):
     def test_valid_config(self):
-        config = TelegramLogConfig(bot_token="4839574812:AAFD39kkdpWt3ywyRZergyOLMaJhac60qc", chat_id="123456")
-        config.validate()  
+        config = TelegramLogConfig(
+            bot_token="4839574812:AAFD39kkdpWt3ywyRZergyOLMaJhac60qc", chat_id="123456"
+        )
+        config.validate()
 
     def test_invalid_bot_token(self):
         config = TelegramLogConfig(bot_token="invalid_bot_token")
@@ -80,14 +92,16 @@ class TestLogger(unittest.TestCase):
         self.loop = asyncio.get_event_loop()
         self.logger_config = LoggerConfig(base_level="DEBUG")
         self.file_config = FileLogConfig(filepath="test_logs.txt")
-        self.logger = Logger(logger_config=self.logger_config, file_config=self.file_config)
+        self.logger = Logger(
+            logger_config=self.logger_config, file_config=self.file_config
+        )
 
     def tearDown(self):
         if os.path.exists(self.file_config.filepath):
             os.remove(self.file_config.filepath)
 
     def read_log_file(self):
-        with open(self.file_config.filepath, 'r') as file:
+        with open(self.file_config.filepath, "r") as file:
             return file.read()
 
     def test_debug_logging(self):
@@ -169,7 +183,9 @@ class TestLogger(unittest.TestCase):
         self.assertIn("Buffered message 1", log_content)
 
     def test_logging_with_time_flush(self):
-        logger_config = LoggerConfig(base_level="DEBUG", stout=False, max_buffer_size=10, max_buffer_age=1)
+        logger_config = LoggerConfig(
+            base_level="DEBUG", stout=False, max_buffer_size=10, max_buffer_age=1
+        )
         logger = Logger(logger_config=logger_config, file_config=self.file_config)
 
         logger.debug("Message 1")
@@ -217,6 +233,7 @@ class TestLogger(unittest.TestCase):
 
         self.assertIn("This should appear in stdout", output)
         self.assertIn("Another stdout message", output)
+
 
 if __name__ == "__main__":
     unittest.main()

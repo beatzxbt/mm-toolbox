@@ -94,15 +94,19 @@ from mm_toolbox.numba.array import (
     nbzeros_like as nbzeros_like,
 )
 
-class TestNumbaFuncs(unittest.TestCase):
 
+class TestNumbaFuncs(unittest.TestCase):
     def test_nballclose(self):
         np_result = np.allclose(np.array([1.0, 2.0, 3.0]), np.array([1.0, 2.0, 3.0]))
         nb_result = nballclose(np.array([1.0, 2.0, 3.0]), np.array([1.0, 2.0, 3.0]))
         self.assertEqual(nb_result, np_result)
 
-        np_result = np.allclose(np.array([1.0, 2.0, 3.0]), np.array([1.0, 2.1, 3.0]), rtol=1e-3)
-        nb_result = nballclose(np.array([1.0, 2.0, 3.0]), np.array([1.0, 2.1, 3.0]), rtol=1e-3)
+        np_result = np.allclose(
+            np.array([1.0, 2.0, 3.0]), np.array([1.0, 2.1, 3.0]), rtol=1e-3
+        )
+        nb_result = nballclose(
+            np.array([1.0, 2.0, 3.0]), np.array([1.0, 2.1, 3.0]), rtol=1e-3
+        )
         self.assertEqual(nb_result, np_result)
 
     def test_nbappend(self):
@@ -171,12 +175,12 @@ class TestNumbaFuncs(unittest.TestCase):
         np.testing.assert_array_equal(nb_result, np_result)
 
     def test_nbconvolve(self):
-        np_result = np.convolve(np.array([1, 2, 3]), np.array([0, 1, 0.5]), 'same')
-        nb_result = nbconvolve(np.array([1, 2, 3]), np.array([0, 1, 0.5]), 'same')
+        np_result = np.convolve(np.array([1, 2, 3]), np.array([0, 1, 0.5]), "same")
+        nb_result = nbconvolve(np.array([1, 2, 3]), np.array([0, 1, 0.5]), "same")
         np.testing.assert_array_equal(nb_result, np_result)
 
         with self.assertRaises(ValueError):
-            nb_result = nbconvolve(np.array([[1, 2], [3, 4]]), np.array([1, 2]), 'same')
+            nb_result = nbconvolve(np.array([[1, 2], [3, 4]]), np.array([1, 2]), "same")
 
     def test_nbcopy(self):
         np_result = np.copy(np.array([1, 2, 3]))
@@ -184,12 +188,14 @@ class TestNumbaFuncs(unittest.TestCase):
         np.testing.assert_array_equal(nb_result, np_result)
 
     def test_nbcorrelate(self):
-        np_result = np.correlate(np.array([1, 2, 3]), np.array([0, 1, 0.5]), 'same')
-        nb_result = nbcorrelate(np.array([1, 2, 3]), np.array([0, 1, 0.5]), 'same')
+        np_result = np.correlate(np.array([1, 2, 3]), np.array([0, 1, 0.5]), "same")
+        nb_result = nbcorrelate(np.array([1, 2, 3]), np.array([0, 1, 0.5]), "same")
         np.testing.assert_array_equal(nb_result, np_result)
 
         with self.assertRaises(ValueError):
-            nb_result = nbcorrelate(np.array([[1, 2], [3, 4]]), np.array([1, 2]), 'same')
+            nb_result = nbcorrelate(
+                np.array([[1, 2], [3, 4]]), np.array([1, 2]), "same"
+            )
 
     def test_nbcount_nonzero(self):
         np_result = np.count_nonzero(np.array([1, 0, 2, 0, 3, 0]))
@@ -344,8 +350,12 @@ class TestNumbaFuncs(unittest.TestCase):
         np.testing.assert_array_equal(nb_result, np_result)
 
     def test_nbisclose(self):
-        np_result = np.isclose(np.array([1.0, 2.0, 3.0]), np.array([1.0, 2.1, 3.0]), rtol=1e-3)
-        nb_result = nbisclose(np.array([1.0, 2.0, 3.0]), np.array([1.0, 2.1, 3.0]), rtol=1e-3)
+        np_result = np.isclose(
+            np.array([1.0, 2.0, 3.0]), np.array([1.0, 2.1, 3.0]), rtol=1e-3
+        )
+        nb_result = nbisclose(
+            np.array([1.0, 2.0, 3.0]), np.array([1.0, 2.1, 3.0]), rtol=1e-3
+        )
         np.testing.assert_array_equal(nb_result, np_result)
 
     def test_nbiscomplex(self):
@@ -449,8 +459,16 @@ class TestNumbaFuncs(unittest.TestCase):
         np.testing.assert_array_equal(nb_result, np_result)
 
     def test_nbselect(self):
-        np_result = np.select([np.array([True, False]), np.array([False, True])], [np.array([1, 2]), np.array([3, 4])], default=0)
-        nb_result = nbselect([np.array([True, False]), np.array([False, True])], [np.array([1, 2]), np.array([3, 4])], default=0)
+        np_result = np.select(
+            [np.array([True, False]), np.array([False, True])],
+            [np.array([1, 2]), np.array([3, 4])],
+            default=0,
+        )
+        nb_result = nbselect(
+            [np.array([True, False]), np.array([False, True])],
+            [np.array([1, 2]), np.array([3, 4])],
+            default=0,
+        )
         np.testing.assert_array_equal(nb_result, np_result)
 
     def test_nbshape(self):
@@ -525,8 +543,8 @@ class TestNumbaFuncs(unittest.TestCase):
         np.testing.assert_array_equal(nb_result, np_result)
 
     def test_nbtrim_zeros(self):
-        np_result = np.trim_zeros(np.array([0, 1, 2, 0, 3, 0]), 'f')
-        nb_result = nbtrim_zeros(np.array([0, 1, 2, 0, 3, 0]), 'f')
+        np_result = np.trim_zeros(np.array([0, 1, 2, 0, 3, 0]), "f")
+        nb_result = nbtrim_zeros(np.array([0, 1, 2, 0, 3, 0]), "f")
         np.testing.assert_array_equal(nb_result, np_result)
 
     def test_nbunion1d(self):
@@ -578,6 +596,7 @@ class TestNumbaFuncs(unittest.TestCase):
         np_result = np.zeros_like(np.array([1, 2, 3]))
         nb_result = nbzeros_like(np.array([1, 2, 3]))
         np.testing.assert_array_equal(nb_result, np_result)
+
 
 if __name__ == "__main__":
     unittest.main()

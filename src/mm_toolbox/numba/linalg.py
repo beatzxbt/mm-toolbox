@@ -3,9 +3,12 @@ from numba import njit
 from typing import Tuple, Union
 
 try:
-    import scipy 
+    import scipy
 except ImportError:
-    raise ImportError(f"Numba requires SciPy for all linalg functions, do 'pip install scipy'.")
+    raise ImportError(
+        f"Numba requires SciPy for all linalg functions, do 'pip install scipy'."
+    )
+
 
 @njit(inline="always")
 def nbcholesky(a: np.ndarray) -> np.ndarray:

@@ -23,8 +23,9 @@ from mm_toolbox.numba.linalg import (
     nbsolve as nbsolve,
     nbsvd as nbsvd,
     nbtrace as nbtrace,
-    nbvdot as nbvdot
+    nbvdot as nbvdot,
 )
+
 
 class TestNumbaLinalgFuncs(unittest.TestCase):
     def test_nbcov(self):
@@ -183,4 +184,3 @@ class TestNumbaLinalgFuncs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

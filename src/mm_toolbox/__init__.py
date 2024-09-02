@@ -3,7 +3,7 @@ from .candles.volume import VolumeCandles as VolumeCandles
 from .candles.time import TimeCandles as TimeCandles
 
 from .logging.logger import (
-    Logger as Logger, 
+    Logger as Logger,
     LoggerConfig as LoggerConfig,
 )
 from .logging.handlers import (
@@ -12,12 +12,8 @@ from .logging.handlers import (
     TelegramLogConfig as TelegramLogConfig,
 )
 
-from .moving_average.ema import (
-    ExponentialMovingAverage as ExponentialMovingAverage
-)
-from .moving_average.hma import (
-    HullMovingAverage as HullMovingAverage
-)
+from .moving_average.ema import ExponentialMovingAverage as ExponentialMovingAverage
+from .moving_average.hma import HullMovingAverage as HullMovingAverage
 
 from .numba.linalg import (
     nbcholesky as nbcholesky,
@@ -42,7 +38,7 @@ from .numba.linalg import (
     nbsolve as nbsolve,
     nbsvd as nbsvd,
     nbtrace as nbtrace,
-    nbvdot as nbvdot
+    nbvdot as nbvdot,
 )
 from .numba.array import (
     nballclose as nballclose,
@@ -142,11 +138,11 @@ from .orderbook.standard import Orderbook as Orderbook
 
 from .ringbuffer.onedim import (
     RingBufferSingleDimFloat as RingBufferSingleDimFloat,
-    RingBufferSingleDimInt as RingBufferSingleDimInt
+    RingBufferSingleDimInt as RingBufferSingleDimInt,
 )
 from .ringbuffer.twodim import (
     RingBufferTwoDimFloat as RingBufferTwoDimFloat,
-    RingBufferTwoDimInt as RingBufferTwoDimInt
+    RingBufferTwoDimInt as RingBufferTwoDimInt,
 )
 from .ringbuffer.multidim import RingBufferMultiDim as RingBufferMultiDim
 
@@ -158,15 +154,14 @@ from .time.time import (
     time_us as time_us,
     time_ns as time_ns,
     time_iso8601 as time_iso8601,
-    iso8601_to_unix as iso8601_to_unix
+    iso8601_to_unix as iso8601_to_unix,
 )
 
 from .websocket.tools import VerifyWsPayload as VerifyWsPayload
-from .websocket.stream import (
-    WsConnectionEvictionPolicy as WsConnectionEvictionPolicy, 
-    SingleWsConnection as SingleWsConnection, 
-    WsPool as WsPool, 
-    FastWebsocketStream as FastWebsocketStream
+from .websocket.client import (
+    SingleWsConnection as SingleWsConnection,
+    WsPoolEvictionPolicy as WsPoolEvictionPolicy,
+    WsPool as WsPool,
 )
 
 from .weights.ema import ema_weights as ema_weights
@@ -310,10 +305,9 @@ __all__ = [
     "time_iso8601",
     "iso8601_to_unix",
     "VerifyWsPayload",
-    "WsConnectionEvictionPolicy",
     "SingleWsConnection",
+    "WsConnectionEvictionPolicy",
     "WsPool",
-    "FastWebsocketStream",
     "ema_weights",
     "geometric_weights",
 ]

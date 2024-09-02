@@ -100,7 +100,9 @@ class TestOrderbook(unittest.TestCase):
         self.assertEqual(self.orderbook.asks[4, 1], 19.3)
 
     def test_update_bids_add_new_deep(self):
-        inbounds_level = np.array([59998.5, 0.25])  # This should become the new 1st level
+        inbounds_level = np.array(
+            [59998.5, 0.25]
+        )  # This should become the new 1st level
         outbounds_level = np.array(
             [59992.5, 0.4]
         )  # This is out of bounds, shouldnt show up
@@ -122,7 +124,9 @@ class TestOrderbook(unittest.TestCase):
         self.assertEqual(len(self.orderbook.bids), self.size)
 
     def test_update_asks_add_new_deep(self):
-        inbounds_level = np.array([60000.5, 0.25])  # This should become the new 1st level
+        inbounds_level = np.array(
+            [60000.5, 0.25]
+        )  # This should become the new 1st level
         outbounds_level = np.array(
             [60006.5, 0.4]
         )  # This is out of bounds, shouldnt show up
@@ -144,7 +148,9 @@ class TestOrderbook(unittest.TestCase):
         self.assertEqual(len(self.orderbook.asks), self.size)
 
     def test_update_bids_add_new_jump(self):
-        jump_level = np.array([60000.5, 1.75])  # This is higher than the current best ask
+        jump_level = np.array(
+            [60000.5, 1.75]
+        )  # This is higher than the current best ask
 
         self.orderbook.update_bids(np.array([jump_level]), self.orderbook.seq_id + 1)
 
@@ -153,13 +159,17 @@ class TestOrderbook(unittest.TestCase):
         self.assertEqual(self.orderbook.bids[1, 0], 59999.0)  # Unchanged from before
         self.assertEqual(self.orderbook.bids[1, 1], 1.0)  # Unchanged from before
 
-        self.assertEqual(self.orderbook.asks[0, 0], 60001.0)  # 2nd level becomes the 1st
+        self.assertEqual(
+            self.orderbook.asks[0, 0], 60001.0
+        )  # 2nd level becomes the 1st
         self.assertEqual(self.orderbook.asks[0, 1], 2.0)  # 2nd level becomes the 1st
         self.assertEqual(self.orderbook.asks[4, 0], 0.0)  # Last level is fresh (new)
         self.assertEqual(self.orderbook.asks[4, 1], 0.0)  # Last level is fresh (new)
 
     def test_update_asks_add_new_jump(self):
-        jump_level = np.array([59998.5, 1.75])  # This is lower than the current best bid
+        jump_level = np.array(
+            [59998.5, 1.75]
+        )  # This is lower than the current best bid
 
         self.orderbook.update_asks(np.array([jump_level]), self.orderbook.seq_id + 1)
 
@@ -168,7 +178,9 @@ class TestOrderbook(unittest.TestCase):
         self.assertEqual(self.orderbook.asks[1, 0], 60000.0)  # Unchanged from before
         self.assertEqual(self.orderbook.asks[1, 1], 1.0)  # Unchanged from before
 
-        self.assertEqual(self.orderbook.bids[0, 0], 59998.0)  # 2nd level becomes the 1st
+        self.assertEqual(
+            self.orderbook.bids[0, 0], 59998.0
+        )  # 2nd level becomes the 1st
         self.assertEqual(self.orderbook.bids[0, 1], 2.0)  # 2nd level becomes the 1st
         self.assertEqual(self.orderbook.bids[4, 0], 0.0)  # Last level is fresh (new)
         self.assertEqual(self.orderbook.bids[4, 1], 0.0)  # Last level is fresh (new)
