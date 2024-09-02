@@ -22,26 +22,26 @@ class RingBufferTwoDimFloat:
 
     capacity: uint32
     sub_array_len: uint32
-    _left_index_: uint32
-    _right_index_: uint32
-    _array_: float64[:, :]
+    _left_index: uint32
+    _right_index: uint32
+    _array: float64[:, :]
 
     def __init__(self, capacity: int, sub_array_len: int) -> None:
         self.capacity = capacity
         self.sub_array_len = sub_array_len
-        self._left_index_ = 0
-        self._right_index_ = 0
-        self._array_ = np.zeros(
+        self._left_index = 0
+        self._right_index = 0
+        self._array = np.zeros(
             shape=(self.capacity, self.sub_array_len), dtype=float64
         )
 
     @property
     def is_full(self) -> bool:
-        return (self._right_index_ - self._left_index_) == self.capacity
+        return (self._right_index - self._left_index) == self.capacity
 
     @property
     def is_empty(self) -> bool:
-        return self._left_index_ == 0 and self._right_index_ == 0
+        return self._left_index == 0 and self._right_index == 0
 
     @property
     def dtype(self) -> np.dtype:
@@ -57,34 +57,34 @@ class RingBufferTwoDimFloat:
 
         Returns
         -------
-        np.ndarray[np.float64]
+        np.ndarray[float]
             A numpy array containing the unwrapped buffer data.
         """
-        if self._right_index_ <= self.capacity:
-            return self._array_[self._left_index_ : self._right_index_]
+        if self._right_index <= self.capacity:
+            return self._array[self._left_index : self._right_index]
 
         return np.concatenate(
             (
-                self._array_[self._left_index_ :],
-                self._array_[: self._right_index_ % self.capacity],
+                self._array[self._left_index :],
+                self._array[: self._right_index % self.capacity],
             )
         )
 
     def _fix_indices_(self) -> None:
         """
-        Enforce the invariant that 0 <= self._left_index_ < self.capacity.
+        Enforce the invariant that 0 <= self._left_index < self.capacity.
 
         This method adjusts the indices to ensure they stay within the bounds
         of the buffer's capacity.
         """
-        if self._left_index_ >= self.capacity:
-            self._left_index_ -= self.capacity
-            self._right_index_ -= self.capacity
-        elif self._left_index_ < 0:
-            self._left_index_ += self.capacity
-            self._right_index_ += self.capacity
+        if self._left_index >= self.capacity:
+            self._left_index -= self.capacity
+            self._right_index -= self.capacity
+        elif self._left_index < 0:
+            self._left_index += self.capacity
+            self._right_index += self.capacity
 
-    def append(self, values: np.ndarray[np.float64]) -> None:
+    def append(self, values: np.ndarray[float]) -> None:
         """
         Add a 1D array to the end of the buffer.
 
@@ -96,13 +96,13 @@ class RingBufferTwoDimFloat:
         assert values.size == self.sub_array_len and values.ndim == 1
 
         if self.is_full:
-            self._left_index_ += 1
+            self._left_index += 1
 
-        self._array_[self._right_index_ % self.capacity, :] = values
-        self._right_index_ += 1
+        self._array[self._right_index % self.capacity, :] = values
+        self._right_index += 1
         self._fix_indices_()
 
-    def pop(self) -> np.ndarray[np.float64]:
+    def pop(self) -> np.ndarray[float]:
         """
         Remove and return the last value from the buffer.
 
@@ -118,12 +118,12 @@ class RingBufferTwoDimFloat:
         """
         assert len(self) > 0, "Cannot pop from an empty RingBuffer."
 
-        self._right_index_ -= 1
+        self._right_index -= 1
         self._fix_indices_()
-        res = self._array_[self._right_index_ % self.capacity]
+        res = self._array[self._right_index % self.capacity]
         return res
 
-    def popleft(self) -> np.ndarray[np.float64]:
+    def popleft(self) -> np.ndarray[float]:
         """
         Remove and return the first value from the buffer.
 
@@ -139,12 +139,12 @@ class RingBufferTwoDimFloat:
         """
         assert len(self) > 0, "Cannot pop from an empty RingBuffer."
 
-        res = self._array_[self._left_index_]
-        self._left_index_ += 1
+        res = self._array[self._left_index]
+        self._left_index += 1
         self._fix_indices_()
         return res
 
-    def __contains__(self, sub_array: np.ndarray[np.float64]) -> bool:
+    def __contains__(self, sub_array: np.ndarray[float]) -> bool:
         assert sub_array.size == self.sub_array_len and sub_array.ndim == 1
 
         if self.is_empty:
@@ -154,7 +154,7 @@ class RingBufferTwoDimFloat:
             match = True
 
             for j in range(self.sub_array_len):
-                if self._array_[i, j] != sub_array[j]:
+                if self._array[i, j] != sub_array[j]:
                     match = False
                     break
 
@@ -169,7 +169,7 @@ class RingBufferTwoDimFloat:
         return False
 
     def __len__(self) -> int:
-        return self._right_index_ - self._left_index_
+        return self._right_index - self._left_index
 
     def __getitem__(self, item: int) -> np.ndarray:
         return self.as_array()[item]
@@ -201,24 +201,24 @@ class RingBufferTwoDimInt:
 
     capacity: uint32
     sub_array_len: uint32
-    _left_index_: uint32
-    _right_index_: uint32
-    _array_: int64[:, :]
+    _left_index: uint32
+    _right_index: uint32
+    _array: int64[:, :]
 
     def __init__(self, capacity: int, sub_array_len: int) -> None:
         self.capacity = capacity
         self.sub_array_len = sub_array_len
-        self._left_index_ = 0
-        self._right_index_ = 0
-        self._array_ = np.zeros(shape=(self.capacity, self.sub_array_len), dtype=int64)
+        self._left_index = 0
+        self._right_index = 0
+        self._array = np.zeros(shape=(self.capacity, self.sub_array_len), dtype=int64)
 
     @property
     def is_full(self) -> bool:
-        return (self._right_index_ - self._left_index_) == self.capacity
+        return (self._right_index - self._left_index) == self.capacity
 
     @property
     def is_empty(self) -> bool:
-        return self._left_index_ == 0 and self._right_index_ == 0
+        return self._left_index == 0 and self._right_index == 0
 
     @property
     def dtype(self) -> np.dtype:
@@ -234,34 +234,34 @@ class RingBufferTwoDimInt:
 
         Returns
         -------
-        np.ndarray[np.int64]
+        np.ndarray[int]
             A numpy array containing the unwrapped buffer data.
         """
-        if self._right_index_ <= self.capacity:
-            return self._array_[self._left_index_ : self._right_index_]
+        if self._right_index <= self.capacity:
+            return self._array[self._left_index : self._right_index]
 
         return np.concatenate(
             (
-                self._array_[self._left_index_ :],
-                self._array_[: self._right_index_ % self.capacity],
+                self._array[self._left_index :],
+                self._array[: self._right_index % self.capacity],
             )
         )
 
     def _fix_indices_(self) -> None:
         """
-        Enforce the invariant that 0 <= self._left_index_ < self.capacity.
+        Enforce the invariant that 0 <= self._left_index < self.capacity.
 
         This method adjusts the indices to ensure they stay within the bounds
         of the buffer's capacity.
         """
-        if self._left_index_ >= self.capacity:
-            self._left_index_ -= self.capacity
-            self._right_index_ -= self.capacity
-        elif self._left_index_ < 0:
-            self._left_index_ += self.capacity
-            self._right_index_ += self.capacity
+        if self._left_index >= self.capacity:
+            self._left_index -= self.capacity
+            self._right_index -= self.capacity
+        elif self._left_index < 0:
+            self._left_index += self.capacity
+            self._right_index += self.capacity
 
-    def append(self, values: np.ndarray[np.int64]) -> None:
+    def append(self, values: np.ndarray[int]) -> None:
         """
         Add a 1D array to the end of the buffer.
 
@@ -273,13 +273,13 @@ class RingBufferTwoDimInt:
         assert values.size == self.sub_array_len and values.ndim == 1
 
         if self.is_full:
-            self._left_index_ += 1
+            self._left_index += 1
 
-        self._array_[self._right_index_ % self.capacity, :] = values
-        self._right_index_ += 1
+        self._array[self._right_index % self.capacity, :] = values
+        self._right_index += 1
         self._fix_indices_()
 
-    def pop(self) -> np.ndarray[np.int64]:
+    def pop(self) -> np.ndarray[int]:
         """
         Remove and return the last value from the buffer.
 
@@ -295,12 +295,12 @@ class RingBufferTwoDimInt:
         """
         assert len(self) > 0, "Cannot pop from an empty RingBuffer."
 
-        self._right_index_ -= 1
+        self._right_index -= 1
         self._fix_indices_()
-        res = self._array_[self._right_index_ % self.capacity]
+        res = self._array[self._right_index % self.capacity]
         return res
 
-    def popleft(self) -> np.ndarray[np.int64]:
+    def popleft(self) -> np.ndarray[int]:
         """
         Remove and return the first value from the buffer.
 
@@ -316,12 +316,12 @@ class RingBufferTwoDimInt:
         """
         assert len(self) > 0, "Cannot pop from an empty RingBuffer."
 
-        res = self._array_[self._left_index_]
-        self._left_index_ += 1
+        res = self._array[self._left_index]
+        self._left_index += 1
         self._fix_indices_()
         return res
 
-    def __contains__(self, sub_array: np.ndarray[np.int64]) -> bool:
+    def __contains__(self, sub_array: np.ndarray[int]) -> bool:
         assert sub_array.size == self.sub_array_len and sub_array.ndim == 1
 
         if self.is_empty:
@@ -331,7 +331,7 @@ class RingBufferTwoDimInt:
             match = True
 
             for j in range(self.sub_array_len):
-                if self._array_[i, j] != sub_array[j]:
+                if self._array[i, j] != sub_array[j]:
                     match = False
                     break
 
@@ -346,7 +346,7 @@ class RingBufferTwoDimInt:
         return False
 
     def __len__(self) -> int:
-        return self._right_index_ - self._left_index_
+        return self._right_index - self._left_index
 
     def __getitem__(self, item: int) -> np.ndarray:
         return self.as_array()[item]

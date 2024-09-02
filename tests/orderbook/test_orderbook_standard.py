@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 
-from src.mm_toolbox.orderbook import Orderbook
+from mm_toolbox.orderbook import Orderbook
 
 
 class TestOrderbook(unittest.TestCase):

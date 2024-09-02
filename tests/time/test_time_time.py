@@ -1,5 +1,5 @@
 import unittest
-from src.mm_toolbox.time import (
+from mm_toolbox.time import (
     time_s,
     time_iso8601,
     iso8601_to_unix,

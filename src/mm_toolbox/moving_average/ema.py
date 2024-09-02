@@ -3,7 +3,7 @@ from numba.types import bool_, uint32, float64
 from numba.experimental import jitclass
 from typing import Optional
 
-from src.mm_toolbox.ringbuffer import RingBufferSingleDimFloat
+from mm_toolbox.ringbuffer import RingBufferSingleDimFloat
 
 
 @jitclass
@@ -42,7 +42,7 @@ class ExponentialMovingAverage:
         self.value = 0.0
         self.ringbuffer = RingBufferSingleDimFloat(self.window)
 
-    def _recursive_ema_(self, update: float) -> float:
+    def _recursive_ema(self, update: float) -> float:
         """
         Internal method to calculate the EMA given a new data point.
 
@@ -92,7 +92,7 @@ class ExponentialMovingAverage:
         new_val : float
             The new data point to include in the EMA calculation.
         """
-        self.value = self._recursive_ema_(new_val)
+        self.value = self._recursive_ema(new_val)
         if not self.fast:
             self.ringbuffer.append(self.value)
 

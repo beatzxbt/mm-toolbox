@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from src.mm_toolbox.ringbuffer import RingBufferTwoDimFloat, RingBufferTwoDimInt
+from mm_toolbox.ringbuffer import RingBufferTwoDimFloat, RingBufferTwoDimInt
 
 
 

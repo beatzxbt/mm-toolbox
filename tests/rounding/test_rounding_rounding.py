@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from src.mm_toolbox.rounding import Round
+from mm_toolbox.rounding import Round
 
 
 class TestRound(unittest.TestCase):
