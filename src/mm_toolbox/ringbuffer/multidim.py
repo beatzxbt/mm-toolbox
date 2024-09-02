@@ -4,6 +4,7 @@ from typing import Tuple, Union
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+
 class RingBufferMultiDim:
     """
     A multi-dimensional fixed-size circular buffer.

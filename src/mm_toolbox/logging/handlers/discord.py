@@ -5,13 +5,18 @@ from typing import List, Coroutine
 from dataclasses import dataclass
 from .base import LogConfig, LogHandler
 
+
 @dataclass
 class DiscordLogConfig(LogConfig):
     webhook: str = ""
 
     def validate(self) -> None:
-        if not self.webhook or self.webhook.find("https://discord.com/api/webhooks/") == -1:
+        if (
+            not self.webhook
+            or self.webhook.find("https://discord.com/api/webhooks/") == -1
+        ):
             raise ValueError("Missing or invalid webhook url.")
+
 
 class DiscordLogHandler(LogHandler):
     def __init__(self, config: DiscordLogConfig) -> None:

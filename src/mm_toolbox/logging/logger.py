@@ -4,27 +4,22 @@ from typing import List
 from mm_toolbox.time import time_iso8601, time_s
 
 from .handlers import (
-    LogConfig, 
-    LogHandler, 
-    FileLogConfig, 
-    FileLogHandler, 
-    DiscordLogConfig, 
-    DiscordLogHandler, 
-    TelegramLogConfig, 
-    TelegramLogHandler
+    LogConfig,
+    LogHandler,
+    FileLogConfig,
+    FileLogHandler,
+    DiscordLogConfig,
+    DiscordLogHandler,
+    TelegramLogConfig,
+    TelegramLogHandler,
 )
 
-LOG_LEVEL_MAP = {
-    10: "DEBUG",
-    20: "INFO",
-    30: "WARNING",
-    40: "ERROR",
-    50: "CRITICAL"
-}
+LOG_LEVEL_MAP = {10: "DEBUG", 20: "INFO", 30: "WARNING", 40: "ERROR", 50: "CRITICAL"}
 
 LOG_LEVELS = {10, 20, 30, 40, 50}
 
-@dataclass 
+
+@dataclass
 class LoggerConfig(LogConfig):
     """
     Core configuration for the Logger.
@@ -43,6 +38,7 @@ class LoggerConfig(LogConfig):
     max_buffer_age : int
         Maximum age (in seconds) before flushing the buffer. Default is 10.
     """
+
     base_level: str = "WARNING"
     stout: bool = True
     max_buffer_size: int = 10
@@ -55,18 +51,19 @@ class LoggerConfig(LogConfig):
             raise ValueError("Max buffer size must be positive.")
         if self.max_buffer_age < 1:
             raise ValueError("Max buffer age must be positive.")
-    
+
+
 class Logger:
     def __init__(
-        self, 
-        logger_config: LoggerConfig = None, 
+        self,
+        logger_config: LoggerConfig = None,
         file_config: FileLogConfig = None,
-        discord_config: DiscordLogConfig = None, 
+        discord_config: DiscordLogConfig = None,
         telegram_config: TelegramLogConfig = None,
     ) -> None:
         self.logger_config = logger_config if logger_config else LoggerConfig()
         self.logger_config.validate()
-        
+
         self.log_message_buffer: List[str] = []
         self.current_buffer_size = 0
         self.last_flush_time = time_s()
@@ -139,10 +136,10 @@ class Logger:
 
                 self.log_message_buffer.append(log_entry)
                 self.current_buffer_size += 1
-                
+
                 if self._stout:
                     print(log_entry)
-                    
+
                 # Immediate flush for ERROR or CRITICAL levels
                 if level >= 40:
                     await self._flush_buffer()
@@ -150,8 +147,10 @@ class Logger:
                 # Buffer messages below ERROR level
                 else:
                     is_buffer_full = self.current_buffer_size >= self._max_buffer_size
-                    is_buffer_old = time_s() - self.last_flush_time >= self._max_buffer_age
-                    
+                    is_buffer_old = (
+                        time_s() - self.last_flush_time >= self._max_buffer_age
+                    )
+
                     # Flush buffer if it's full or aged enough
                     if is_buffer_full or is_buffer_old:
                         await self._flush_buffer()
@@ -165,11 +164,13 @@ class Logger:
         try:
             if level >= self._base_level:
                 log_entry = f"{time_iso8601()} - {LOG_LEVEL_MAP[level]} - {message}"
-                self._ev_loop.call_soon_threadsafe(self._queue.put_nowait, (log_entry, level))
+                self._ev_loop.call_soon_threadsafe(
+                    self._queue.put_nowait, (log_entry, level)
+                )
 
         except Exception as e:
             raise Exception(f"Failed to submit log: {e}")
-        
+
     def debug(self, message: str) -> None:
         self._submit_log(10, message)
 
@@ -189,10 +190,9 @@ class Logger:
         """
         Shuts down the logger, flushing all buffers and closing handlers.
         """
-        self._shutdown_flag = True # Kills the ingestor task.
-        await self._queue.join()   
+        self._shutdown_flag = True  # Kills the ingestor task.
+        await self._queue.join()
         if self.log_message_buffer:
             await self._flush_buffer()
         for handler in self._log_handlers:
             await handler.close()
-        

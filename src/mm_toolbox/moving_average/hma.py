@@ -12,7 +12,7 @@ class HullMovingAverage:
     fast: bool_
     ringbuffer: RingBufferSingleDimFloat.class_type.instance_type
     value: float64
-    
+
     _short_ema: EMA.class_type.instance_type
     _long_ema: EMA.class_type.instance_type
     _smooth_ema: EMA.class_type.instance_type

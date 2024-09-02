@@ -21,7 +21,7 @@ from .linalg import (
     nbsolve as nbsolve,
     nbsvd as nbsvd,
     nbtrace as nbtrace,
-    nbvdot as nbvdot
+    nbvdot as nbvdot,
 )
 
 from .array import (
