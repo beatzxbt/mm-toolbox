@@ -17,7 +17,8 @@ class VerifyWsPayload:
     def __init__(self, sample: Dict, strict: bool = False) -> None:
         self.sample = sample
         self.strict = strict
-        self.type_map = self._create_type_map_(sample)
+        
+        self._type_map = self._create_type_map(sample)
 
     def verify(self, payload: Dict) -> bool:
         """
@@ -33,9 +34,9 @@ class VerifyWsPayload:
         bool
             True if the payload matches the sample structure, False otherwise.
         """
-        return self._check_structure_(self.type_map, payload)
+        return self._check_structure(self._type_map, payload)
 
-    def _create_type_map_(self, sample: Dict) -> Dict:
+    def _create_type_map(self, sample: Dict) -> Dict:
         """
         Creates a type map for the sample dictionary.
 
@@ -53,13 +54,13 @@ class VerifyWsPayload:
 
         for key, value in sample.items():
             if isinstance(value, dict):
-                type_map[key] = self._create_type_map_(value)
+                type_map[key] = self._create_type_map(value)
             else:
                 type_map[key] = type(value)
 
         return type_map
 
-    def _check_structure_(self, type_map: Dict, payload: Dict) -> bool:
+    def _check_structure(self, type_map: Dict, payload: Dict) -> bool:
         """
         Recursively check if the payload matches the sample structure.
 
@@ -84,7 +85,7 @@ class VerifyWsPayload:
                 if not isinstance(payload[key], dict):
                     return False
 
-                if not self._check_structure_(type_map[key], payload[key]):
+                if not self._check_structure(type_map[key], payload[key]):
                     return False
 
             else:

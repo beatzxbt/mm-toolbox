@@ -15,7 +15,7 @@
 # import unittest
 # import numpy as np
 
-# from src.mm_toolbox.orderbook import HFTOrderbook
+# from mm_toolbox.orderbook import HFTOrderbook
 
 # class TestHFTOrderbook(unittest.TestCase):
 #     def setUp(self):

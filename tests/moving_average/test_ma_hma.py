@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 
-from src.mm_toolbox.moving_average.hma import HullMovingAverage as HMA
+from mm_toolbox.moving_average.hma import HullMovingAverage as HMA
 
 
 class TestHMA(unittest.TestCase):
@@ -16,18 +16,18 @@ class TestHMA(unittest.TestCase):
         self.assertFalse(self.hma.fast)
         self.assertTrue(self.fast_hma.fast)
         self.assertEqual(self.hma.value, 0.0)
-        self.assertEqual(self.hma.short_ema.window, self.window // 2)
-        self.assertEqual(self.hma.long_ema.window, self.window)
-        self.assertEqual(self.hma.smooth_ema.window, int(self.window**0.5))
+        self.assertEqual(self.hma._short_ema.window, self.window // 2)
+        self.assertEqual(self.hma._long_ema.window, self.window)
+        self.assertEqual(self.hma._smooth_ema.window, int(self.window**0.5))
         self.assertEqual(len(self.hma.ringbuffer), 0)
 
     def test_class_initialization_fast(self):
         self.assertEqual(self.fast_hma.window, self.window)
         self.assertTrue(self.fast_hma.fast)
         self.assertEqual(self.fast_hma.value, 0.0)
-        self.assertEqual(self.fast_hma.short_ema.window, self.window // 2)
-        self.assertEqual(self.fast_hma.long_ema.window, self.window)
-        self.assertEqual(self.fast_hma.smooth_ema.window, int(self.window**0.5))
+        self.assertEqual(self.fast_hma._short_ema.window, self.window // 2)
+        self.assertEqual(self.fast_hma._long_ema.window, self.window)
+        self.assertEqual(self.fast_hma._smooth_ema.window, int(self.window**0.5))
         self.assertEqual(len(self.fast_hma.ringbuffer), 0)
 
     def test_recursive_hma(self):

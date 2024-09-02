@@ -1,6 +1,6 @@
 import unittest
 
-from src.mm_toolbox.websocket import VerifyWsPayload
+from mm_toolbox.websocket import VerifyWsPayload
 
 
 class TestVerifyWsPayload(unittest.TestCase):

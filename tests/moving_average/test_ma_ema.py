@@ -1,8 +1,8 @@
 import unittest
 import numpy as np
 
-from src.mm_toolbox.ringbuffer import RingBufferSingleDimFloat
-from src.mm_toolbox.moving_average import ExponentialMovingAverage as EMA
+from mm_toolbox.ringbuffer import RingBufferSingleDimFloat
+from mm_toolbox.moving_average import ExponentialMovingAverage as EMA
 
 
 class TestEMA(unittest.TestCase):
@@ -32,7 +32,7 @@ class TestEMA(unittest.TestCase):
         initial_value = 1.0
         update_value = 2.0
         self.ema.value = initial_value
-        result = self.ema._recursive_ema_(update_value)
+        result = self.ema._recursive_ema(update_value)
         expected = self.alpha * update_value + (1.0 - self.alpha) * initial_value
         self.assertAlmostEqual(result, expected)
 
@@ -40,7 +40,7 @@ class TestEMA(unittest.TestCase):
         initial_value = 1.0
         update_value = 2.0
         self.fast_ema.value = initial_value
-        result = self.fast_ema._recursive_ema_(update_value)
+        result = self.fast_ema._recursive_ema(update_value)
         expected = self.alpha * update_value + (1.0 - self.alpha) * initial_value
         self.assertAlmostEqual(result, expected)
 

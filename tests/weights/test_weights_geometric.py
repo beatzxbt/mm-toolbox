@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from src.mm_toolbox.weights import geometric_weights
+from mm_toolbox.weights import geometric_weights
 
 
 class TestGeometricWeights(unittest.TestCase):

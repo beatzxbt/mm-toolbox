@@ -67,36 +67,36 @@ class Logger:
         self.logger_config = logger_config if logger_config else LoggerConfig()
         self.logger_config.validate()
         
-        self.base_level = self._get_log_level_(self.logger_config.base_level)
-        self.stout = self.logger_config.stout
-        self.max_buffer_size = self.logger_config.max_buffer_size
-        self.max_buffer_age = self.logger_config.max_buffer_age
-
-        self.log_handlers: List[LogHandler] = []
-
-        if file_config:
-            file_config.validate()
-            self.log_handlers.append(FileLogHandler(file_config))
-
-        if discord_config:
-            discord_config.validate()
-            self.log_handlers.append(DiscordLogHandler(discord_config))
-
-        if telegram_config:
-            telegram_config.validate()
-            self.log_handlers.append(TelegramLogHandler(telegram_config))
-
         self.log_message_buffer: List[str] = []
         self.current_buffer_size = 0
         self.last_flush_time = time_s()
 
-        self.queue = asyncio.Queue()
-        self.loop = asyncio.get_event_loop()
-        self.shutdown_flag = False
+        self._base_level = self._get_log_level(self.logger_config.base_level)
+        self._stout = self.logger_config.stout
+        self._max_buffer_size = self.logger_config.max_buffer_size
+        self._max_buffer_age = self.logger_config.max_buffer_age
 
-        self.loop.create_task(self._log_ingestor_())
+        self._log_handlers: List[LogHandler] = []
 
-    def _get_log_level_(self, level_name: str) -> int:
+        if file_config:
+            file_config.validate()
+            self._log_handlers.append(FileLogHandler(file_config))
+
+        if discord_config:
+            discord_config.validate()
+            self._log_handlers.append(DiscordLogHandler(discord_config))
+
+        if telegram_config:
+            telegram_config.validate()
+            self._log_handlers.append(TelegramLogHandler(telegram_config))
+
+        self._queue = asyncio.Queue()
+        self._ev_loop = asyncio.get_event_loop()
+        self._shutdown_flag = False
+
+        self._ev_loop.create_task(self._log_ingestor())
+
+    def _get_log_level(self, level_name: str) -> int:
         """
         Converts a log level name to its corresponding integer value.
 
@@ -114,17 +114,17 @@ class Logger:
             if name == level_name:
                 return level
 
-    async def _flush_buffer_(self) -> None:
+    async def _flush_buffer(self) -> None:
         """
         Flushes the log message buffer to all handlers.
         """
-        for handler in self.log_handlers:
+        for handler in self._log_handlers:
             await handler.flush(self.log_message_buffer)
         self.log_message_buffer.clear()
         self.current_buffer_size = 0
         self.last_flush_time = time_s()
 
-    async def _log_ingestor_(self):
+    async def _log_ingestor(self):
         """
         Asynchronous loop that processes log messages from the queue.
 
@@ -133,66 +133,66 @@ class Logger:
         Exception
             If there is an error during the log writing process.
         """
-        while not self.shutdown_flag or not self.queue.empty():
+        while not self._shutdown_flag or not self._queue.empty():
             try:
-                log_entry, level = await self.queue.get()
+                log_entry, level = await self._queue.get()
 
                 self.log_message_buffer.append(log_entry)
                 self.current_buffer_size += 1
                 
-                if self.stout:
+                if self._stout:
                     print(log_entry)
                     
                 # Immediate flush for ERROR or CRITICAL levels
                 if level >= 40:
-                    await self._flush_buffer_()
+                    await self._flush_buffer()
 
                 # Buffer messages below ERROR level
                 else:
-                    is_buffer_full = self.current_buffer_size >= self.max_buffer_size
-                    is_buffer_old = time_s() - self.last_flush_time >= self.max_buffer_age
+                    is_buffer_full = self.current_buffer_size >= self._max_buffer_size
+                    is_buffer_old = time_s() - self.last_flush_time >= self._max_buffer_age
                     
                     # Flush buffer if it's full or aged enough
                     if is_buffer_full or is_buffer_old:
-                        await self._flush_buffer_()
+                        await self._flush_buffer()
 
-                self.queue.task_done()
+                self._queue.task_done()
 
             except Exception as e:
                 raise Exception(f"Log writer loop: {e}")
 
-    def _submit_log_(self, level: int, message: str) -> None:
+    def _submit_log(self, level: int, message: str) -> None:
         try:
-            if level >= self.base_level:
+            if level >= self._base_level:
                 log_entry = f"{time_iso8601()} - {LOG_LEVEL_MAP[level]} - {message}"
-                self.loop.call_soon_threadsafe(self.queue.put_nowait, (log_entry, level))
+                self._ev_loop.call_soon_threadsafe(self._queue.put_nowait, (log_entry, level))
 
         except Exception as e:
             raise Exception(f"Failed to submit log: {e}")
         
     def debug(self, message: str) -> None:
-        self._submit_log_(10, message)
+        self._submit_log(10, message)
 
     def info(self, message: str) -> None:
-        self._submit_log_(20, message)
+        self._submit_log(20, message)
 
     def warning(self, message: str) -> None:
-        self._submit_log_(30, message)
+        self._submit_log(30, message)
 
     def error(self, message: str) -> None:
-        self._submit_log_(40, message)
+        self._submit_log(40, message)
 
     def critical(self, message: str) -> None:
-        self._submit_log_(50, message)
+        self._submit_log(50, message)
 
     async def shutdown(self) -> None:
         """
         Shuts down the logger, flushing all buffers and closing handlers.
         """
-        self.shutdown_flag = True # Kills the ingestor task.
-        await self.queue.join()   
+        self._shutdown_flag = True # Kills the ingestor task.
+        await self._queue.join()   
         if self.log_message_buffer:
-            await self._flush_buffer_()
-        for handler in self.log_handlers:
+            await self._flush_buffer()
+        for handler in self._log_handlers:
             await handler.close()
         

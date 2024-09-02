@@ -43,8 +43,8 @@ class BaseCandles(ABC):
         self.open_timestamp = 0.0
         self.close_timestamp = 0.0
 
-        self._cum_price_volume_ = 0.0
-        self._total_volume_ = 0.0
+        self._cum_price_volume = 0.0
+        self._total_volume = 0.0
 
         self.ringbuffer = RingBufferTwoDimFloat(capacity=self.num_candles, sub_array_len=10)
 
@@ -103,8 +103,8 @@ class BaseCandles(ABC):
         self.close_timestamp = 0.0
         self.total_volume = 0.0
 
-        self._cum_price_volume_ = 0.0
-        self._total_volume_ = 0.0
+        self._cum_price_volume = 0.0
+        self._total_volume = 0.0
 
     def insert_candle(
         self,
@@ -229,9 +229,9 @@ class BaseCandles(ABC):
             self.process_trade(timestamp, side, price, size)
 
     def calculate_vwap(self, price: float, size: float) -> float:
-        self._cum_price_volume_ += price * size
-        self._total_volume_ += size
-        return self._cum_price_volume_ / self._total_volume_
+        self._cum_price_volume += price * size
+        self._total_volume += size
+        return self._cum_price_volume / self._total_volume
 
     def durations(self) -> np.ndarray[float]:
         candles = self.as_array()
