@@ -1,6 +1,6 @@
 import asyncio
 import aiosonic
-import orjson
+import msgspec
 from typing import List, Coroutine
 from dataclasses import dataclass
 from .base import LogConfig, LogHandler
@@ -23,6 +23,8 @@ class TelegramLogConfig(LogConfig):
 
 
 class TelegramLogHandler(LogHandler):
+    json_encoder = msgspec.json.Encoder()
+
     def __init__(self, config: TelegramLogConfig) -> None:
         self.chat_id = config.chat_id
 
@@ -43,8 +45,8 @@ class TelegramLogHandler(LogHandler):
                 tasks.append(
                     self.client.post(
                         url=self.url,
-                        data=orjson.dumps(payload).decode(),
                         headers=self.headers,
+                        json=self.json_encoder.encode(payload),
                     )
                 )
 
