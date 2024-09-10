@@ -92,7 +92,7 @@ class Logger:
         self._shutdown_flag = False
 
         self._ev_loop.create_task(self._log_ingestor())
-
+        
     def _get_log_level(self, level_name: str) -> int:
         """
         Converts a log level name to its corresponding integer value.
@@ -121,7 +121,7 @@ class Logger:
         self.current_buffer_size = 0
         self.last_flush_time = time_s()
 
-    async def _log_ingestor(self):
+    async def _log_ingestor(self) -> None:
         """
         Asynchronous loop that processes log messages from the queue.
 
@@ -159,6 +159,8 @@ class Logger:
 
             except Exception as e:
                 raise Exception(f"Log writer loop: {e}")
+        
+        return
 
     def _submit_log(self, level: int, message: str) -> None:
         try:
