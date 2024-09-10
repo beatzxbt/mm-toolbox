@@ -1,6 +1,6 @@
 import asyncio
 import aiosonic
-import orjson
+import msgspec
 from typing import List, Coroutine
 from dataclasses import dataclass
 from .base import LogConfig, LogHandler
@@ -19,6 +19,8 @@ class DiscordLogConfig(LogConfig):
 
 
 class DiscordLogHandler(LogHandler):
+    json_encoder = msgspec.json.Encoder()
+
     def __init__(self, config: DiscordLogConfig) -> None:
         self.url = config.webhook
         self.headers = {"Content-Type": "application/json"}
@@ -33,8 +35,8 @@ class DiscordLogHandler(LogHandler):
                 tasks.append(
                     self.client.post(
                         url=self.url,
-                        data=orjson.dumps({"content": log}).decode(),
                         headers=self.headers,
+                        json=self.json_encoder.encode({"content": log}),
                     )
                 )
 
