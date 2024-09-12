@@ -5,6 +5,7 @@ from .conn import (
     SingleWsConnection,
 )
 
-from .pool import WsPoolEvictionPolicy as WsPoolEvictionPolicy, WsPool as WsPool
+from .fastpool import WsPoolEvictionPolicy as WsPoolEvictionPolicy, WsFast as WsFast
+from .standard import WsStandard as WsStandard
 
-__all__ = ["SingleWsConnection", "WsPoolEvictionPolicy", "WsPool"]
+__all__ = ["SingleWsConnection", "WsPoolEvictionPolicy", "WsFast", "WsStandard"]
