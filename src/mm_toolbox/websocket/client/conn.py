@@ -1,6 +1,5 @@
 import asyncio
-import orjson
-import numpy as np
+import msgspec
 from picows import ws_connect, WSFrame, WSTransport, WSListener, WSMsgType, WSCloseCode
 from typing import Tuple, List, Dict, Union, Callable, Optional
 
@@ -10,7 +9,6 @@ from mm_toolbox.time import time_ns
 RawWsPayload = bytearray
 PayloadData = Dict[str, Union[int, float, str, Dict, List]]
 QueuePayload = Tuple[int, int, PayloadData]
-
 
 class RawWsConnection(WSListener):
     """
@@ -32,10 +30,10 @@ class RawWsConnection(WSListener):
         buffer yields one.
     """
 
-    def __init__(self, process_frame):
+    def __init__(self, process_frame: Callable) -> None:
         super().__init__()
         self.transport: WSTransport = None  # For external access
-        self.process_frame: Callable = process_frame
+        self.process_frame = process_frame
 
         self.final_frame: RawWsPayload = bytearray()
 
@@ -49,19 +47,26 @@ class RawWsConnection(WSListener):
             self.process_frame(time_ns(), self.final_frame)
             self.final_frame.clear()
 
-    # Not used, but available for future impl
+    # Not used, but available for future impl.
     def on_ws_disconnected(self, transport: WSTransport):
         pass
-
+    
+    # Not used, but available for future impl.
     def pause_writing(self):
         pass
 
+    # Not used, but available for future impl.
     def resume_writing(self):
         pass
 
 
 class SingleWsConnection:
-    def __init__(self, logger: Logger) -> None:
+    QUEUE_MAX_SIZE = 10000
+
+    json_encoder = msgspec.json.Encoder()
+    json_decoder = msgspec.json.Decoder()
+
+    def __init__(self, logger: Logger, conn_id: Optional[int]=None) -> None:
         """
         Initializes a single WebSocket connection.
 
@@ -71,15 +76,26 @@ class SingleWsConnection:
             Logger instance for logging activities.
         """
         self.logger = logger
-        self.running: bool = False
 
+        self._running: bool = False
         self._ws_client: WSListener = None
         self._seq_id: int = 0
-        self._conn_id = np.random.randint(
-            low=np.iinfo(np.uint16).min, high=np.iinfo(np.uint16).max
-        )
-        self._queue = asyncio.Queue(maxsize=10_000)
+        self._conn_id: int = conn_id if conn_id is not None else 0
+        self._conn_task: asyncio.Task = None
+        self._queue = asyncio.Queue(self.QUEUE_MAX_SIZE)
 
+    @property
+    def running(self) -> bool:
+        """
+        Returns the websocket running state.
+
+        Returns
+        -------
+        bool
+            the websocket running state.
+        """
+        return self._running
+    
     @property
     def seq_id(self) -> int:
         """
@@ -130,17 +146,17 @@ class SingleWsConnection:
         """
         try:
             self._seq_id += 1
-            q_payload: QueuePayload = (self._seq_id, time, orjson.loads(final_frame))
+            q_payload: QueuePayload = (self._seq_id, time, self.json_decoder.decode(final_frame))
             self._queue.put_nowait(q_payload)
-
-        except orjson.JSONDecodeError:
-            self.logger.warning(
-                f"Unable to decode msg {self._seq_id}: {final_frame.decode()}"
-            )
 
         except asyncio.QueueFull:
             self.logger.warning(
                 f"Conn '{self._conn_id}' queue full, skipping msg {self._seq_id}."
+            )
+
+        except Exception as e:
+            self.logger.warning(
+                f"Unable to decode msg {self._seq_id}: {e}"
             )
 
     def reset_seq_id(self) -> None:
@@ -149,7 +165,7 @@ class SingleWsConnection:
         """
         self._seq_id = 0
 
-    def send_data(self, payload: Dict) -> None:
+    def send_data(self, payload: Dict, msg_type: Optional[int]=WSMsgType.TEXT) -> None:
         """
         Sends a payload through the WebSocket connection.
 
@@ -160,12 +176,9 @@ class SingleWsConnection:
         """
         try:
             if self._ws_client.transport is not None:
-                self._ws_client.transport.send(WSMsgType.TEXT, orjson.dumps(payload))
+                self._ws_client.transport.send(msg_type, self.json_encoder.encode(payload))
             else:
-                raise ConnectionError(f"Conn '{self._conn_id}' not started yet.")
-
-        except orjson.JSONEncodeError as e:
-            self.logger.warning(f"Conn '{self._conn_id}' failed to encode: {e}")
+                raise ConnectionError("Connection not started yet.")
 
         except Exception as e:
             self.logger.warning(f"Conn '{self._conn_id}' failed to send: {e}")
@@ -186,20 +199,25 @@ class SingleWsConnection:
         on_connect : Optional[List[Dict]], optional
             A list of payloads to send upon connecting (default is None).
         """
+        if self._running:
+            self.logger.warning(f"Conn '{self._conn_id}' already started, use restart to reconnect.")
+            return
+        
         try:
-            self.running = True
+            self._running = True
 
-            self.logger.info(f"Conn '{self._conn_id}' starting on '{url}'.")
+            # Assign to self for future use in self.restart()
+            self.url = url
+            self.on_connect = on_connect if on_connect is not None else []
+
+            self.logger.info(f"Conn '{self._conn_id}' starting on '{self.url}'.")
 
             # (WSTransport, WSListener)
             (_, self._ws_client) = await ws_connect(
-                lambda: RawWsConnection(self._process_frame), url
+                lambda: RawWsConnection(self._process_frame), self.url
             )
 
-            # Dummy empty list in case none provided, never iterates.
-            on_connect = on_connect if on_connect else []
-
-            for payload in on_connect:
+            for payload in self.on_connect:
                 self.send_data(payload)
 
             self._conn_task = asyncio.create_task(
@@ -209,11 +227,50 @@ class SingleWsConnection:
         except Exception as e:
             self.logger.error(f"Conn '{self._conn_id}': {e}")
 
+    async def restart(self) -> None:
+        """
+        Restart the WebSocket connection with the same args as when 
+        it was first started.
+        """
+        if not self._running: 
+            raise ConnectionError(f"Conn '{self._conn_id}' not started yet.")
+
+        self.logger.info(f"Conn '{self._conn_id}' restarting on '{self.url}'.")
+        
+        # Close old connection.
+        if self._ws_client is not None:
+            self._ws_client.transport.send_close(WSCloseCode.OK)
+            self._ws_client.transport.disconnect()
+
+        # Cancel old connection task.
+        if self._conn_task is not None:
+            if not self._conn_task.done():
+                self._conn_task.cancel()
+        
+        # Overwrite current queue (bad GC, but no other way for now).
+        self._queue = asyncio.Queue(self.QUEUE_MAX_SIZE)
+
+        self.reset_seq_id()
+        
+        # (WSTransport, WSListener)
+        (_, self._ws_client) = await ws_connect(
+            lambda: RawWsConnection(self._process_frame), self.url
+        )
+
+        for payload in self.on_connect:
+            self.send_data(payload)
+
+        self._conn_task = asyncio.create_task(
+            self._ws_client.transport.wait_disconnected()
+        )
+
     def close(self) -> None:
         """
         Closes the WebSocket connection and cancels any ongoing tasks.
         """
-        self.running = False
+        self.logger.info(f"Conn '{self._conn_id}' shutting down.")
+
+        self._running = False
 
         if self._ws_client is not None:
             self._ws_client.transport.send_close(WSCloseCode.OK)
