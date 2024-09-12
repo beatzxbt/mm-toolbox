@@ -14,19 +14,7 @@ class TimeCandles(BaseCandles):
             self.open_price = price
 
         if self.open_timestamp + self.millis_per_bucket <= timestamp:
-            self.insert_candle(
-                open_price=self.open_price,
-                high_price=self.high_price,
-                low_price=self.low_price,
-                close_price=self.close_price,
-                buy_volume=self.buy_volume,
-                sell_volume=self.sell_volume,
-                vwap_price=self.vwap_price,
-                total_trades=self.total_trades,
-                open_timestamp=self.open_timestamp,
-                close_timestamp=self.close_timestamp,
-            )
-
+            self.insert_candle()
             self.process_trade(timestamp, side, price, size)
 
         self.high_price = max(self.high_price, price)

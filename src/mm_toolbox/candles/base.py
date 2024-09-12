@@ -103,71 +103,26 @@ class BaseCandles(ABC):
         self.total_trades = 0.0
         self.open_timestamp = 0.0
         self.close_timestamp = 0.0
-        self.total_volume = 0.0
 
         self._cum_price_volume = 0.0
         self._total_volume = 0.0
 
-    def insert_candle(
-        self,
-        open_price: float,
-        high_price: float,
-        low_price: float,
-        close_price: float,
-        buy_volume: float,
-        sell_volume: float,
-        vwap_price: float,
-        total_trades: float,
-        open_timestamp: float,
-        close_timestamp: float,
-    ) -> None:
+    def insert_candle(self) -> None:
         """
-        Inserts a completed candle into the ring buffer and resets the current candle.
-
-        Parameters
-        ----------
-        open_price : float
-            The open price of the candle.
-
-        high_price : float
-            The high price of the candle.
-
-        low_price : float
-            The low price of the candle.
-
-        close_price : float
-            The close price of the candle.
-
-        buy_volume : float
-            The buy volume of the candle.
-
-        sell_volume : float
-            The sell volume of the candle.
-
-        vwap_price : float
-            The volume-weighted average price of the candle.
-
-        total_trades : float
-            The total number of trades in the candle.
-
-        open_timestamp : float
-            The open timestamp of the candle.
-
-        close_timestamp : float
-            The close timestamp of the candle.
+        Inserts the completed candle into the ring buffer and resets the current candle.
         """
         current_candle = np.array(
             [
-                open_price,
-                high_price,
-                low_price,
-                close_price,
-                buy_volume,
-                sell_volume,
-                vwap_price,
-                total_trades,
-                open_timestamp,
-                close_timestamp,
+                self.open_price,
+                self.high_price,
+                self.low_price,
+                self.close_price,
+                self.buy_volume,
+                self.sell_volume,
+                self.vwap_price,
+                self.total_trades,
+                self.open_timestamp,
+                self.close_timestamp,
             ]
         )
         self.ringbuffer.append(current_candle)
