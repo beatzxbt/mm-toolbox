@@ -5,7 +5,7 @@ from typing import Optional
 
 
 @njit(error_model="numpy", fastmath=True)
-def ema_weights(window: int, alpha: Optional[float] = 0.0) -> np.ndarray[float]:
+def ema_weights(window: int, alpha: Optional[float] = None) -> np.ndarray[float]:
     """
     Calculate EMA (Exponential Moving Average)-like weights for a given window size.
 
@@ -20,11 +20,11 @@ def ema_weights(window: int, alpha: Optional[float] = 0.0) -> np.ndarray[float]:
     Returns
     -------
     np.ndarray
-        An array of EMA-like weights.
+        An array of normalized EMA-like weights from lowest -> highest.
     """
     assert window > 1, "Number of weights generated cannot be <1."
-    alpha = 3.0 / float(window + 1) if alpha == 0.0 else alpha
+    alpha = alpha if alpha is not None else 3.0 / float(window + 1)
     weights = np.array(
-        [alpha * (1.0 - alpha) ** i for i in range(window)], dtype=float64
+        [alpha * (1.0 - alpha) ** i for i in range(window-1, -1, -1)], dtype=float64
     )
     return weights
