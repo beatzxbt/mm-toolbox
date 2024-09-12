@@ -1,9 +1,17 @@
 from .base import BaseCandles
 
 
-class VolumeCandles(BaseCandles):
-    def __init__(self, volume_per_bucket: float, num_candles: int) -> None:
-        self.volume_per_bucket = volume_per_bucket
+class MultiTriggerCandles(BaseCandles):
+    def __init__(
+        self,
+        max_duration_secs: float,
+        max_ticks: float,
+        max_volume: float,
+        num_candles: int,
+    ) -> None:
+        self.max_duration_millis = max_duration_secs * 1000.0
+        self.max_ticks = max_ticks
+        self.max_volume = max_volume
         super().__init__(num_candles)
 
     def process_trade(
@@ -12,6 +20,11 @@ class VolumeCandles(BaseCandles):
         if self.total_trades == 0.0:
             self.open_timestamp = timestamp
             self.open_price = price
+
+        if self.open_timestamp + self.max_duration_millis <= timestamp:
+            self.insert_candle()
+            self.process_trade(timestamp, side, price, size)
+            return
 
         self.high_price = max(self.high_price, price)
         self.low_price = min(self.low_price, price)
@@ -25,13 +38,16 @@ class VolumeCandles(BaseCandles):
                 self.sell_volume += size
 
         self.vwap_price = self.calculate_vwap(price, size)
-        self.total_trades += 1.0
+        self.total_trades += 1
         self.close_timestamp = timestamp
 
-        total_volume = self.buy_volume + self.sell_volume
+        if self.total_trades >= self.max_ticks:
+            self.insert_candle()
+            return
 
-        if total_volume >= self.volume_per_bucket:
-            remaining_volume = total_volume - self.volume_per_bucket
+        total_volume = self.buy_volume + self.sell_volume
+        if total_volume > self.max_volume:
+            remaining_volume = total_volume - self.max_volume
 
             match side:
                 case 0.0:
@@ -42,3 +58,4 @@ class VolumeCandles(BaseCandles):
 
             self.insert_candle()
             self.process_trade(timestamp, side, price, remaining_volume)
+            return
