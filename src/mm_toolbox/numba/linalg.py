@@ -1,13 +1,15 @@
+from importlib.util import find_spec
+
+if find_spec("scipy") is None:
+    raise ImportError(
+        "SciPy is required for all linalg functions, do 'pip install scipy'."
+    )
+
+###
+
 import numpy as np
 from numba import njit
 from typing import Tuple, Union
-
-try:
-    import scipy
-except ImportError:
-    raise ImportError(
-        f"Numba requires SciPy for all linalg functions, do 'pip install scipy'."
-    )
 
 
 @njit(inline="always")
