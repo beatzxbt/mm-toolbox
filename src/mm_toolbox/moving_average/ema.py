@@ -10,23 +10,6 @@ from mm_toolbox.ringbuffer import RingBufferSingleDimFloat
 class ExponentialMovingAverage:
     """
     Exponential Moving Average (EMA) with optional RingBuffer to store history.
-
-    Attributes:
-    -----------
-    window : int
-        The window size for the EMA calculation.
-
-    alpha : float
-        The smoothing factor applied to the EMA. Default is calculated as `3 / (window + 1)`.
-
-    fast : bool
-        If True, the history of calculated EMA values is not stored.
-
-    value : float
-        The current value of the EMA.
-
-    ringbuffer : RingBufferF64
-        A ring buffer to store EMA values history, activated if `fast` is False.
     """
 
     window: uint32
@@ -35,10 +18,12 @@ class ExponentialMovingAverage:
     value: float64
     ringbuffer: RingBufferSingleDimFloat.class_type.instance_type
 
-    def __init__(self, window: int, alpha: Optional[float] = 0.0, fast: bool = True):
+    def __init__(
+        self, window: int, alpha: Optional[float] = None, fast: Optional[bool] = None
+    ):
         self.window = window
-        self.alpha = alpha if alpha != 0.0 else 3.0 / (self.window + 1)
-        self.fast = fast
+        self.alpha = alpha if alpha is not None else 3.0 / (self.window + 1)
+        self.fast = fast if fast is not None else True
         self.value = 0.0
         self.ringbuffer = RingBufferSingleDimFloat(self.window)
 
