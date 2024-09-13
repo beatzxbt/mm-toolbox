@@ -1,56 +1,33 @@
 import numpy as np
-from numba.experimental import jitclass
+# Comment out jitclass for debugging
+# from numba.experimental import jitclass
 from numba.types import bool_, uint32, float64
+from typing import Optional
 
-from mm_toolbox.moving_average.ema import ExponentialMovingAverage as EMA
+from .wma import WeightedMovingAverage as WMA
 from mm_toolbox.ringbuffer import RingBufferSingleDimFloat
 
-
-@jitclass
+# Comment out jitclass for debugging
+# @jitclass
 class HullMovingAverage:
     window: uint32
     fast: bool_
-    ringbuffer: RingBufferSingleDimFloat.class_type.instance_type
     value: float64
 
-    _short_ema: EMA.class_type.instance_type
-    _long_ema: EMA.class_type.instance_type
-    _smooth_ema: EMA.class_type.instance_type
+    _short_wma: WMA
+    _long_wma: WMA
+    _smooth_wma: WMA
+    _values: RingBufferSingleDimFloat
 
-    def __init__(self, window: int, fast: bool = True):
+    def __init__(self, window: int, fast: Optional[bool] = None):
         self.window = window
-        self.fast = fast
-        self.ringbuffer = RingBufferSingleDimFloat(window)
+        self.fast = fast if fast is not None else True
         self.value = 0.0
 
-        self._short_ema = EMA(self.window // 2, 0.0, True)
-        self._long_ema = EMA(window, 0.0, True)
-        self._smooth_ema = EMA(int(window**0.5), 0.0, True)
-
-    def _recursive_hma(self, value: float) -> float:
-        """
-        Internal method to calculate the HMA given a new data point.
-
-        Parameters:
-        -----------
-        update : float
-            The new data point to include in the HMA calculation.
-
-        Returns:
-        --------
-        float
-            The updated HMA value.
-        """
-        self._short_ema.update(value)
-        self._long_ema.update(value)
-        self._smooth_ema.update((self._short_ema.value * 2.0) - self._long_ema.value)
-        return self._smooth_ema.value
-
-    def as_array(self) -> np.ndarray[float]:
-        """
-        Compatibility with underlying ringbuffer for unwrapping.
-        """
-        return self.ringbuffer.as_array()
+        self._values = RingBufferSingleDimFloat(window)
+        self._short_wma = WMA(int(window / 2), False)
+        self._long_wma = WMA(window, False)
+        self._smooth_wma = WMA(int(np.sqrt(window)), True)
 
     def initialize(self, arr_in: np.ndarray[float]) -> None:
         """
@@ -61,15 +38,31 @@ class HullMovingAverage:
         arr_in : np.ndarray[float]
             The initial series of data points to feed into the HMA calculator.
         """
-        assert arr_in.ndim == 1
-        self._short_ema.ringbuffer.reset()
-        self._smooth_ema.ringbuffer.reset()
-        self._long_ema.ringbuffer.reset()
-        self.ringbuffer.reset()
+        assert arr_in.ndim == 1 and arr_in.size >= self.window, (
+            f"Input array must be 1D and at least of size {self.window}, "
+            f"but got size {arr_in.size}"
+        )
 
-        self.value = arr_in[0]
-        for val in arr_in:
-            self.update(val)
+        self.value = 0.0
+        self._values.reset()
+        self._short_wma._values.reset()
+        self._long_wma._values.reset()
+        self._smooth_wma._values.reset()
+
+        self._short_wma.initialize(arr_in)
+        self._long_wma.initialize(arr_in)
+
+        # TODO: Needs optimization to make short/long EMA fast=True.
+        short_wma_values = self._short_wma.values
+        long_wma_values = self._long_wma.values
+        min_length = min(len(short_wma_values), len(long_wma_values))
+        diff_series = (short_wma_values[:min_length] * 2.0) - long_wma_values[:min_length]
+
+        self._smooth_wma.initialize(diff_series)
+        self.value = self._smooth_wma.value
+
+        if not self.fast:
+            self._values.append(self.value)
 
     def update(self, value: float) -> None:
         """
@@ -77,19 +70,29 @@ class HullMovingAverage:
 
         Parameters:
         -----------
-        new_val : float
+        value : float
             The new data point to include in the HMA calculation.
         """
-        self.value = self._recursive_hma(value)
-        if not self.fast:
-            self.ringbuffer.append(self.value)
+        self._short_wma.update(value)
+        self._long_wma.update(value)
 
-    def __eq__(self, ema: "HullMovingAverage") -> bool:
-        assert isinstance(ema, HullMovingAverage)
-        return ema.as_array() == self.as_array()
+        diff = (self._short_wma.value * 2.0) - self._long_wma.value
+        self._smooth_wma.update(diff)
+        self.value = self._smooth_wma.value
+
+        if not self.fast:
+            self._values.append(self.value)
+
+    @property
+    def values(self) -> np.ndarray:
+        return self._values.as_array()
+
+    def __eq__(self, hma: "HullMovingAverage") -> bool:
+        assert isinstance(hma, HullMovingAverage)
+        return np.all(hma.values == self.values)
 
     def __len__(self) -> int:
-        return len(self.ringbuffer)
+        return len(self._values)
 
     def __getitem__(self, index: int) -> float:
-        return self.ringbuffer[index]
+        return self._values[index]
