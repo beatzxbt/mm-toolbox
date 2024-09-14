@@ -26,7 +26,7 @@ class TestWMA(unittest.TestCase):
         self.assertEqual(self.fast_wma.window, self.window)
         self.assertTrue(self.fast_wma.fast)
         self.assertEqual(self.fast_wma.value, 0.0)
-        
+
         self.assertIsInstance(self.fast_wma._values, RingBufferSingleDimFloat)
         self.assertIsInstance(self.fast_wma._input_values, RingBufferSingleDimFloat)
         self.assertIsInstance(self.fast_wma._weights, np.ndarray)
@@ -35,7 +35,9 @@ class TestWMA(unittest.TestCase):
     def test_initialize(self):
         self.wma.initialize(self.data)
 
-        expected_values = np.array([0.33333333, 0.93333333, 1.73333333, 2.66666667, 3.66666667])
+        expected_values = np.array(
+            [0.33333333, 0.93333333, 1.73333333, 2.66666667, 3.66666667]
+        )
         self.assertEqual(len(self.wma.values), len(expected_values))
         self.assertAlmostEqual(self.wma.value, expected_values[-1])
         np.testing.assert_array_almost_equal(self.wma.values, expected_values)
@@ -50,7 +52,9 @@ class TestWMA(unittest.TestCase):
         self.wma.initialize(self.data)
         self.wma.update(6.0)
 
-        expected_values = np.array([0.93333333, 1.73333333, 2.66666667, 3.66666667, 4.66666667])
+        expected_values = np.array(
+            [0.93333333, 1.73333333, 2.66666667, 3.66666667, 4.66666667]
+        )
 
         self.assertEqual(len(self.wma.values), len(expected_values))
         self.assertAlmostEqual(self.wma.value, expected_values[-1])

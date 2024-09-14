@@ -5,11 +5,13 @@ from typing import Optional
 
 from mm_toolbox.ringbuffer import RingBufferSingleDimFloat
 
+
 @jitclass
 class WeightedMovingAverage:
     """
     Weighted Moving Average (WMA) with optional RingBuffer to store history.
     """
+
     window: uint32
     fast: bool_
     value: float64
@@ -46,7 +48,7 @@ class WeightedMovingAverage:
         self.value = 0.0
         self._values.reset()
         self._input_values.reset()
-        
+
         for value in arr_in:
             self.update(value)
 
@@ -60,16 +62,18 @@ class WeightedMovingAverage:
             The new data point to include in the WMA calculation.
         """
         self._input_values.append(new_val)
-        weighted_inputs = self._input_values.as_array() * self._weights[-len(self._input_values):]
+        weighted_inputs = (
+            self._input_values.as_array() * self._weights[-len(self._input_values) :]
+        )
         self.value = weighted_inputs.sum() / self._weight_sum
-        
+
         if not self.fast:
             self._values.append(self.value)
 
     @property
     def values(self) -> np.ndarray:
         return self._values.as_array()
-    
+
     def __eq__(self, wma: "WeightedMovingAverage") -> bool:
         assert isinstance(wma, WeightedMovingAverage)
         return np.all(wma.values == self.values)

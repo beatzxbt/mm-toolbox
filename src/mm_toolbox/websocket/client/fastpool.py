@@ -24,6 +24,7 @@ class WsPoolEvictionPolicy:
         Number of frames at the start of an eviction lifecycle which
         are not penalized.
     """
+
     # TODO: Add multi-trigger pool rebalance.
     # Potential additional triggers:
     # - Messages processed
@@ -99,21 +100,27 @@ class WsFast(ABC):
         self._conn_speed_penalties: Dict[int, int] = {}
         self._conn_ingress_tasks: Dict[int, asyncio.Task] = {}
         self._eviction_task: asyncio.Task = None
-        
+
         # Require high performance event loop (OS spec)
         if platform.system() == "Windows":
             try:
                 import winloop
+
                 asyncio.set_event_loop_policy(winloop.EventLoopPolicy())
             except ImportError:
-                raise ImportError("Requires 'winloop' for WsFast, install with 'pip install winloop'")
+                raise ImportError(
+                    "Requires 'winloop' for WsFast, install with 'pip install winloop'"
+                )
         else:
             try:
                 import uvloop
+
                 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
             except ImportError:
-                raise ImportError("Requires 'uvloop' for WsFast, install with 'pip install uvloop'")
-            
+                raise ImportError(
+                    "Requires 'uvloop' for WsFast, install with 'pip install uvloop'"
+                )
+
     @abstractmethod
     def data_handler(self, recv: PayloadData) -> None:
         """
@@ -174,28 +181,34 @@ class WsFast(ABC):
 
         while True:
             if not self._conn_speed_penalties:
-                self.logger.warning("Grace period may be too high, no penalties detected.")
-                await asyncio.sleep(5.0) 
+                self.logger.warning(
+                    "Grace period may be too high, no penalties detected."
+                )
+                await asyncio.sleep(5.0)
                 continue
-            
+
             # Find the connection with the highest penalty.
             slowest_conn_id = max(
                 self._conn_speed_penalties, key=self._conn_speed_penalties.get
             )
-            slowest_conn = self._conn_pool[slowest_conn_id] # Id == Index in pool.
+            slowest_conn = self._conn_pool[slowest_conn_id]  # Id == Index in pool.
 
             # If not enough data collected, recheck eviction on next cycle.
-            if slowest_conn and self._conn_speed_penalties[slowest_conn_id] > self.eviction_policy.grace_period:
+            if (
+                slowest_conn
+                and self._conn_speed_penalties[slowest_conn_id]
+                > self.eviction_policy.grace_period
+            ):
                 self._conn_ingress_tasks[slowest_conn_id].cancel()
                 await slowest_conn.restart()
 
                 # Discard results till grace period ends.
                 while slowest_conn.seq_id <= self.eviction_policy.grace_period:
                     # Yield control to main event loop instead of using get_nowait
-                    # to ingest other sockets. Non-zero sleep is fine too, as we dont 
+                    # to ingest other sockets. Non-zero sleep is fine too, as we dont
                     # care about the results anyway.
                     (_, _, _) = await slowest_conn.queue.get()
-                    
+
                 # Reset all the seq ids & penalties, restart ingress task.
                 self._latest_seq_id = 0
                 self._conn_speed_penalties = {
@@ -209,9 +222,12 @@ class WsFast(ABC):
                 )
 
             await asyncio.sleep(self.eviction_policy.interval)
-            
+
     async def _spawn_new_conn(
-        self, conn_id: int, url: str, on_connect: Optional[List[Dict]] = None,
+        self,
+        conn_id: int,
+        url: str,
+        on_connect: Optional[List[Dict]] = None,
     ) -> None:
         """
         Establishes a new WebSocket connection, adds it to the connection pool,
@@ -255,12 +271,13 @@ class WsFast(ABC):
         self._started = True
 
         await asyncio.gather(
-            *[self._spawn_new_conn(conn_id, url, on_connect) for conn_id in range(self.size)]
+            *[
+                self._spawn_new_conn(conn_id, url, on_connect)
+                for conn_id in range(self.size)
+            ]
         )
 
-        self._eviction_task = asyncio.create_task(
-            self._enforce_eviction_policy()
-        )
+        self._eviction_task = asyncio.create_task(self._enforce_eviction_policy())
 
     def send_data(self, payload: Dict) -> None:
         """

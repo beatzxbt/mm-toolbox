@@ -6,4 +6,10 @@ from .client import (
     WsPoolEvictionPolicy as WsPoolEvictionPolicy,
 )
 
-__all__ = ["VerifyWsPayload", "SingleWsConnection", "WsPoolEvictionPolicy", "WsFast", "WsStandard"]
+__all__ = [
+    "VerifyWsPayload",
+    "SingleWsConnection",
+    "WsPoolEvictionPolicy",
+    "WsFast",
+    "WsStandard",
+]

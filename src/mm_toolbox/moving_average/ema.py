@@ -16,7 +16,7 @@ class ExponentialMovingAverage:
     alpha: float64
     fast: bool_
     value: float64
-    
+
     _values: RingBufferSingleDimFloat.class_type.instance_type
 
     def __init__(
@@ -26,7 +26,7 @@ class ExponentialMovingAverage:
         self.alpha = alpha if alpha is not None else 3.0 / (self.window + 1)
         self.fast = fast if fast is not None else True
         self.value = 0.0
-        
+
         self._values = RingBufferSingleDimFloat(self.window)
 
     def initialize(self, arr_in: np.ndarray[float]) -> None:

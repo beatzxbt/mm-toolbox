@@ -1,6 +1,6 @@
 import unittest
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 from mm_toolbox import Logger, LoggerConfig
 
 from mm_toolbox.websocket.client import SingleWsConnection
@@ -14,7 +14,7 @@ class TestSingleWsConnection(unittest.TestCase):
 
     def tearDown(self):
         self.conn.close()
-    
+
     def test_initialization(self):
         self.assertFalse(self.conn.running)
         self.assertEqual(self.conn.seq_id, 0)
@@ -35,12 +35,14 @@ class TestSingleWsConnection(unittest.TestCase):
         await asyncio.sleep(1.0)
 
         # Attempt to start it again and check if it logs a warning
-        with patch.object(self.logger, 'warning') as mock_warning:
+        with patch.object(self.logger, "warning") as mock_warning:
             await self.conn.start(self.test_server_url)
-            mock_warning.assert_called_once_with("Conn '0' already started, use restart to reconnect.")
+            mock_warning.assert_called_once_with(
+                "Conn '0' already started, use restart to reconnect."
+            )
 
     async def test_invalid_restart_connection(self):
-        with patch.object(self.logger, 'warning') as mock_warning:
+        with patch.object(self.logger, "warning") as mock_warning:
             await self.conn.restart()
             mock_warning.assert_called_once_with("Conn '0' not started yet.")
 
@@ -48,7 +50,7 @@ class TestSingleWsConnection(unittest.TestCase):
         # Start and then restart connection
         await self.conn.start(self.test_server_url)
         await asyncio.sleep(1.0)  # Spare time for response.
-        
+
         await self.conn.restart()
 
         self.assertEqual(self.conn.url, self.test_server_url)
@@ -58,18 +60,20 @@ class TestSingleWsConnection(unittest.TestCase):
 
     async def test_send_data(self):
         await self.conn.start(
-            url=self.test_server_url, 
-            on_connect=[{
-                "method": "SUBSCRIBE",
-                "params": ["btcusdt@depth@100ms"],
-                "id": 1,
-            }]
+            url=self.test_server_url,
+            on_connect=[
+                {
+                    "method": "SUBSCRIBE",
+                    "params": ["btcusdt@depth@100ms"],
+                    "id": 1,
+                }
+            ],
         )
         await asyncio.sleep(1.0)  # Spare time for response.
-        
+
         # Simulate receiving messages in the queue.
         await self.conn.queue.put((1, 123456789, {"id": 1}))
-        
+
         # Now search the queue for subscription confirmation.
         found = False
         try:
@@ -89,7 +93,7 @@ class TestSingleWsConnection(unittest.TestCase):
         self.conn.queue = asyncio.Queue(maxsize=1)
         await self.conn.queue.put((1, 123456789, {"id": 1}))
 
-        with patch.object(self.logger, 'warning') as mock_warning:
+        with patch.object(self.logger, "warning") as mock_warning:
             # Queue is full, this should trigger a warning
             self.conn._process_frame(123456789, b'{"id": 2}')
             mock_warning.assert_called_once_with("Conn '0' queue full, skipping msg 2.")
@@ -98,19 +102,21 @@ class TestSingleWsConnection(unittest.TestCase):
         # Ensure connection is not started
         self.conn._ws_client = None
 
-        with patch.object(self.logger, 'warning') as mock_warning:
+        with patch.object(self.logger, "warning") as mock_warning:
             self.conn.send_data({"key": "value"})
-            mock_warning.assert_called_once_with("Conn '0' failed to send: Connection not started yet.")
-
+            mock_warning.assert_called_once_with(
+                "Conn '0' failed to send: Connection not started yet."
+            )
 
     async def test_close_connection(self):
         # Start connection
         await self.conn.start(self.test_server_url)
-        await asyncio.sleep(1.0) # Spare time for response.
+        await asyncio.sleep(1.0)  # Spare time for response.
 
         self.conn.close()
 
         self.assertFalse(self.conn.running)
+
 
 if __name__ == "__main__":
     unittest.main()

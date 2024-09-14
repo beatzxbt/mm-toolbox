@@ -5,6 +5,7 @@ from mm_toolbox.ringbuffer import RingBufferSingleDimFloat
 from mm_toolbox.moving_average.hma import HullMovingAverage as HMA
 from mm_toolbox.moving_average.wma import WeightedMovingAverage as WMA
 
+
 class TestHMA(unittest.TestCase):
     def setUp(self):
         self.window = 5
@@ -72,6 +73,7 @@ class TestHMA(unittest.TestCase):
 
         self.assertEqual(len(self.fast_hma.values), 0)
         self.assertAlmostEqual(self.fast_hma.value, expected_values[-1])
+
 
 if __name__ == "__main__":
     unittest.main()

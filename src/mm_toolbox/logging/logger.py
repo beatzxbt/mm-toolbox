@@ -92,7 +92,7 @@ class Logger:
         self._shutdown_flag = False
 
         self._ev_loop.create_task(self._log_ingestor())
-        
+
     def _get_log_level(self, level_name: str) -> int:
         """
         Converts a log level name to its corresponding integer value.
@@ -159,7 +159,7 @@ class Logger:
 
             except Exception as e:
                 raise Exception(f"Log writer loop: {e}")
-        
+
         return
 
     def _submit_log(self, level: int, message: str) -> None:

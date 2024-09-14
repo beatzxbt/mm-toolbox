@@ -60,5 +60,6 @@ class TestEMA(unittest.TestCase):
         self.assertEqual(len(self.fast_ema), 0)
         self.assertAlmostEqual(self.fast_ema.value, 5.03125)
 
+
 if __name__ == "__main__":
     unittest.main()
