@@ -14,7 +14,7 @@ class TestOrderbook(unittest.TestCase):
 
         # Uncommon to use methods within the setup, but makes the rest of the tests
         # a lot cleaner to do. If refresh fails, the 4 next tasks will be expected
-        # to fail too (as well as this setUp).
+        # to fail too (as well as this setup).
         self.orderbook.refresh(self.asks, self.bids, self.seq_id)
 
     def test_class_initialization(self):
@@ -45,33 +45,97 @@ class TestOrderbook(unittest.TestCase):
                 self.seq_id,
             )
 
+    def test_update_bbo_existing_bid_ask(self):
+        best_bid = self.bids[0].copy()
+        best_bid[1] = 10.0  # Change size only
+
+        best_ask = self.asks[0].copy()
+        best_ask[1] = 8.0  # Change size only
+
+        self.orderbook.update_bbo(
+            best_bid[0],
+            best_bid[1],
+            best_ask[0],
+            best_ask[1],
+            self.orderbook.seq_id + 1,
+        )
+
+        self.assertEqual(self.orderbook.bids[0, 0], 59999.0)
+        self.assertEqual(self.orderbook.bids[0, 1], 10.0)
+        self.assertEqual(self.orderbook.asks[0, 0], 60000.0)
+        self.assertEqual(self.orderbook.asks[0, 1], 8.0)
+
+    def test_update_bbo_new_ask(self):
+        best_bid = self.bids[0].copy()
+
+        best_ask = self.bids[0].copy() - 1.5
+        best_ask[1] = 8.0
+
+        self.orderbook.update_bbo(
+            best_bid[0],
+            best_bid[1],
+            best_ask[0],
+            best_ask[1],
+            self.orderbook.seq_id + 1,
+        )
+
+        self.assertEqual(self.orderbook.bids[0, 0], 59997.0)
+        self.assertEqual(self.orderbook.bids[0, 1], 3.0)
+        self.assertEqual(self.orderbook.asks[0, 0], 59997.5)
+        self.assertEqual(self.orderbook.asks[0, 1], 8.0)
+
+        np.testing.assert_array_equal(self.orderbook.bids[-1], np.array([0.0, 0.0]))
+        np.testing.assert_array_equal(self.orderbook.bids[-2], np.array([0.0, 0.0]))
+
+    def test_update_bbo_new_bid(self):
+        best_bid = self.bids[0].copy() + 1.5
+        best_bid[1] = 10.0
+
+        best_ask = self.asks[0].copy()
+
+        self.orderbook.update_bbo(
+            best_bid[0],
+            best_bid[1],
+            best_ask[0],
+            best_ask[1],
+            self.orderbook.seq_id + 1,
+        )
+
+        print(self.orderbook.recordable())
+        self.assertEqual(self.orderbook.bids[0, 0], 60000.5)
+        self.assertEqual(self.orderbook.bids[0, 1], 10.0)
+        self.assertEqual(self.orderbook.asks[0, 0], 60001.0)
+        self.assertEqual(self.orderbook.asks[0, 1], 1.0)
+
+        np.testing.assert_array_equal(self.orderbook.asks[-1], np.array([0.0, 0.0]))
+
     def test_update_bids_existing_bba(self):
         best_bid = self.bids[0].copy()
-        best_bid[1] = 6.1  # Change size only
+        best_bid[1] = 10.0  # Change size only
 
         self.orderbook.update_bids(np.array([best_bid]), self.orderbook.seq_id + 1)
 
         self.assertEqual(self.orderbook.bids[0, 0], 59999.0)
-        self.assertEqual(self.orderbook.bids[0, 1], 6.1)
+        self.assertEqual(self.orderbook.bids[0, 1], 10.0)
         self.assertEqual(self.orderbook.asks[0, 0], 60000.0)
         self.assertEqual(self.orderbook.asks[0, 1], 1.0)
 
     def test_update_asks_existing_bba(self):
         best_ask = self.asks[0].copy()
-        best_ask[1] = 6.1  # Change size only
+        best_ask[1] = 10.0  # Change size only
 
         self.orderbook.update_asks(np.array([best_ask]), self.orderbook.seq_id + 1)
 
         self.assertEqual(self.orderbook.bids[0, 0], 59999.0)
         self.assertEqual(self.orderbook.bids[0, 1], 1.0)
         self.assertEqual(self.orderbook.asks[0, 0], 60000.0)
-        self.assertEqual(self.orderbook.asks[0, 1], 6.1)
+        self.assertEqual(self.orderbook.asks[0, 1], 10.0)
 
     def test_update_bids_existing_deep(self):
         fourth_level = self.bids[3].copy()
         fifth_level = self.bids[4].copy()
 
-        fourth_level[1] = 6.1  # Change size only
+        fourth_level[1] = 10.0  # Change size only
         fifth_level[1] = 19.3  # Change size only
 
         self.orderbook.update_bids(
@@ -79,7 +143,7 @@ class TestOrderbook(unittest.TestCase):
         )
 
         self.assertEqual(self.orderbook.bids[3, 0], 59996.0)
-        self.assertEqual(self.orderbook.bids[3, 1], 6.1)
+        self.assertEqual(self.orderbook.bids[3, 1], 10.0)
         self.assertEqual(self.orderbook.bids[4, 0], 59995.0)
         self.assertEqual(self.orderbook.bids[4, 1], 19.3)
 
@@ -87,7 +151,7 @@ class TestOrderbook(unittest.TestCase):
         fourth_level = self.asks[3].copy()
         fifth_level = self.asks[4].copy()
 
-        fourth_level[1] = 6.1  # Change size only
+        fourth_level[1] = 10.0  # Change size only
         fifth_level[1] = 19.3  # Change size only
 
         self.orderbook.update_asks(
@@ -95,7 +159,7 @@ class TestOrderbook(unittest.TestCase):
         )
 
         self.assertEqual(self.orderbook.asks[3, 0], 60003.0)
-        self.assertEqual(self.orderbook.asks[3, 1], 6.1)
+        self.assertEqual(self.orderbook.asks[3, 1], 10.0)
         self.assertEqual(self.orderbook.asks[4, 0], 60004.0)
         self.assertEqual(self.orderbook.asks[4, 1], 19.3)
 
