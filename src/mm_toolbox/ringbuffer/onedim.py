@@ -24,23 +24,23 @@ class RingBufferSingleDimFloat:
     """
 
     capacity: uint32
-    _left_index_: uint32
-    _right_index_: uint32
-    _array_: float64[:]
+    _left_index: uint32
+    _right_index: uint32
+    _array: float64[:]
 
     def __init__(self, capacity: int):
         self.capacity = capacity
-        self._left_index_ = 0
-        self._right_index_ = 0
-        self._array_ = np.zeros(shape=capacity, dtype=float64)
+        self._left_index = 0
+        self._right_index = 0
+        self._array = np.zeros(shape=capacity, dtype=float64)
 
     @property
     def is_full(self) -> bool:
-        return (self._right_index_ - self._left_index_) == self.capacity
+        return (self._right_index - self._left_index) == self.capacity
 
     @property
     def is_empty(self) -> bool:
-        return self._left_index_ == 0 and self._right_index_ == 0
+        return self._left_index == 0 and self._right_index == 0
 
     @property
     def dtype(self) -> np.dtype:
@@ -59,13 +59,13 @@ class RingBufferSingleDimFloat:
         np.ndarray
             A numpy array containing the unwrapped buffer data.
         """
-        if self._right_index_ <= self.capacity:
-            return self._array_[self._left_index_ : self._right_index_]
+        if self._right_index <= self.capacity:
+            return self._array[self._left_index : self._right_index]
 
         return np.concatenate(
             (
-                self._array_[self._left_index_ :],
-                self._array_[: self._right_index_ % self.capacity],
+                self._array[self._left_index :],
+                self._array[: self._right_index % self.capacity],
             )
         )
 
@@ -76,12 +76,12 @@ class RingBufferSingleDimFloat:
         This method adjusts the left and right indices to ensure they
         stay within the bounds of the buffer's capacity.
         """
-        if self._left_index_ >= self.capacity:
-            self._left_index_ -= self.capacity
-            self._right_index_ -= self.capacity
-        elif self._left_index_ < 0:
-            self._left_index_ += self.capacity
-            self._right_index_ += self.capacity
+        if self._left_index >= self.capacity:
+            self._left_index -= self.capacity
+            self._right_index -= self.capacity
+        elif self._left_index < 0:
+            self._left_index += self.capacity
+            self._right_index += self.capacity
 
     def append(self, value: float) -> None:
         """
@@ -93,10 +93,10 @@ class RingBufferSingleDimFloat:
             The value to be added to the buffer.
         """
         if self.is_full:
-            self._left_index_ += 1
+            self._left_index += 1
 
-        self._array_[self._right_index_ % self.capacity] = value
-        self._right_index_ += 1
+        self._array[self._right_index % self.capacity] = value
+        self._right_index += 1
         self._fix_indices_()
 
     def popright(self) -> float:
@@ -115,9 +115,9 @@ class RingBufferSingleDimFloat:
         """
         assert len(self) > 0, "Cannot pop from an empty RingBuffer"
 
-        self._right_index_ -= 1
+        self._right_index -= 1
         self._fix_indices_()
-        res = self._array_[self._right_index_ % self.capacity]
+        res = self._array[self._right_index % self.capacity]
         return res
 
     def popleft(self) -> float:
@@ -136,8 +136,8 @@ class RingBufferSingleDimFloat:
         """
         assert len(self) > 0, "Cannot pop from an empty RingBuffer"
 
-        res = self._array_[self._left_index_]
-        self._left_index_ += 1
+        res = self._array[self._left_index]
+        self._left_index += 1
         self._fix_indices_()
         return res
 
@@ -151,20 +151,20 @@ class RingBufferSingleDimFloat:
             The contents of the buffer before it was reset.
         """
         res = self.as_array()
-        self._array_.fill(0.0)
-        self._left_index_ = 0
-        self._right_index_ = 0
+        self._array.fill(0.0)
+        self._left_index = 0
+        self._right_index = 0
         return res
 
     def __contains__(self, num: float) -> bool:
-        return np.any(num == self._array_)
+        return np.any(num == self._array)
 
     def __eq__(self, ringbuffer: "RingBufferSingleDimFloat") -> bool:
         assert isinstance(ringbuffer, RingBufferSingleDimFloat)
         return np.array_equal(ringbuffer.as_array(), self.as_array())
 
     def __len__(self) -> int:
-        return self._right_index_ - self._left_index_
+        return self._right_index - self._left_index
 
     def __getitem__(self, item: int) -> float:
         return self.as_array()[item]
@@ -198,23 +198,23 @@ class RingBufferSingleDimInt:
     """
 
     capacity: uint32
-    _left_index_: uint32
-    _right_index_: uint32
-    _array_: int64[:]
+    _left_index: uint32
+    _right_index: uint32
+    _array: int64[:]
 
     def __init__(self, capacity: int):
         self.capacity = capacity
-        self._left_index_ = 0
-        self._right_index_ = 0
-        self._array_ = np.zeros(shape=capacity, dtype=int64)
+        self._left_index = 0
+        self._right_index = 0
+        self._array = np.zeros(shape=capacity, dtype=int64)
 
     @property
     def is_full(self) -> bool:
-        return (self._right_index_ - self._left_index_) == self.capacity
+        return (self._right_index - self._left_index) == self.capacity
 
     @property
     def is_empty(self) -> bool:
-        return self._left_index_ == 0 and self._right_index_ == 0
+        return self._left_index == 0 and self._right_index == 0
 
     @property
     def dtype(self) -> np.dtype:
@@ -233,13 +233,13 @@ class RingBufferSingleDimInt:
         np.ndarray
             A numpy array containing the unwrapped buffer data.
         """
-        if self._right_index_ <= self.capacity:
-            return self._array_[self._left_index_ : self._right_index_]
+        if self._right_index <= self.capacity:
+            return self._array[self._left_index : self._right_index]
 
         return np.concatenate(
             (
-                self._array_[self._left_index_ :],
-                self._array_[: self._right_index_ % self.capacity],
+                self._array[self._left_index :],
+                self._array[: self._right_index % self.capacity],
             )
         )
 
@@ -250,12 +250,12 @@ class RingBufferSingleDimInt:
         This method adjusts the left and right indices to ensure they
         stay within the bounds of the buffer's capacity.
         """
-        if self._left_index_ >= self.capacity:
-            self._left_index_ -= self.capacity
-            self._right_index_ -= self.capacity
-        elif self._left_index_ < 0:
-            self._left_index_ += self.capacity
-            self._right_index_ += self.capacity
+        if self._left_index >= self.capacity:
+            self._left_index -= self.capacity
+            self._right_index -= self.capacity
+        elif self._left_index < 0:
+            self._left_index += self.capacity
+            self._right_index += self.capacity
 
     def append(self, value: int) -> None:
         """
@@ -267,10 +267,10 @@ class RingBufferSingleDimInt:
             The value to be added to the buffer.
         """
         if self.is_full:
-            self._left_index_ += 1
+            self._left_index += 1
 
-        self._array_[self._right_index_ % self.capacity] = value
-        self._right_index_ += 1
+        self._array[self._right_index % self.capacity] = value
+        self._right_index += 1
         self._fix_indices_()
 
     def popright(self) -> int:
@@ -289,9 +289,9 @@ class RingBufferSingleDimInt:
         """
         assert len(self) > 0, "Cannot pop from an empty RingBuffer"
 
-        self._right_index_ -= 1
+        self._right_index -= 1
         self._fix_indices_()
-        res = self._array_[self._right_index_ % self.capacity]
+        res = self._array[self._right_index % self.capacity]
         return res
 
     def popleft(self) -> int:
@@ -310,8 +310,8 @@ class RingBufferSingleDimInt:
         """
         assert len(self) > 0, "Cannot pop from an empty RingBuffer"
 
-        res = self._array_[self._left_index_]
-        self._left_index_ += 1
+        res = self._array[self._left_index]
+        self._left_index += 1
         self._fix_indices_()
         return res
 
@@ -325,20 +325,20 @@ class RingBufferSingleDimInt:
             The contents of the buffer before it was reset.
         """
         res = self.as_array()
-        self._array_.fill(0.0)
-        self._left_index_ = 0
-        self._right_index_ = 0
+        self._array.fill(0.0)
+        self._left_index = 0
+        self._right_index = 0
         return res
 
     def __contains__(self, num: int) -> bool:
-        return np.any(num == self._array_)
+        return np.any(num == self._array)
 
     def __eq__(self, ringbuffer: "RingBufferSingleDimInt") -> bool:
         assert isinstance(ringbuffer, RingBufferSingleDimInt)
         return np.array_equal(ringbuffer.as_array(), self.as_array())
 
     def __len__(self) -> int:
-        return self._right_index_ - self._left_index_
+        return self._right_index - self._left_index
 
     def __getitem__(self, item: int) -> int:
         return self.as_array()[item]

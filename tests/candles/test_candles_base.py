@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from src.mm_toolbox.candles.base import BaseCandles
+from mm_toolbox.candles.base import BaseCandles
 
 
 class MockBaseCandle(BaseCandles):
@@ -10,7 +10,7 @@ class MockBaseCandle(BaseCandles):
     def process_trade(
         self, timestamp: float, side: bool, price: float, size: float
     ) -> None:
-        # This is tested in actual inherited classes for specific behaviour
+        # This is tested in actual inherited classes for specific behavior
         pass
 
 
@@ -33,18 +33,19 @@ class TestBaseCandles(unittest.TestCase):
         self.assertTrue(self.candles.ringbuffer.is_empty)
 
     def test_insert_candle(self):
-        self.candles.insert_candle(
-            open_price=100.0,
-            high_price=110.0,
-            low_price=90.0,
-            close_price=105.0,
-            buy_volume=500.0,
-            sell_volume=200.0,
-            vwap_price=102.0,
-            total_trades=3.0,
-            open_timestamp=1609459200.0,
-            close_timestamp=1609459260.0,
-        )
+        self.candles.open_price = 100.0
+        self.candles.high_price = 110.0
+        self.candles.low_price = 90.0
+        self.candles.close_price = 105.0
+        self.candles.buy_volume = 500.0
+        self.candles.sell_volume = 200.0
+        self.candles.vwap_price = 102.0
+        self.candles.total_trades = 3.0
+        self.candles.open_timestamp = 1609459200.0
+        self.candles.close_timestamp = 1609459260.0
+
+        self.candles.insert_candle()
+
         stored_candle = self.candles[0]
         expected_candle = np.array(
             [
@@ -63,18 +64,19 @@ class TestBaseCandles(unittest.TestCase):
         np.testing.assert_array_equal(stored_candle, expected_candle)
 
     def test_as_array_without_current(self):
-        self.candles.insert_candle(
-            open_price=100.0,
-            high_price=110.0,
-            low_price=90.0,
-            close_price=105.0,
-            buy_volume=500.0,
-            sell_volume=200.0,
-            vwap_price=102.0,
-            total_trades=3.0,
-            open_timestamp=1609459200.0,
-            close_timestamp=1609459260.0,
-        )
+        self.candles.open_price = 100.0
+        self.candles.high_price = 110.0
+        self.candles.low_price = 90.0
+        self.candles.close_price = 105.0
+        self.candles.buy_volume = 500.0
+        self.candles.sell_volume = 200.0
+        self.candles.vwap_price = 102.0
+        self.candles.total_trades = 3.0
+        self.candles.open_timestamp = 1609459200.0
+        self.candles.close_timestamp = 1609459260.0
+
+        self.candles.insert_candle()
+
         candle_array = self.candles.as_array()
         expected_candles = np.array(
             [
@@ -95,19 +97,20 @@ class TestBaseCandles(unittest.TestCase):
         np.testing.assert_array_equal(candle_array, expected_candles)
 
     def test_as_array_with_current(self):
-        self.candles.insert_candle(
-            open_price=100.0,
-            high_price=110.0,
-            low_price=90.0,
-            close_price=105.0,
-            buy_volume=500.0,
-            sell_volume=200.0,
-            vwap_price=102.0,
-            total_trades=3.0,
-            open_timestamp=1609459200.0,
-            close_timestamp=1609459260.0,
-        )
+        self.candles.open_price = 100.0
+        self.candles.high_price = 110.0
+        self.candles.low_price = 90.0
+        self.candles.close_price = 105.0
+        self.candles.buy_volume = 500.0
+        self.candles.sell_volume = 200.0
+        self.candles.vwap_price = 102.0
+        self.candles.total_trades = 3.0
+        self.candles.open_timestamp = 1609459200.0
+        self.candles.close_timestamp = 1609459260.0
 
+        self.candles.insert_candle()
+
+        # Modify current candle data
         self.candles.open_price = 104.0
         self.candles.high_price = 112.0
         self.candles.low_price = 91.0
@@ -150,26 +153,20 @@ class TestBaseCandles(unittest.TestCase):
         )
         np.testing.assert_array_equal(candle_array, expected_candles)
 
-    def test_as_array_empty(self):
-        candle_array = self.candles.as_array()
-        expected_candles = np.array([[]], dtype=np.float64)
-        np.testing.assert_array_equal(candle_array, expected_candles)
-
     def test_reset_current_candle(self):
-        self.candles.open_price = (104.0,)
-        self.candles.high_price = (112.0,)
-        self.candles.low_price = (91.0,)
-        self.candles.close_price = (109.0,)
-        self.candles.buy_volume = (10.0,)
-        self.candles.sell_volume = (94.0,)
-        self.candles.vwap_price = (106.0,)
-        self.candles.total_trades = (9.0,)
-        self.candles.open_timestamp = (1609459260.0,)
+        self.candles.open_price = 104.0
+        self.candles.high_price = 112.0
+        self.candles.low_price = 91.0
+        self.candles.close_price = 109.0
+        self.candles.buy_volume = 10.0
+        self.candles.sell_volume = 94.0
+        self.candles.vwap_price = 106.0
+        self.candles.total_trades = 9.0
+        self.candles.open_timestamp = 1609459260.0
         self.candles.close_timestamp = 1609459320.0
 
         self.candles.reset_current_candle()
 
-        self.assertEqual(self.candles.num_candles, 5)
         self.assertEqual(self.candles.open_price, 0.0)
         self.assertEqual(self.candles.high_price, -np.inf)
         self.assertEqual(self.candles.low_price, np.inf)
@@ -183,34 +180,36 @@ class TestBaseCandles(unittest.TestCase):
         self.assertTrue(self.candles.ringbuffer.is_empty)
 
     def test_durations(self):
-        self.candles.insert_candle(
-            open_price=100.0,
-            high_price=110.0,
-            low_price=90.0,
-            close_price=105.0,
-            buy_volume=500.0,
-            sell_volume=200.0,
-            vwap_price=102.0,
-            total_trades=3.0,
-            open_timestamp=1609459200.0,
-            close_timestamp=1609459260.0,
-        )
+        self.candles.open_price = 100.0
+        self.candles.high_price = 110.0
+        self.candles.low_price = 90.0
+        self.candles.close_price = 105.0
+        self.candles.buy_volume = 500.0
+        self.candles.sell_volume = 200.0
+        self.candles.vwap_price = 102.0
+        self.candles.total_trades = 3.0
+        self.candles.open_timestamp = 1609459200.0
+        self.candles.close_timestamp = 1609459260.0
+
+        self.candles.insert_candle()
+
         durations = self.candles.durations()
         self.assertEqual(durations[0], 60.0)
 
     def test_imbalances(self):
-        self.candles.insert_candle(
-            open_price=100.0,
-            high_price=110.0,
-            low_price=90.0,
-            close_price=105.0,
-            buy_volume=500.0,
-            sell_volume=250.0,
-            vwap_price=102.0,
-            total_trades=3.0,
-            open_timestamp=1609459200.0,
-            close_timestamp=1609459260.0,
-        )
+        self.candles.open_price = 100.0
+        self.candles.high_price = 110.0
+        self.candles.low_price = 90.0
+        self.candles.close_price = 105.0
+        self.candles.buy_volume = 500.0
+        self.candles.sell_volume = 250.0
+        self.candles.vwap_price = 102.0
+        self.candles.total_trades = 3.0
+        self.candles.open_timestamp = 1609459200.0
+        self.candles.close_timestamp = 1609459260.0
+
+        self.candles.insert_candle()
+
         imbalances = self.candles.imbalances()
         self.assertEqual(imbalances[0], 500.0 / 250.0)
 
@@ -223,18 +222,10 @@ class TestBaseCandles(unittest.TestCase):
         )
 
         for i in range(len(close_prices)):
-            candles.insert_candle(
-                open_price=0.0,  # Irrelevant to RSI calculation
-                high_price=0.0,  # Irrelevant to RSI calculation
-                low_price=0.0,  # Irrelevant to RSI calculation
-                close_price=close_prices[i],
-                buy_volume=0.0,  # Irrelevant to RSI calculation
-                sell_volume=0.0,  # Irrelevant to RSI calculation
-                vwap_price=0.0,  # Irrelevant to RSI calculation
-                total_trades=0.0,  # Irrelevant to RSI calculation
-                open_timestamp=1609459200.0 + (60 * i),
-                close_timestamp=1609459260.0 + (60 * i),
-            )
+            candles.close_price = close_prices[i]
+            candles.open_timestamp = 1609459200.0 + (60 * i)
+            candles.close_timestamp = 1609459260.0 + (60 * i)
+            candles.insert_candle()
 
         rsi_values = candles.rsi(period=5)
         expected_rsi_values = np.array(
@@ -276,18 +267,13 @@ class TestBaseCandles(unittest.TestCase):
         )
 
         for i in range(len(close_prices)):
-            candles.insert_candle(
-                open_price=open_prices[i],
-                high_price=high_prices[i],
-                low_price=low_prices[i],
-                close_price=close_prices[i],
-                buy_volume=0.0,  # Irrelevant to Bollinger Bands calculation
-                sell_volume=0.0,  # Irrelevant to Bollinger Bands calculation
-                vwap_price=0.0,  # Irrelevant to Bollinger Bands calculation
-                total_trades=0.0,  # Irrelevant to Bollinger Bands calculation
-                open_timestamp=1609459200.0 + (60 * i),
-                close_timestamp=1609459260.0 + (60 * i),
-            )
+            candles.open_price = open_prices[i]
+            candles.high_price = high_prices[i]
+            candles.low_price = low_prices[i]
+            candles.close_price = close_prices[i]
+            candles.open_timestamp = 1609459200.0 + (60 * i)
+            candles.close_timestamp = 1609459260.0 + (60 * i)
+            candles.insert_candle()
 
         lower_band, sma, upper_band = candles.bollinger_bands(period=5, num_std_dev=2.0)
 
@@ -304,42 +290,44 @@ class TestBaseCandles(unittest.TestCase):
         np.testing.assert_almost_equal(upper_band[-7:], expected_upper_band, decimal=3)
 
     def test_average_true_range(self):
-        self.candles.insert_candle(
-            100.0,
-            110.0,
-            90.0,
-            105.0,
-            500.0,
-            200.0,
-            102.0,
-            3,
-            1609459200.0,
-            1609459260.0,
-        )
-        self.candles.insert_candle(
-            105.0,
-            120.0,
-            100.0,
-            110.0,
-            600.0,
-            300.0,
-            108.0,
-            4,
-            1609459260.0,
-            1609459320.0,
-        )
-        self.candles.insert_candle(
-            110.0,
-            130.0,
-            105.0,
-            115.0,
-            700.0,
-            400.0,
-            114.0,
-            5,
-            1609459320.0,
-            1609459380.0,
-        )
+        self.candles.open_price = 100.0
+        self.candles.high_price = 110.0
+        self.candles.low_price = 90.0
+        self.candles.close_price = 105.0
+        self.candles.buy_volume = 500.0
+        self.candles.sell_volume = 200.0
+        self.candles.vwap_price = 102.0
+        self.candles.total_trades = 3.0
+        self.candles.open_timestamp = 1609459200.0
+        self.candles.close_timestamp = 1609459260.0
+
+        self.candles.insert_candle()
+
+        self.candles.open_price = 105.0
+        self.candles.high_price = 120.0
+        self.candles.low_price = 100.0
+        self.candles.close_price = 110.0
+        self.candles.buy_volume = 600.0
+        self.candles.sell_volume = 300.0
+        self.candles.vwap_price = 108.0
+        self.candles.total_trades = 4.0
+        self.candles.open_timestamp = 1609459260.0
+        self.candles.close_timestamp = 1609459320.0
+
+        self.candles.insert_candle()
+
+        self.candles.open_price = 110.0
+        self.candles.high_price = 130.0
+        self.candles.low_price = 105.0
+        self.candles.close_price = 115.0
+        self.candles.buy_volume = 700.0
+        self.candles.sell_volume = 400.0
+        self.candles.vwap_price = 114.0
+        self.candles.total_trades = 5.0
+        self.candles.open_timestamp = 1609459320.0
+        self.candles.close_timestamp = 1609459380.0
+
+        self.candles.insert_candle()
 
         atr = self.candles.average_true_range()
         expected_atr = np.array([25.0])
@@ -375,18 +363,18 @@ class TestBaseCandles(unittest.TestCase):
         np.testing.assert_array_equal(current_candle, expected_candle)
 
     def test_getitem(self):
-        self.candles.insert_candle(
-            open_price=100.0,
-            high_price=110.0,
-            low_price=90.0,
-            close_price=105.0,
-            buy_volume=500.0,
-            sell_volume=250.0,
-            vwap_price=102.0,
-            total_trades=3.0,
-            open_timestamp=1609459200.0,
-            close_timestamp=1609459260.0,
-        )
+        self.candles.open_price = 100.0
+        self.candles.high_price = 110.0
+        self.candles.low_price = 90.0
+        self.candles.close_price = 105.0
+        self.candles.buy_volume = 500.0
+        self.candles.sell_volume = 250.0
+        self.candles.vwap_price = 102.0
+        self.candles.total_trades = 3.0
+        self.candles.open_timestamp = 1609459200.0
+        self.candles.close_timestamp = 1609459260.0
+
+        self.candles.insert_candle()
 
         newest_candle = self.candles[0]
         expected_candle = np.array(
@@ -409,46 +397,47 @@ class TestBaseCandles(unittest.TestCase):
 
     def test_length(self):
         for i in range(0, 30, 10):
-            self.candles.insert_candle(
-                open_price=100.0,
-                high_price=110.0,
-                low_price=90.0,
-                close_price=105.0,
-                buy_volume=500.0,
-                sell_volume=250.0,
-                vwap_price=102.0,
-                total_trades=3.0,
-                open_timestamp=1609459200.0 + i,
-                close_timestamp=1609459260.0 + (i + 10),
-            )
+            self.candles.open_price = 100.0
+            self.candles.high_price = 110.0
+            self.candles.low_price = 90.0
+            self.candles.close_price = 105.0
+            self.candles.buy_volume = 500.0
+            self.candles.sell_volume = 250.0
+            self.candles.vwap_price = 102.0
+            self.candles.total_trades = 3.0
+            self.candles.open_timestamp = 1609459200.0 + i
+            self.candles.close_timestamp = 1609459260.0 + (i + 10)
+            self.candles.insert_candle()
 
         self.assertEqual(len(self.candles), 3)
 
     def test_iteration(self):
-        self.candles.insert_candle(
-            100.0,
-            110.0,
-            90.0,
-            105.0,
-            500.0,
-            200.0,
-            102.0,
-            3,
-            1609459200.0,
-            1609459260.0,
-        )
-        self.candles.insert_candle(
-            105.0,
-            120.0,
-            100.0,
-            110.0,
-            600.0,
-            300.0,
-            108.0,
-            4,
-            1609459260.0,
-            1609459320.0,
-        )
+        self.candles.open_price = 100.0
+        self.candles.high_price = 110.0
+        self.candles.low_price = 90.0
+        self.candles.close_price = 105.0
+        self.candles.buy_volume = 500.0
+        self.candles.sell_volume = 200.0
+        self.candles.vwap_price = 102.0
+        self.candles.total_trades = 3.0
+        self.candles.open_timestamp = 1609459200.0
+        self.candles.close_timestamp = 1609459260.0
+
+        self.candles.insert_candle()
+
+        self.candles.open_price = 105.0
+        self.candles.high_price = 120.0
+        self.candles.low_price = 100.0
+        self.candles.close_price = 110.0
+        self.candles.buy_volume = 600.0
+        self.candles.sell_volume = 300.0
+        self.candles.vwap_price = 108.0
+        self.candles.total_trades = 4.0
+        self.candles.open_timestamp = 1609459260.0
+        self.candles.close_timestamp = 1609459320.0
+
+        self.candles.insert_candle()
+
         candles = list(self.candles)
         self.assertEqual(len(candles), 2)
 

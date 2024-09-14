@@ -1,9 +1,6 @@
 import unittest
 import numpy as np
-from src.mm_toolbox.ringbuffer import RingBufferTwoDimFloat, RingBufferTwoDimInt
-
-import unittest
-import numpy as np
+from mm_toolbox.ringbuffer import RingBufferTwoDimFloat, RingBufferTwoDimInt
 
 
 class TestRingBufferTwoDimFloat(unittest.TestCase):
@@ -249,7 +246,9 @@ class TestRingBufferTwoDimInt(unittest.TestCase):
             self.buffer.append(np.array([i, i + 1, i + 2]))
 
         array = self.buffer.as_array()
-        expected_array = np.array([[0, 1, 2], [1, 2, 3], [2, 3, 4], [3, 4, 5], [4, 5, 6]])
+        expected_array = np.array(
+            [[0, 1, 2], [1, 2, 3], [2, 3, 4], [3, 4, 5], [4, 5, 6]]
+        )
 
         np.testing.assert_array_equal(array, expected_array)
 

@@ -1,8 +1,7 @@
 import unittest
-import numpy as np
 
-from src.mm_toolbox.candles import TickCandles
-from src.mm_toolbox.time import time_ms
+from mm_toolbox.candles import TickCandles
+from mm_toolbox.time import time_ms
 
 
 class TestTickCandles(unittest.TestCase):

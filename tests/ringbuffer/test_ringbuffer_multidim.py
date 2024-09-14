@@ -1,12 +1,14 @@
 import unittest
 import numpy as np
-from src.mm_toolbox.ringbuffer import RingBufferMultiDim
+from mm_toolbox.ringbuffer import RingBufferMultiDim
 
 
 class TestRingBufferMultiDim(unittest.TestCase):
     def setUp(self):
         self.buffer_capacity = 5
-        self.single_dim_buffer = RingBufferMultiDim(self.buffer_capacity, dtype=np.int64)
+        self.single_dim_buffer = RingBufferMultiDim(
+            self.buffer_capacity, dtype=np.int64
+        )
         self.multi_dim_buffer = RingBufferMultiDim(
             (self.buffer_capacity, 3), dtype=np.int64
         )
@@ -184,7 +186,9 @@ class TestRingBufferMultiDim(unittest.TestCase):
             [[5, 6, 7], [6, 7, 8], [7, 8, 9], [8, 9, 10], [9, 10, 11]]
         )
 
-        np.testing.assert_array_equal(self.single_dim_buffer.as_array(), expected_single)
+        np.testing.assert_array_equal(
+            self.single_dim_buffer.as_array(), expected_single
+        )
         np.testing.assert_array_equal(self.multi_dim_buffer.as_array(), expected_multi)
 
 

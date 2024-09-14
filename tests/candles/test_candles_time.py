@@ -1,6 +1,6 @@
 import unittest
-from src.mm_toolbox.candles import TimeCandles
-from src.mm_toolbox.time import time_ms
+from mm_toolbox.candles import TimeCandles
+from mm_toolbox.time import time_ms
 
 
 class TestTimeCandles(unittest.TestCase):
@@ -75,7 +75,8 @@ class TestTimeCandles(unittest.TestCase):
         self.assertTrue(self.candles.ringbuffer.is_empty)
 
         self.candles.update(
-            timestamp=self.dummy_ms + (61.0 * 1000.0),  # 61s later, should trigger update
+            timestamp=self.dummy_ms
+            + (61.0 * 1000.0),  # 61s later, should trigger update
             side=0.0,
             price=117.0,
             size=8.0,

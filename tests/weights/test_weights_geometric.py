@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from src.mm_toolbox.weights import geometric_weights
+from mm_toolbox.weights import geometric_weights
 
 
 class TestGeometricWeights(unittest.TestCase):
@@ -11,7 +11,9 @@ class TestGeometricWeights(unittest.TestCase):
 
     def test_custom_ratio(self):
         result = geometric_weights(5, r=0.5)
-        expected = np.array([0.51612903, 0.25806452, 0.12903226, 0.06451613, 0.03225806])
+        expected = np.array(
+            [0.51612903, 0.25806452, 0.12903226, 0.06451613, 0.03225806]
+        )
         np.testing.assert_almost_equal(result, expected, decimal=8)
 
     def test_invalid_num(self):
