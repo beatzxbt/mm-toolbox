@@ -1,5 +1,4 @@
 import unittest
-import numpy as np
 from mm_toolbox.candles import MultiTriggerCandles
 from mm_toolbox.time import time_ms
 
@@ -30,9 +29,7 @@ class TestMultiTriggerCandles(unittest.TestCase):
 
     def test_update_with_max_duration(self):
         # Simulate trades that exceed the max duration (3 seconds)
-        self.candles.update(
-            timestamp=self.dummy_ms, side=0.0, price=110.0, size=30.0
-        )
+        self.candles.update(timestamp=self.dummy_ms, side=0.0, price=110.0, size=30.0)
         self.candles.update(
             timestamp=self.dummy_ms + 1000, side=1.0, price=111.0, size=25.0
         )
@@ -49,16 +46,16 @@ class TestMultiTriggerCandles(unittest.TestCase):
         self.assertEqual(created_candle[0], 110.0)  # Open price
         self.assertEqual(created_candle[1], 112.0)  # High price
         self.assertEqual(created_candle[2], 110.0)  # Low price
-        self.assertEqual(created_candle[3], 112.0)  # Close price (before duration exceeded)
+        self.assertEqual(
+            created_candle[3], 112.0
+        )  # Close price (before duration exceeded)
         self.assertEqual(created_candle[4], 50.0)  # Buy volume (30 + 20)
         self.assertEqual(created_candle[5], 25.0)  # Sell volume
         self.assertEqual(created_candle[7], 3.0)  # Total trades
 
     def test_update_with_max_volume(self):
         # Process trades that exceed max_volume (100.0)
-        self.candles.update(
-            timestamp=self.dummy_ms, side=0.0, price=110.0, size=30.0
-        )
+        self.candles.update(timestamp=self.dummy_ms, side=0.0, price=110.0, size=30.0)
         self.candles.update(
             timestamp=self.dummy_ms + 100, side=1.0, price=111.0, size=25.0
         )
@@ -73,7 +70,7 @@ class TestMultiTriggerCandles(unittest.TestCase):
         self.assertEqual(created_candle[1], 112.0)  # High price
         self.assertEqual(created_candle[2], 110.0)  # Low price
         self.assertEqual(created_candle[3], 112.0)  # Close price
-        self.assertEqual(created_candle[4], 75.0)  # Buy volume 
+        self.assertEqual(created_candle[4], 75.0)  # Buy volume
         self.assertEqual(created_candle[5], 25.0)  # Sell volume
         self.assertEqual(created_candle[7], 3.0)  # Total trades
 
@@ -81,9 +78,7 @@ class TestMultiTriggerCandles(unittest.TestCase):
         # This test checks how multiple triggers (ticks, duration, volume) work together
 
         # First three trades, with ticks and volume under limits
-        self.candles.update(
-            timestamp=self.dummy_ms, side=0.0, price=110.0, size=10.0
-        )
+        self.candles.update(timestamp=self.dummy_ms, side=0.0, price=110.0, size=10.0)
         self.candles.update(
             timestamp=self.dummy_ms + 100, side=1.0, price=111.0, size=20.0
         )
@@ -126,7 +121,9 @@ class TestMultiTriggerCandles(unittest.TestCase):
 
         created_candle = self.candles[0]
         self.assertEqual(created_candle[0], 110.0)  # Open price
-        self.assertEqual(created_candle[1], 114.0)  # High price (from the first 5 trades)
+        self.assertEqual(
+            created_candle[1], 114.0
+        )  # High price (from the first 5 trades)
         self.assertEqual(created_candle[2], 110.0)  # Low price
         self.assertEqual(created_candle[3], 114.0)  # Close price
         self.assertEqual(created_candle[4], 100.0)  # Buy volume (5 trades)

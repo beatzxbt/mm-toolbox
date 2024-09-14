@@ -25,6 +25,6 @@ def ema_weights(window: int, alpha: Optional[float] = None) -> np.ndarray[float]
     assert window > 1, "Number of weights generated cannot be <1."
     alpha = alpha if alpha is not None else 3.0 / float(window + 1)
     weights = np.array(
-        [alpha * (1.0 - alpha) ** i for i in range(window-1, -1, -1)], dtype=float64
+        [alpha * (1.0 - alpha) ** i for i in range(window - 1, -1, -1)], dtype=float64
     )
     return weights

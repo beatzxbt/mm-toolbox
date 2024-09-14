@@ -1,4 +1,5 @@
 import numpy as np
+
 # Comment out jitclass for debugging
 # from numba.experimental import jitclass
 from numba.types import bool_, uint32, float64
@@ -6,6 +7,7 @@ from typing import Optional
 
 from .wma import WeightedMovingAverage as WMA
 from mm_toolbox.ringbuffer import RingBufferSingleDimFloat
+
 
 # Comment out jitclass for debugging
 # @jitclass
@@ -56,7 +58,9 @@ class HullMovingAverage:
         short_wma_values = self._short_wma.values
         long_wma_values = self._long_wma.values
         min_length = min(len(short_wma_values), len(long_wma_values))
-        diff_series = (short_wma_values[:min_length] * 2.0) - long_wma_values[:min_length]
+        diff_series = (short_wma_values[:min_length] * 2.0) - long_wma_values[
+            :min_length
+        ]
 
         self._smooth_wma.initialize(diff_series)
         self.value = self._smooth_wma.value
