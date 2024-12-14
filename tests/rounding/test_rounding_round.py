@@ -35,11 +35,11 @@ class TestRound(unittest.TestCase):
         np.testing.assert_almost_equal(self.rounder.sizes(sizes), expected, decimal=3)
 
     def test_invalid_tick_size(self):
-        with self.assertRaises(ZeroDivisionError):
+        with self.assertRaises(ValueError):
             Round(0.0, 0.001)
 
     def test_invalid_lot_size(self):
-        with self.assertRaises(ZeroDivisionError):
+        with self.assertRaises(ValueError):
             Round(0.01, 0.0)
 
 
