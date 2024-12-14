@@ -34,7 +34,7 @@ class TestEmaWeights(unittest.TestCase):
         np.testing.assert_almost_equal(result, expected, decimal=8)
 
     def test_invalid_window(self):
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(ValueError):
             ema_weights(1)
 
 

@@ -16,18 +16,14 @@ class TestGeometricWeights(unittest.TestCase):
         )
         np.testing.assert_almost_equal(result, expected, decimal=8)
 
-    def test_invalid_num(self):
-        with self.assertRaises(AssertionError):
-            geometric_weights(1)
-
-    def test_sum_of_weights(self):
-        result = geometric_weights(10, r=0.9)
-        self.assertAlmostEqual(result.sum(), 1.0)
-
-    def test_large_num(self):
+    def test_larger_num(self):
         result = geometric_weights(100, r=0.95)
         self.assertEqual(len(result), 100)
         self.assertAlmostEqual(result.sum(), 1.0)
+
+    def test_invalid_num(self):
+        with self.assertRaises(ValueError):
+            geometric_weights(1)
 
 
 if __name__ == "__main__":
