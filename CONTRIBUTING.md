@@ -33,14 +33,14 @@ Make sure to choose a descriptive name for your branch that reflects the changes
 ### 4. Install Dependencies
 Install these by doing:
 ```bash
-pip install -r requirements.txt
+poetry install --all
 ```
 
 ### 5. Make Your Changes
 Implement your changes in the appropriate module(s). Be sure to format your code with black and add numpy style docstrings where neccesary. If possible, avoid introducing new dependencies.
 
 ### 6. Write Tests
-Ensure that your changes are well-tested. If you add new functionality, write corresponding unit tests. Tests are located in the tests/ directory.
+Ensure that your changes are well-tested. If you add new functionality, write corresponding unit tests. Tests are located in [`tests/`](tests/).
 
 Run the tests to ensure everything is working correctly:
 ```bash
@@ -70,7 +70,7 @@ In your PR:
 * Highlight any particular areas you'd like reviewers to focus on.
 
 ### 10. Address Feedback
-Your PR will be reviewed by the maintainers. You may be asked to make additional changes based on feedback. Please address these promptly to move the process forward.
+Your PR will be reviewed by the maintainers (me). You may be asked to make additional changes based on feedback. Please address these promptly to move the process forward.
 
 ## Code Style
 * Follow PEP 8 for Python code style ([black](https://github.com/psf/black) makes this very simple).
