@@ -46,43 +46,45 @@ poetry install
 After installation, you can start using MM Toolbox by importing the necessary modules:
 ```python
 from mm_toolbox import Orderbook
-from mm_toolbox import ExponentialMovingAverage
-from mm_toolbox import time_iso8601
+from mm_toolbox import ExponentialMovingAverage as EMA
+from mm_toolbox.logging import Logger, LoggerConfig
 
 # Example usage:
-orderbook = Orderbook(size=100)
+ema = EMA(window=10, fast=True)
+logger = Logger(LoggerConfig(stout=True))
 ```
+
+## Latest release notes (v1.0.0)
+Migration of most core libary components from Numba to Cython. Massive speed improvements of ``5-30x``, and more consistant, user-friendly APIs between common components.
+
+**Common breaking changes**: Majority of core components reimplemented fully in Cython/C for maximum performance. No longer compatible with existing Numba code, however most components retain Numba compatible mirrors (accessible by doing `mm_toolbox.numba.'component'`).
+
+**Candles**: Added functionality to get next-state candle values without updating internal states (mirrors moving average's `.next()`). Technical indicators can be set to track mode, which auto calculates them on every new tick.
+
+**Ringbuffer**: Integer support dropped for 1/2D ringbuffers. Multi now supports *any* number type, strings and bytes (datetime compatibility may be added at a later date). New unified API, opening up safe and unsafe access to underlying buffer for faster custom operations.
+
+**Moving Average**: Introduced SMA, deprecated HMA (lack of use).
+
+**Orderbook**: New zero-alloc design Orderbook, >4x faster for BBO updates and >5x faster per-level for batch updates. Supports historical tracking for orderbook state.
+
+**Websocket**: New single connection design, supporting auto-pinging and latency tracking natively. Optionally exposes raw unprocessed data for custom processing. New pool design, with smarter latency policies, load balancing features and better modularity. Both highly integrated with `mm_toolbox.logging` loggers.
+
+**Logging**: New AdvancedLogger, purpose built for distributed HFT systems. Two parts, a very lightweight worker logger to collect and batch send logs to a master logger. Master logger then distributes it to external handlers (file/loki/discord/etc) in various formats (customizable). Importable through `mm_toolbox.advanced`.
+
+**Numba**: Migration of existing components into sub folders in this directory. Numba sped-up NumPy functions now accessible with `mm_toolbox.numba.numpy`. *These will be kept feature compatible with the Cython API until `v2.0.0`, where they will likely be deprecated*.
+
+*Components not mentioned have either not incurred any changes, or are not significant enough to affect a vast majority of code bases.*
 
 ## Planned additions/upgrades
 
-### v0.2.0
-**Numba**: Complete coverage of [Numba's top-level functions](https://numba.readthedocs.io/en/stable/reference/numpysupported.html#other-functions) (with custom implementation if faster).
+### v1.1.0 (no earlier than Feb 25')
+**Orderbook**: Orderbook ++Performance.
 
-**Moving Average**: Weighted Moving Average (WMA).
+**Logger**: AdvancedLogger ++Performance, Telegram handler.
 
-**Orderbook**: Directly update BBA, ++Performance.
+**Websocket**: Market Data Structures (like a payload handler), FastWsPool ++Performance.
 
-**Candles**: Multi-trigger candle (time/tick/volume), ++Performance.
-
-**Logger**: High performance logger.
-
-**Websocket**: Standard websocket, Fast websocket pool + auto latency swapping mechanism.
-
-### v0.3.0
-**Numba**: Coverage of [Numba's reduction functions.](https://numba.readthedocs.io/en/stable/reference/numpysupported.html#reductions) (with custom implementation if faster).
-
-**Moving Average**: Simple Moving Average (SMA).
-
-**Orderbook**: [HFT Orderbook](/mm_toolbox/src/orderbook/hft.py), aiming to be fastest Python orderbook on GitHub.
-
-### v0.4.0
-**Weights**: Logarithmic.
-
-**Orderbook**: HFTOrderbook ++Performance.
-
-**Websocket**: FastWsPool ++Stability ++Performance, VerifyWsPayload ++Performance.
-
-### v0.5.0
+### v1.2.0 (no earlier than Apr 25')
 **Orderbook**: L3 Orderbook.
 
 ## License
