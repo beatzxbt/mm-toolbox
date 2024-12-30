@@ -69,9 +69,10 @@ cpdef str time_iso8601():
     str
         An ISO 8601 formatted date-time string (e.g., "2023-04-04T00:28:50.516Z").
     """
-    cdef int64_t    ms
-    cdef str        ms_padded
-    cdef timespec   tspec
+    cdef: 
+        int64_t    ms
+        str        ms_padded
+        timespec   tspec
 
     if clock_gettime(CLOCK_REALTIME, &tspec) == -1:
         raise RuntimeError(f"clock_gettime failed: {errno}")

@@ -21,7 +21,7 @@ def geometric_weights(num: int, r: Optional[float] = None) -> np.ndarray:
     """
     if num <= 1:
         raise ValueError("Number of weights generated cannot be <1.")
-    
+
     r = r if r else 0.75
     weights = np.array([r**i for i in range(num)], dtype=np.float64)
     normalized = weights / weights.sum()

@@ -1,3 +1,5 @@
+from .sma import SimpleMovingAverage as SimpleMovingAverage
 from .ema import ExponentialMovingAverage as ExponentialMovingAverage
-from .hma import HullMovingAverage as HullMovingAverage
 from .wma import WeightedMovingAverage as WeightedMovingAverage
+
+__all__ = ["SimpleMovingAverage", "ExponentialMovingAverage", "WeightedMovingAverage"]
