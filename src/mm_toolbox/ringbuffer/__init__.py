@@ -1,11 +1,5 @@
-from .onedim import (
-    RingBufferSingleDimFloat as RingBufferSingleDimFloat,
-    RingBufferSingleDimInt as RingBufferSingleDimInt,
-)
+from .onedim import RingBufferOneDim as RingBufferOneDim
+from .twodim import RingBufferTwoDim as RingBufferTwoDim
+from .multi import RingBufferMulti as RingBufferMulti
 
-from .twodim import (
-    RingBufferTwoDimFloat as RingBufferTwoDimFloat,
-    RingBufferTwoDimInt as RingBufferTwoDimInt,
-)
-
-from .multidim import RingBufferMultiDim as RingBufferMultiDim
+__all__ = ["RingBufferOneDim", "RingBufferTwoDim", "RingBufferMulti"]
