@@ -22,6 +22,7 @@ class DiscordLogHandler(LogHandler):
     json_encoder = msgspec.json.Encoder()
 
     def __init__(self, config: DiscordLogConfig) -> None:
+        config.validate()
         self.url = config.webhook
         self.headers = {"Content-Type": "application/json"}
 
@@ -36,7 +37,7 @@ class DiscordLogHandler(LogHandler):
                     self.client.post(
                         url=self.url,
                         headers=self.headers,
-                        json=self.json_encoder.encode({"content": log}),
+                        data=self.json_encoder.encode({"content": log}),
                     )
                 )
 
