@@ -26,6 +26,7 @@ class TelegramLogHandler(LogHandler):
     json_encoder = msgspec.json.Encoder()
 
     def __init__(self, config: TelegramLogConfig) -> None:
+        config.validate()
         self.chat_id = config.chat_id
 
         self.url = f"https://api.telegram.org/bot{config.bot_token}/sendMessage"
@@ -33,7 +34,7 @@ class TelegramLogHandler(LogHandler):
 
         self.client = aiosonic.HTTPClient()
 
-    async def flush(self, buffer) -> None:
+    async def flush(self, buffer: List[str]) -> None:
         try:
             tasks: List[Coroutine] = []
             for log in buffer:

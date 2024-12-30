@@ -5,8 +5,6 @@ from .base import LogConfig, LogHandler
 @dataclass
 class FileLogConfig(LogConfig):
     filepath: str = ""
-    buffer_size: int = 10
-    flush_interval: int = 10
 
     def validate(self) -> None:
         if not self.filepath or not self.filepath.endswith(".txt"):
@@ -19,9 +17,9 @@ class FileLogConfig(LogConfig):
 
 class FileLogHandler(LogHandler):
     def __init__(self, config: FileLogConfig) -> None:
+        config.validate()
+
         self.log_file = open(config.filepath, "w")
-        self.buffer_size = config.buffer_size
-        self.flush_interval = config.flush_interval
 
     async def flush(self, buffer) -> None:
         combined_logs = "\n".join(buffer) + "\n"
