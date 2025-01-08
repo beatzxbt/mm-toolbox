@@ -399,8 +399,8 @@ cdef class ArrayOrderbook:
         # The incoming arrays should be sorted in ascending order
         # anyways, but it doesnt hurt to ensure it. Sort will be 
         # extremely fast anyway if it is already in order.
-        self._asks[:, :] = new_asks_view[cnp.PyArray_ArgSort(new_asks[:, 0], -1, cnp.NPY_QUICKSORT)]
-        self._bids[:, :] = new_bids_view[cnp.PyArray_ArgSort(new_bids[:, 0], -1, cnp.NPY_QUICKSORT)]
+        self._asks[:, :] = new_asks[new_asks[:, 0].argsort()]
+        self._bids[:, :] = new_bids[new_bids[:, 0].argsort()[::-1]]
         self._seq_id = new_seq_id
         self._is_warm = True
 
@@ -704,7 +704,7 @@ cdef class ArrayOrderbook:
             RuntimeError: If the orderbook is not warmed (caught via `ensure_warm()`).
         """
         self.ensure_warm()
-        return (self._bids[0, 0] + self._asks[0, 0]) / 2.0
+        return (self._bids_view[0, 0] + self._asks_view[0, 0]) / 2.0
 
     cpdef double get_wmid(self):
         """
@@ -724,11 +724,11 @@ cdef class ArrayOrderbook:
         """
         self.ensure_warm()
 
-        cdef double top_bid_sz = self._bids[0, 1]
-        cdef double top_ask_sz = self._asks[0, 1]
+        cdef double top_bid_sz = self._bids_view[0, 1]
+        cdef double top_ask_sz = self._asks_view[0, 1]
         cdef double imbalance = top_bid_sz / (top_bid_sz + top_ask_sz)
 
-        return (self._bids[0, 0] * imbalance) + (self._asks[0, 0] * (1.0 - imbalance))
+        return (self._bids_view[0, 0] * imbalance) + (self._asks_view[0, 0] * (1.0 - imbalance))
 
     cpdef double get_bbo_spread(self):
         """
@@ -738,7 +738,7 @@ cdef class ArrayOrderbook:
             float: The difference between the best ask price (asks[0,0])
                 and the best bid price (bids[0,0]).
         """
-        return self._asks[0, 0] - self._bids[0, 0]
+        return self._asks_view[0, 0] - self._bids_view[0, 0]
     
     cpdef double get_vamp(self, double size, bint is_base_currency=False):
         """
@@ -776,13 +776,17 @@ cdef class ArrayOrderbook:
             double aprice, asize
 
         # convert base -> quote if needed
-        if not is_base_currency:
-            size = size * self.get_mid()  
+        if is_base_currency:
+            size *= self.get_mid()  
+
+        # Please dont be this dumb...
+        if size == 0.0:
+            return self.get_mid()
 
         # Bids accumulation (partial fill from top bids)
         while cum_bsize < size and bid_iter_idx < self._size:
-            bprice = self._bids[bid_iter_idx, 0]
-            bsize = self._bids[bid_iter_idx, 1]
+            bprice = self._bids_view[bid_iter_idx, 0]
+            bsize = self._bids_view[bid_iter_idx, 1]
 
             if (cum_bsize + bsize) > size:
                 remaining_size = size - cum_bsize
@@ -796,8 +800,8 @@ cdef class ArrayOrderbook:
 
         # Asks accumulation (partial fill from top asks)
         while cum_asize < size and ask_iter_idx < self._size:
-            aprice = self._asks[ask_iter_idx, 0]
-            asize = self._asks[ask_iter_idx, 1]
+            aprice = self._asks_view[ask_iter_idx, 0]
+            asize = self._asks_view[ask_iter_idx, 1]
 
             if (cum_asize + asize) > size:
                 remaining_size = size - cum_asize
@@ -850,11 +854,11 @@ cdef class ArrayOrderbook:
             double available_size
             Py_ssize_t level = 0
 
-            double[:, :] book = self._bids if is_bid else self._asks
+            double[:, :] book = self._bids_view if is_bid else self._asks_view
 
         # convert base -> quote if needed
         if is_base_currency:
-            size = size * mid_price
+            size *= mid_price
 
         # Iterate over levels to fill partial or entire 'size'
         while cum_size < size and level < self._size:
@@ -915,8 +919,8 @@ cdef class ArrayOrderbook:
             raise ValueError(f"Invalid depth_pct; expected >0 but got {depth_pct}")
 
         cdef:
-            double best_bid = self._bids[0, 0]
-            double best_ask = self._asks[0, 0]
+            double best_bid = self._bids_view[0, 0]
+            double best_ask = self._asks_view[0, 0]
             double spread = self.get_bbo_spread()
             double mid = self.get_mid()
 
@@ -932,8 +936,8 @@ cdef class ArrayOrderbook:
 
         # Sum up volumes on the bid side for levels >= min_px
         for i in range(self._size):
-            px = self._bids[i, 0]
-            sz = self._bids[i, 1]
+            px = self._bids_view[i, 0]
+            sz = self._bids_view[i, 1]
 
             if px < min_px:
                 break
@@ -942,8 +946,8 @@ cdef class ArrayOrderbook:
 
         # Sum up volumes on the ask side for levels <= max_px
         for i in range(self._size):
-            px = self._asks[i, 0]
-            sz = self._asks[i, 1]
+            px = self._asks_view[i, 0]
+            sz = self._asks_view[i, 1]
 
             if px > max_px:
                 break
