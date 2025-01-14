@@ -1,26 +1,24 @@
-import os
 import zmq
 import asyncio
 import msgspec
 from typing import Union
 
-from libc.stdint cimport uint8_t, uint32_t
+from libc.stdint cimport uint8_t, uint16_t
 
 from mm_toolbox.time.time cimport time_ns
 
-from ..utils._system import _get_system_info
-from ..utils._zmq import ZmqConnection
+from .handlers.base import LogHandler
+from ..utils.system import _get_system_info
+from ..utils.zmq import ZmqConnection
 
 from .config cimport LoggerConfig
-# from .handlers cimport
-from .structs cimport (
-    LogLevel, 
+from .structs import (
     LogMessage, 
     LogMessageBatch, 
     DataMessage, 
-    DataMessageBatch, 
-    MessageBuffer, 
+    DataMessageBatch
 )
+from .structs cimport LogLevel, MessageBuffer
 
 
 cdef class MasterLogger:
@@ -31,22 +29,28 @@ cdef class MasterLogger:
     """
     def __init__(
         self, 
-        LoggerConfig config, 
-        list log_handlers,  
-        list data_handlers, 
-        str srcfilename=""
+        LoggerConfig config=LoggerConfig(), 
+        str srcfilename="",
+        list log_handlers=[],  
+        list data_handlers=[], 
     ):
+        for handler in log_handlers + data_handlers:
+            handler_base_class = handler.__class__.__base__
+            if not handler_base_class == LogHandler:
+                raise TypeError(f"Invalid handler base class; expected LogHandler but got {handler_base_class}")
+        
+        self._log_handlers = log_handlers
+        self._data_handlers = data_handlers
+
         self._system_info = _get_system_info(
             machine=True, 
             network=True, 
             op_sys=True
         )
-        self._ev_loop = asyncio.get_event_loop()
         self._srcfilename = srcfilename.encode()
         
-        self._batch_decoder = msgspec.msgpack.Decoder(
-            type=Union[LogMessageBatch, DataMessageBatch]
-        )
+        self._batch_encoder = msgspec.msgpack.Encoder()
+        self._batch_decoder = msgspec.msgpack.Decoder(Union[LogMessageBatch, DataMessageBatch])
 
         # PUSH/PULL sockets are more performant for MPSC style queues.
         self._master_conn = ZmqConnection(
@@ -54,15 +58,20 @@ cdef class MasterLogger:
             path=config.path,
             bind=True
         )
+        self._master_conn.start()
+
+        self._log_buffer = MessageBuffer(
+            self._logs_dump_to_queue_callback,
+            timeout_s=1.0,
+        )
+        self._data_buffer = MessageBuffer(
+            self._data_dump_to_queue_callback,
+            timeout_s=2.0,
+        )
+
         self._master_conn.listen(self._process_worker_msg)
-        
-        self._log_handlers = log_handlers
-        self._data_handlers = data_handlers
 
-        self._log_buffer = MessageBuffer(self._logs_dump_to_queue_callback)
-        self._data_buffer = MessageBuffer(self._data_dump_to_queue_callback)
-
-        self._is_running = True
+        self._is_running = False
 
     cpdef void _process_worker_msg(self, bytes msg):
         """
@@ -92,7 +101,7 @@ cdef class MasterLogger:
         Args:
             raw_log_buffer (list): A list of LogMessage objects to be encoded and sent.
         """
-        cdef uint32_t log_buffer_size = len(raw_log_buffer)
+        cdef uint16_t log_buffer_size = len(raw_log_buffer)
 
         cdef object log_batch = LogMessageBatch(
             system=self._system_info,
@@ -102,8 +111,8 @@ cdef class MasterLogger:
             msgs=raw_log_buffer
         ) 
 
-        cdef bytes log_batch_encoded = self._log_batch_encoder.encode(log_batch)
-        self._ev_loop.create_task(self._master_conn.send(log_batch_encoded))
+        for handler in self._log_handlers:
+            handler.push(log_batch)
 
     cdef void _data_dump_to_queue_callback(self, list raw_data_buffer):
         """
@@ -113,7 +122,7 @@ cdef class MasterLogger:
             raw_data_buffer (list): A list of data objects (DataMessage or otherwise) 
                 to be encoded and sent.
         """
-        cdef uint32_t data_buffer_size = len(raw_data_buffer)
+        cdef uint16_t data_buffer_size = len(raw_data_buffer)
 
         cdef object data_batch = DataMessageBatch(
             time=time_ns(),
@@ -121,15 +130,15 @@ cdef class MasterLogger:
             data=raw_data_buffer
         ) 
 
-        cdef bytes data_batch_encoded = self._data_batch_encoder.encode(data_batch)
-        self._ev_loop.create_task(self._master_conn.send(data_batch_encoded))
+        for handler in self._data_handlers:
+            handler.push(data_batch)
 
     cdef inline void _process_log(self, uint8_t level, bytes msg):
         """
         Process a single log message by creating a LogMessage struct and buffering it.
 
         Args:
-            level (uint8_t): The log level, e.g. LogLevel.LL_INFO.
+            level (uint8_t): The log level, e.g. LogLevel.INFO.
             msg (bytes): The log message text, encoded as bytes.
         """   
         cdef object log_msg_struct = LogMessage(
@@ -139,39 +148,36 @@ cdef class MasterLogger:
         )
         self._log_buffer.append(log_msg_struct)
 
-    cdef inline void _process_data(self, object data):
+    cdef inline void _process_data(self, object msg):
         """
         Process a single data item by buffering it for later batch sending.
 
         Args:
-            data (object): The data to buffer. Often a msgspec.Struct or DataMessage.
+            msg (object): The msg to buffer. DataMessage.
         """
-        self._data_buffer.append(data)
+        data_msg_struct = DataMessage(
+            time=time_ns(),
+            data=msg
+        )
+        self._data_buffer.append(data_msg_struct)
 
     cpdef void data(self, object data):
         """
         Enqueue data to be sent to the master logger.
 
         Args:
-            data (object): Either a msgspec.Struct or a dict. If dict, it is wrapped 
-                in a DataMessage object.
+            data (object): A msgspec.Struct representing the data.
 
         Raises:
-            TypeError: If data is neither a msgspec.Struct nor a dict.
+            TypeError: If data is not a msgspec.Struct.
         """
-        cdef object data_type = type(data)
+        cdef object data_class_type = type(data).__class__
 
-        if data_type == msgspec.Struct:
+        if data_class_type == msgspec.Struct.__class__:
             self._process_data(data)
-        elif data_type == dict:
-            data_msg_struct = DataMessage(
-                time=time_ns(),
-                data=data
-            )
-            self._process_data(data_msg_struct)
         else:
             raise TypeError(
-                f"Invalid data type; expected [msgspec.Struct, dict] but got '{data_type}'"
+                f"Invalid data type; expected msgspec.Struct but got '{data_class_type}'"
             )
 
     cpdef void trace(self, bytes msg):
@@ -181,7 +187,7 @@ cdef class MasterLogger:
         Args:
             msg (bytes): The log message text, encoded as bytes.
         """
-        self._process_log(LogLevel.LL_TRACE, msg)
+        self._process_log(LogLevel.TRACE, msg)
 
     cpdef void debug(self, bytes msg):
         """
@@ -190,7 +196,7 @@ cdef class MasterLogger:
         Args:
             msg (bytes): The log message text, encoded as bytes.
         """
-        self._process_log(LogLevel.LL_DEBUG, msg)
+        self._process_log(LogLevel.DEBUG, msg)
 
     cpdef void info(self, bytes msg):
         """
@@ -199,7 +205,7 @@ cdef class MasterLogger:
         Args:
             msg (bytes): The log message text, encoded as bytes.
         """
-        self._process_log(LogLevel.LL_INFO, msg)
+        self._process_log(LogLevel.INFO, msg)
 
     cpdef void warning(self, bytes msg):
         """
@@ -208,7 +214,7 @@ cdef class MasterLogger:
         Args:
             msg (bytes): The log message text, encoded as bytes.
         """
-        self._process_log(LogLevel.LL_WARNING, msg)
+        self._process_log(LogLevel.WARNING, msg)
 
     cpdef void error(self, bytes msg):
         """
@@ -217,7 +223,7 @@ cdef class MasterLogger:
         Args:
             msg (bytes): The log message text, encoded as bytes.
         """
-        self._process_log(LogLevel.LL_ERROR, msg)
+        self._process_log(LogLevel.ERROR, msg)
 
     cpdef void critical(self, bytes msg):
         """
@@ -226,7 +232,7 @@ cdef class MasterLogger:
         Args:
             msg (bytes): The log message text, encoded as bytes.
         """
-        self._process_log(LogLevel.LL_CRITICAL, msg)
+        self._process_log(LogLevel.CRITICAL, msg)
 
     cpdef void close(self):
         """
@@ -248,4 +254,4 @@ cdef class MasterLogger:
         if len(raw_data_buffer) > 0:
             self._data_dump_to_queue_callback(raw_data_buffer)
 
-        self._ev_loop.create_task(self._master_conn.stop())
+        self._master_conn.cancel_listening()

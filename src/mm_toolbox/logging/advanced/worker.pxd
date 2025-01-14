@@ -11,8 +11,7 @@ cdef class WorkerLogger:
         dict            _system_info
         object          _ev_loop
         bytes           _srcfilename
-        object          _log_batch_encoder
-        object          _data_batch_encoder
+        object          _batch_encoder
         object          _master_conn
         MessageBuffer   _log_buffer
         MessageBuffer   _data_buffer
