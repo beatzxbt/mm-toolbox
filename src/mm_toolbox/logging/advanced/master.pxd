@@ -11,6 +11,7 @@ cdef class MasterLogger:
         dict            _system_info
         object          _ev_loop
         bytes           _srcfilename
+        object          _batch_encoder
         object          _batch_decoder
         object          _master_conn
         list            _log_handlers
