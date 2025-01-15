@@ -59,12 +59,12 @@ class ZMQLogHandler(LogHandler):
         )
         self.connection.start()
 
-    async def push(self, buffer) -> None:
+    def push(self, buffer) -> None:
         """
         Publish each message in the buffer via the ZeroMQ connection.
 
         Args:
             buffer (list[str]): The messages to publish.
         """
-        for log_msg in buffer:
-            self.connection.send(data=log_msg.encode())
+        for log in buffer:
+            self.connection.send(self.json_encoder.encode(log))
