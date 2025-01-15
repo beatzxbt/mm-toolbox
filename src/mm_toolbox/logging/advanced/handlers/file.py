@@ -19,8 +19,9 @@ class FileLogHandler(LogHandler):
             raise ValueError(f"Invalid filepath; expected string ending with '.txt' but got {filepath}")
         self.filepath = filepath
 
-    async def push(self, buffer) -> None:
+    def push(self, buffer) -> None:
         with open(self.filepath, "a") as file:
-            combined_logs = "\n".join(buffer) + "\n"
+            log_msgs = (f"{log.time} - {log.level} - {log.msg}" for log in buffer.data)
+            combined_logs = "\n".join(log_msgs) + "\n"
             file.write(combined_logs)
             file.flush()

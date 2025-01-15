@@ -1,5 +1,4 @@
 import asyncio
-from typing import List, Coroutine
 from .base import LogHandler
 
 class DiscordLogHandler(LogHandler):
@@ -22,19 +21,17 @@ class DiscordLogHandler(LogHandler):
         self.url = webhook
         self.headers = {"Content-Type": "application/json"}
 
-    async def push(self, buffer):
+    def push(self, buffer):
         try:
-            tasks = []
-
-            for log_msg in buffer:
-                tasks.append(
+            # We let msgspec decode the LogMessage struct into the JSON.
+            for log_msg in buffer.data:
+                self.ev_loop.create_task(
                     self.http_session.post(
                         url=self.url,
                         headers=self.headers,
                         data=self.json_encoder.encode({"content": log_msg}),
                     )
                 )
-            await asyncio.gather(*tasks)
 
         except Exception as e:
             print(f"Failed to send message to Discord; {e}")

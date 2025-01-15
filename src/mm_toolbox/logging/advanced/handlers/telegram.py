@@ -24,19 +24,17 @@ class TelegramLogHandler(LogHandler):
             "disable_web_page_preview": True,
         }
 
-    async def push(self, buffer):
+    def push(self, buffer):
         try:
-            tasks = []
-            for log_msg in buffer:
-                self.partial_payload["text"] = log_msg
-                tasks.append(
+            for log in buffer.data:
+                self.partial_payload["text"] = f"{log.time} - {log.level} - {log.msg}"
+                self.ev_loop.create_task(
                     self.http_session.post(
                         url=self.url,
                         headers=self.headers,
                         data=self.json_encoder.encode(self.partial_payload),
                     )
                 )
-            await asyncio.gather(*tasks)
 
         except Exception as e:
             print(f"Failed to send message to Telegram; {e}")

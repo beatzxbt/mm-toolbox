@@ -31,22 +31,20 @@ class LokiLogHandler(LogHandler):
         if self.auth_token:
             self.headers["Authorization"] = f"Bearer {self.auth_token}"
 
-    async def push(self, buffer):
+    def push(self, buffer):
         log_stream = {
             "stream": self.labels,
-            "values": [[time_iso8601(), log] for log in buffer],
+            "values": [[log.time, log.level, log.msg] for log in buffer.data],
         }
 
         try:
-            async with self.http_session.post(
-                url=self.url, 
-                headers=self.headers, 
-                data=self.json_encoder.encode({"streams": [log_stream]})
-            ) as resp:
-                if resp.status != 204:
-                    # We can't log this in fear of it loop erroring. 
-                    # Just print the failure and move on... 
-                    print(f"Failed to send logs to Loki: {resp.status}, {await resp.text()}.")
+            self.ev_loop.create_task(
+                coro=self.http_session.post(
+                    url=self.url, 
+                    headers=self.headers, 
+                    data=self.json_encoder.encode({"streams": [log_stream]})
+                )
+            )
 
         except Exception as e:
             print(f"Error sending logs to Loki; {e}")
