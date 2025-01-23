@@ -33,8 +33,8 @@ class DataMessage(msgspec.Struct, tag=True):
     msg: msgspec.Struct
 
 class DataMessageBatch(msgspec.Struct, tag=True):
-    # system: dict[str, str]
-    # srcfilename: bytes
+    system: dict[str, str]
+    srcfilename: bytes
     time: int
     size: int
     data: list[DataMessage]
@@ -44,7 +44,7 @@ cdef class MessageBuffer:
     A fixed-size buffer of LogMessage structs for efficient batch storage and encoding.
     """
 
-    def __init__(self, object dump_to_queue_callback, uint16_t capacity=UINT16_MAX, double timeout_s=1.0):
+    def __init__(self, object dump_to_queue_callback, Py_ssize_t capacity=UINT16_MAX, double timeout_s=1.0):
         """
         Initialize the MessageBuffer with a given capacity and optional timeout.
 
