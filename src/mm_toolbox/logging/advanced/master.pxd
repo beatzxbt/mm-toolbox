@@ -28,14 +28,14 @@ cdef class MasterLogger:
     cdef void _data_dump_to_queue_callback(self, list raw_data_buffer)
 
     cdef inline void _process_log(self, uint8_t level, bytes msg)
-    cdef inline void _process_data(self, object data)
+    cdef inline void _process_data(self, object msg)
 
     cpdef void data(self, object data)
-    cpdef void trace(self, bytes msg)
-    cpdef void debug(self, bytes msg)
-    cpdef void info(self, bytes msg)
-    cpdef void warning(self, bytes msg)
-    cpdef void error(self, bytes msg)
-    cpdef void critical(self, bytes msg)
+    cpdef void trace(self, str msg)
+    cpdef void debug(self, str msg)
+    cpdef void info(self, str msg)
+    cpdef void warning(self, str msg)
+    cpdef void error(self, str msg)
+    cpdef void critical(self, str msg)
 
     cpdef void close(self)

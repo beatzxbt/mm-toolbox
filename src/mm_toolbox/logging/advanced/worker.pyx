@@ -1,7 +1,7 @@
 import zmq
 import asyncio
 import msgspec
-from libc.stdint cimport uint8_t, uint16_t
+from libc.stdint cimport uint8_t
 
 from mm_toolbox.time.time cimport time_ns
 
@@ -69,7 +69,7 @@ cdef class WorkerLogger:
         Args:
             raw_log_buffer (list): A list of LogMessage objects to be encoded and sent.
         """
-        cdef uint16_t log_buffer_size = len(raw_log_buffer)
+        cdef Py_ssize_t log_buffer_size = len(raw_log_buffer)
 
         cdef object log_batch = LogMessageBatch(
             system=self._system_info,
@@ -90,9 +90,11 @@ cdef class WorkerLogger:
             raw_data_buffer (list): A list of data objects (DataMessage or otherwise) 
                 to be encoded and sent.
         """
-        cdef uint16_t data_buffer_size = len(raw_data_buffer)
+        cdef Py_ssize_t data_buffer_size = len(raw_data_buffer)
 
         cdef object data_batch = DataMessageBatch(
+            system=self._system_info,
+            srcfilename=self._srcfilename,
             time=time_ns(),
             size=data_buffer_size,
             data=raw_data_buffer
@@ -148,59 +150,59 @@ cdef class WorkerLogger:
                 f"Invalid data type; expected msgspec.Struct but got '{data_class_type}'"
             )
 
-    cpdef void trace(self, bytes msg):
+    cpdef void trace(self, str msg):
         """
         Send a trace-level log message.
 
         Args:
-            msg (bytes): The log message text, encoded as bytes.
+            msg (str): The log message text.
         """
-        self._process_log(LogLevel.TRACE, msg)
+        self._process_log(LogLevel.TRACE, msg.encode())
 
-    cpdef void debug(self, bytes msg):
+    cpdef void debug(self, str msg):
         """
         Send a debug-level log message.
 
         Args:
-            msg (bytes): The log message text, encoded as bytes.
+            msg (str): The log message text.
         """
-        self._process_log(LogLevel.DEBUG, msg)
+        self._process_log(LogLevel.DEBUG, msg.encode())
 
-    cpdef void info(self, bytes msg):
+    cpdef void info(self, str msg):
         """
         Send an info-level log message.
 
         Args:
-            msg (bytes): The log message text, encoded as bytes.
+            msg (str): The log message text.
         """
-        self._process_log(LogLevel.INFO, msg)
+        self._process_log(LogLevel.INFO, msg.encode())
 
-    cpdef void warning(self, bytes msg):
+    cpdef void warning(self, str msg):
         """
         Send a warning-level log message.
 
         Args:
-            msg (bytes): The log message text, encoded as bytes.
+            msg (str): The log message text.
         """
-        self._process_log(LogLevel.WARNING, msg)
+        self._process_log(LogLevel.WARNING, msg.encode())
 
-    cpdef void error(self, bytes msg):
+    cpdef void error(self, str msg):
         """
         Send an error-level log message.
 
         Args:
-            msg (bytes): The log message text, encoded as bytes.
+            msg (str): The log message text.
         """
-        self._process_log(LogLevel.ERROR, msg)
+        self._process_log(LogLevel.ERROR, msg.encode())
 
-    cpdef void critical(self, bytes msg):
+    cpdef void critical(self, str msg):
         """
         Send a critical-level log message.
 
         Args:
-            msg (bytes): The log message text, encoded as bytes.
+            msg (str): The log message text.
         """
-        self._process_log(LogLevel.CRITICAL, msg)
+        self._process_log(LogLevel.CRITICAL, msg.encode())
 
     cpdef void close(self):
         """
@@ -222,4 +224,6 @@ cdef class WorkerLogger:
         if len(raw_data_buffer) > 0:
             self._data_dump_to_queue_callback(raw_data_buffer)
 
-        self._master_conn.stop()
+        self._master_conn.cancel_listening()
+
+        self._is_running = False
