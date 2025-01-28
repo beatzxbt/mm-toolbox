@@ -60,40 +60,108 @@ cpdef int64_t time_ns():
         raise RuntimeError(f"clock_gettime failed: {errno}")
     return tspec.tv_sec * 1_000_000_000 + tspec.tv_nsec
  
-cpdef str time_iso8601():
-    """
-    Get the current time in an ISO 8601 formatted timestamp.
-
-    Returns
-    -------
-    str
-        An ISO 8601 formatted date-time string (e.g., "2023-04-04T00:28:50.516Z").
-    """
-    cdef: 
-        int64_t    ms
-        str        ms_padded
-        timespec   tspec
-
-    if clock_gettime(CLOCK_REALTIME, &tspec) == -1:
-        raise RuntimeError(f"clock_gettime failed: {errno}")
-    
-    ms = tspec.tv_nsec // 1_000_000
-    ms_padded = str(ms).zfill(3)
-
-    return f"{strftime('%Y-%m-%dT%H:%M:%S', gmtime())}.{ms_padded}Z"
-
 cpdef double iso8601_to_unix(str timestamp):
     """
     Converts an ISO 8601 formatted timestamp to a Unix timestamp.
 
-    Parameters
-    ----------
-    timestamp : str
-        An ISO 8601 formatted date-time string (e.g., "2023-04-04T00:28:50.516Z").
+    Parameters:
+        timestamp (str) : An ISO 8601 formatted date-time string.
 
-    Returns
-    -------
-    float
-        The Unix timestamp corresponding to the provided ISO 8601 date-time.
+    Returns:
+        float: The Unix timestamp corresponding to the provided ISO 8601 date-time.
     """
     return ciso8601.parse_datetime(timestamp).timestamp()
+
+
+# ---------- Time ISO8601 ---------- #
+
+
+from libc.stdlib cimport malloc, free
+from libc.string cimport strlen
+from libc.stdio cimport sprintf
+from cpython.bytes cimport PyBytes_FromStringAndSize
+
+cdef inline char* _format_timestamp_ns():
+    """
+    1) Calls time_ns() to get the current time in nanoseconds since 1970-01-01.
+    2) Does manual integer arithmetic (Fliegel–Van Flandern style).
+    3) Writes the result into a C buffer 'YYYY-MM-DDTHH:MM:SS.fffZ'.
+
+    Returns a pointer to the newly allocated buffer, or NULL if malloc fails.
+    The caller must free it.
+    """
+    # Allocate space for the final ASCII string + null terminator
+    cdef char* out_buf = <char*> malloc(40)
+    if out_buf == NULL:
+        return NULL
+
+    # 1) Get current time in ns from your function
+    cdef int64_t nanoseconds = time_ns()
+
+    # 2) Convert nanoseconds to days + remainder
+    cdef int64_t NS_PER_DAY = 86400000000000
+    cdef long long days_since_epoch = nanoseconds // NS_PER_DAY
+    cdef long long remainder_ns = nanoseconds % NS_PER_DAY
+
+    # 3) Do the manual date arithmetic
+    cdef long long z = days_since_epoch + 720198 
+    cdef long long era
+    if z >= 0:
+        era = z // 146097
+    else:
+        era = (z - 146096) // 146097
+
+    cdef long long doe = z - era * 146097
+    cdef long long yoe = (doe - (doe // 1460) + (doe // 36524) - (doe // 146096)) // 365
+    cdef long long year = yoe + era * 400
+    cdef long long t1 = (365*yoe + (yoe // 4) - (yoe // 100) + (yoe // 400))
+    cdef long long doy = doe - t1
+    cdef long long mp = (5*doy + 2) // 153
+    cdef long long day = doy - (153 * mp + 2) // 5 + 1
+    cdef long long month = mp + 3 if mp < 10 else mp - 9
+
+    if month <= 2:
+        year -= 1
+
+    # 4) leftover ns => hour, min, sec, us
+    cdef long long ns_in_hour = 3600000000000
+    cdef long long ns_in_min  = 60000000000
+    cdef long long ns_in_sec  = 1000000000
+
+    cdef long long h = remainder_ns // ns_in_hour
+    remainder_ns %= ns_in_hour
+    cdef long long M = remainder_ns // ns_in_min
+    remainder_ns %= ns_in_min
+    cdef long long s = remainder_ns // ns_in_sec
+    remainder_ns %= ns_in_sec
+    cdef long long ms = remainder_ns // 1_000_000
+
+    # 5) Format to "YYYY-MM-DDTHH:MM:SS.fffZ"
+    sprintf(
+        out_buf,
+        "%04lld-%02lld-%02lldT%02lld:%02lld:%02lld.%03lldZ",
+        year, month, day, h, M, s, ms
+    )
+
+    return out_buf
+
+cpdef str time_iso8601():
+    """
+    Returns the current UTC time as 'YYYY-MM-DDTHH:MM:SS.fffZ'.
+
+    Returns:
+        str: The formatted date/time.
+    """
+    cdef char* buf_ptr = _format_timestamp_ns()
+    if buf_ptr == NULL:
+        raise MemoryError("Failed to allocate timestamp buffer")
+
+    # Convert the C-string to a Python bytes, then decode to str
+    cdef int clen = 0
+    clen = <int>strlen(buf_ptr) 
+    cdef bytes py_bytes = PyBytes_FromStringAndSize(buf_ptr, clen)
+
+    free(buf_ptr)
+
+    # bytes -> str
+    return py_bytes.decode("ascii")
