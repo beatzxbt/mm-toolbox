@@ -12,7 +12,7 @@ class ZMQLogHandler(LogHandler):
 
     def __init__(self, transport: str, path: str) -> None:
         """
-        Initialize the ZMQLogHandler, binding a SUB socket at the specified path.
+        Initialize the ZMQLogHandler, binding a PUB socket at the specified path.
 
         Args:
             transport (str): Either "ipc" or "tcp".
@@ -21,6 +21,8 @@ class ZMQLogHandler(LogHandler):
         Raises:
             ValueError: If the transport or path is invalid.
         """
+        super().__init__()
+
         self.transport = transport.lower()
         
         if self.transport == "ipc":
@@ -53,7 +55,7 @@ class ZMQLogHandler(LogHandler):
             raise ValueError(f"Invalid transport; expected ['ipc', 'tcp'] but got '{self.transport}'")
 
         self.connection = ZmqConnection(
-            socket_type=zmq.SUB,
+            socket_type=zmq.PUB,
             path=self.path,
             bind=True
         )

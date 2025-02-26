@@ -1,13 +1,11 @@
 import msgspec
-from mm_toolbox.time import time_iso8601
+from mm_toolbox.time import time_ns
 from .base import LogHandler
 
 class LokiLogHandler(LogHandler):
     """
     A log handler that sends messages to a Loki endpoint over HTTP.
     """
-
-    json_encoder = msgspec.json.Encoder()
 
     def __init__(
         self, 
@@ -23,25 +21,27 @@ class LokiLogHandler(LogHandler):
             labels (dict): Labels to associate with all log entries in this stream.
             auth_token (str, optional): Bearer token for authentication if required. Defaults to "".
         """
+        super().__init__()
         self.url = url
         self.labels = labels
         self.auth_token = auth_token
         
-        self.headers = {"Content-Type": "application/json", "Authorization": ""}
+        self.headers = {"Content-Type": "application/json"}
         if self.auth_token:
             self.headers["Authorization"] = f"Bearer {self.auth_token}"
 
-    async def push(self, buffer):
+    async def push(self, buffer: list[str]) -> None:
+        # Loki expects timestamps in nanoseconds
         log_stream = {
             "stream": self.labels,
-            "values": [[time_iso8601(), log] for log in buffer],
+            "values": [[str(time_ns()), log] for log in buffer],
         }
 
         try:
             async with self.http_session.post(
                 url=self.url, 
                 headers=self.headers, 
-                data=self.json_encoder.encode({"streams": [log_stream]})
+                json={"streams": [log_stream]}
             ) as resp:
                 if resp.status != 204:
                     # We can't log this in fear of it loop erroring. 
