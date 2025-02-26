@@ -16,6 +16,8 @@ class DiscordLogHandler(LogHandler):
         Raises:
             ValueError: If webhook is invalid.
         """
+        super().__init__()
+        
         if not webhook.startswith("https://discord.com/api/webhooks/"):
             raise ValueError(f"Invalid webhook format; expected 'https://discord.com/api/webhooks/*' but got {webhook}")
         

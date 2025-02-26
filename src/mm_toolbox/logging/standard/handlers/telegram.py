@@ -15,6 +15,7 @@ class TelegramLogHandler(LogHandler):
             bot_token (str): The Telegram bot token for authorization.
             chat_id (str): The ID of the Telegram chat to receive messages.
         """
+        super().__init__()
         self.chat_id = chat_id
         self.url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         self.headers = {"Content-Type": "application/json"}
