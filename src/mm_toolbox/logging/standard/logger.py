@@ -16,7 +16,8 @@ class Logger:
     def __init__(
         self,
         config: LoggerConfig = LoggerConfig(),
-        handlers: Optional[list[LogHandler]] = None
+        handlers: Optional[list[LogHandler]] = None,
+        format_string: str = "{timestamp} - {level} - {message}"
     ):
         """
         Initializes a Logger with specified configuration and handlers.
@@ -25,6 +26,9 @@ class Logger:
             config (LoggerConfig): Configuration settings for the logger (base level, stdout, buffer size, etc.).
             handlers (list[LogHandler], optional): A list of handler objects that inherit from LogHandler. 
                 Defaults to an empty list if not provided.
+            format_string (str, optional): Format string for log messages.
+                Supports {timestamp}, {level}, and {message} placeholders.
+                Defaults to "{timestamp} - {level} - {message}".
 
         Raises:
             TypeError: If one of the provided handlers does not inherit from LogHandler.
@@ -48,6 +52,8 @@ class Logger:
         self._ev_loop = asyncio.get_event_loop()
         self._shutdown_flag = False
 
+        self._format_string = format_string
+
         # Start the log ingestor task.
         self._ev_loop.create_task(self._log_ingestor())
 
@@ -55,8 +61,12 @@ class Logger:
         """
         Flushes the log message buffer to all handlers.
         """
+        if not self._buffer:
+            return
+            
         for handler in self._handlers:
             await handler.push(self._buffer)
+
         self._buffer_size = 0
         self._buffer_start_time = time_s()
 
@@ -105,10 +115,37 @@ class Logger:
         """
         try:
             if level.value >= self._config.base_level.value:
-                log_msg = f"{time_iso8601()} - {level.name} - {msg}"
+                log_msg = self._format_log(level, msg)
                 self._msg_queue.put_nowait((log_msg, level))
         except Exception:
             traceback.print_exc(file=sys.stderr)
+
+    def _format_log(self, level: LogLevel, msg: str) -> str:
+        """
+        Formats the log message according to the configured format string.
+
+        Args:
+            level (LogLevel): The severity level of the message.
+            msg (str): The actual log message.
+
+        Returns:
+            str: The formatted log message.
+        """
+        return self._format_string.format(
+            timestamp=time_iso8601(),
+            level=level.name,
+            message=msg
+        )
+
+    def set_format(self, format_string: str):
+        """
+        Sets a new format string for log messages.
+
+        Args:
+            format_string (str): The new format string.
+                Supports {timestamp}, {level}, and {message} placeholders.
+        """
+        self._format_string = format_string
 
     def set_log_level(self, level: LogLevel):
         """
@@ -173,7 +210,7 @@ class Logger:
         """
         self._submit_log(LogLevel.CRITICAL, msg)
 
-    async def stop(self):
+    async def shutdown(self):
         """
         Shuts down the logger, ensuring all buffered messages are flushed
         and handlers are closed.
@@ -184,5 +221,3 @@ class Logger:
         if self._buffer:
             await self._flush_buffer()
 
-        for handler in self._handlers:
-            await handler.close()
