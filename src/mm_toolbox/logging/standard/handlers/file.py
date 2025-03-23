@@ -1,7 +1,7 @@
 import os
-from .base import LogHandler
+from .base import BaseLogHandler
 
-class FileLogHandler(LogHandler):
+class FileLogHandler(BaseLogHandler):
     """
     A log handler that appends log messages to a text file.
     """
