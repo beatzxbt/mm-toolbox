@@ -15,9 +15,9 @@ class TestRound(unittest.TestCase):
         self.assertAlmostEqual(self.rounder.ask(1.234), 1.24)
         self.assertAlmostEqual(self.rounder.ask(1.231), 1.24)
 
-    def test_size(self):
-        self.assertAlmostEqual(self.rounder.size(1.234), 1.234)
-        self.assertAlmostEqual(self.rounder.size(1.230), 1.230)
+    def test_sz(self):
+        self.assertAlmostEqual(self.rounder.sz(1.234), 1.234)
+        self.assertAlmostEqual(self.rounder.sz(1.230), 1.230)
 
     def test_bids(self):
         prices = np.array([1.234, 1.231, 1.237])
@@ -29,10 +29,10 @@ class TestRound(unittest.TestCase):
         expected = np.array([1.24, 1.24, 1.24])
         np.testing.assert_almost_equal(self.rounder.asks(prices), expected, decimal=2)
 
-    def test_sizes(self):
+    def test_szs(self):
         sizes = np.array([1.234, 1.231, 1.237])
         expected = np.array([1.234, 1.231, 1.237])
-        np.testing.assert_almost_equal(self.rounder.sizes(sizes), expected, decimal=3)
+        np.testing.assert_almost_equal(self.rounder.szs(sizes), expected, decimal=3)
 
     def test_invalid_tick_size(self):
         with self.assertRaises(ValueError):

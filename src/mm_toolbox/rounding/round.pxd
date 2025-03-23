@@ -1,24 +1,24 @@
-cimport numpy as np
+cimport numpy as cnp
 
 cdef class Round:
     cdef:
         # Public attributes.
-        double          tick_size
-        double          lot_size
+        public double   tick_sz
+        public double   lot_sz
 
         # Private attributes.
-        double          _inverse_tick_size
-        double          _inverse_lot_size
+        double          _inverse_tick_sz
+        double          _inverse_lot_sz
         double          _tick_rounding_factor
         double          _lot_rounding_factor
     
-    # Private helper method for process functions.
-    cdef inline double  _round_to(self, double num, double factor)
+    # def               __cinit__(self, double tick_sz, double lot_sz)
 
-    # Core public methods.
+    cdef inline double  _round_to(self, double num, double factor) nogil
+    
     cpdef double        bid(self, double px)
     cpdef double        ask(self, double px)
-    cpdef double        size(self, double sz)
-    cpdef np.ndarray    bids(self, np.ndarray pxs)
-    cpdef np.ndarray    asks(self, np.ndarray pxs)
-    cpdef np.ndarray    sizes(self, np.ndarray szs)
+    cpdef double        sz(self, double sz)
+    cpdef cnp.ndarray   bids(self, cnp.ndarray pxs)
+    cpdef cnp.ndarray   asks(self, cnp.ndarray pxs)
+    cpdef cnp.ndarray   szs(self, cnp.ndarray szs)
