@@ -1,7 +1,8 @@
 import numpy as np
 from typing import Optional
+from functools import lru_cache
 
-
+@lru_cache(maxsize=None)
 def geometric_weights(num: int, r: Optional[float] = None) -> np.ndarray:
     """
     Generates a list of `num` weights that follow a geometric distribution and sum to 1.
@@ -20,7 +21,7 @@ def geometric_weights(num: int, r: Optional[float] = None) -> np.ndarray:
         An array of normalized geometric weights from lowest -> highest.
     """
     if num <= 1:
-        raise ValueError("Number of weights generated cannot be <1.")
+        raise ValueError(f"Invalid number of weights; expected > 1 but got {num}.")
 
     r = r if r else 0.75
     weights = np.array([r**i for i in range(num)], dtype=np.float64)

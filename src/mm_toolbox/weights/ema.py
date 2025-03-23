@@ -1,7 +1,8 @@
 import numpy as np
 from typing import Optional
+from functools import lru_cache
 
-
+@lru_cache(maxsize=None)
 def ema_weights(window: int, alpha: Optional[float] = None) -> np.ndarray:
     """
     Calculate EMA (Exponential Moving Average)-like weights for a given window size.
@@ -20,7 +21,7 @@ def ema_weights(window: int, alpha: Optional[float] = None) -> np.ndarray:
         An array of normalized EMA-like weights from lowest -> highest.
     """
     if window <= 1:
-        raise ValueError("Number of weights generated cannot be <1.")
+        raise ValueError(f"Invalid window size; expected > 1 but got {window}.")
 
     alpha = alpha if alpha else 3.0 / float(window + 1)
 
