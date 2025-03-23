@@ -1,8 +1,8 @@
 import asyncio
 from typing import List, Coroutine
-from .base import LogHandler
+from .base import BaseLogHandler
 
-class DiscordLogHandler(LogHandler):
+class DiscordLogHandler(BaseLogHandler):
     """
     A log handler that sends messages to a Discord webhook.
     """

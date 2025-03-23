@@ -5,7 +5,8 @@ from typing import Optional
 from mm_toolbox.time import time_iso8601, time_s
 
 from .config import LogLevel, LoggerConfig
-from .handlers import LogHandler
+from .handlers import BaseLogHandler
+from ..utils import _get_system_info
 
 class Logger:
     """
@@ -15,16 +16,17 @@ class Logger:
 
     def __init__(
         self,
-        config: LoggerConfig = LoggerConfig(),
-        handlers: Optional[list[LogHandler]] = None,
-        format_string: str = "{timestamp} - {level} - {message}"
+        config: LoggerConfig=None,
+        name: str="",
+        handlers: Optional[list[BaseLogHandler]]=None,
     ):
         """
         Initializes a Logger with specified configuration and handlers.
 
         Args:
             config (LoggerConfig): Configuration settings for the logger (base level, stdout, buffer size, etc.).
-            handlers (list[LogHandler], optional): A list of handler objects that inherit from LogHandler. 
+            name (str): Name of the logger. Defaults to an empty string.
+            handlers (list[BaseLogHandler], optional): A list of handler objects that inherit from BaseLogHandler. 
                 Defaults to an empty list if not provided.
             format_string (str, optional): Format string for log messages.
                 Supports {timestamp}, {level}, and {message} placeholders.
@@ -33,16 +35,30 @@ class Logger:
         Raises:
             TypeError: If one of the provided handlers does not inherit from LogHandler.
         """
-        if handlers is None:
-            handlers = []
-
         self._config = config
+        if self._config is None:
+            self._config = LoggerConfig()
+
+        self._system_info = _get_system_info(
+            machine=True, 
+            network=True, 
+            op_sys=True
+        )
+
+        self._name = name
+        
         self._handlers = handlers
+        if self._handlers is None:
+            self._handlers = []
 
         for handler in self._handlers:
             handler_base_class = handler.__class__.__base__
-            if not handler_base_class == LogHandler:
-                raise TypeError(f"Invalid handler base class; expected LogHandler but got {handler_base_class}")
+            if not handler_base_class == BaseLogHandler:
+                raise TypeError(f"Invalid handler base class; expected BaseLogHandler but got {handler_base_class}")
+            
+            # Mainly for forwarding the str_format to the handler for formatting log messages
+            # where the final point is not a code environment (eg Discord, Telegram, etc).
+            handler.add_primary_config(config)
 
         self._buffer_size = 0
         self._buffer: list[str] = [None] * self._config.buffer_capacity
@@ -50,22 +66,23 @@ class Logger:
 
         self._msg_queue = asyncio.Queue()
         self._ev_loop = asyncio.get_event_loop()
-        self._shutdown_flag = False
-
-        self._format_string = format_string
+        self._is_running = True
 
         # Start the log ingestor task.
-        self._ev_loop.create_task(self._log_ingestor())
+        self._log_ingestor_task = self._ev_loop.create_task(self._log_ingestor())
+
+        # As opposed to the AdvancedLogger where the system info is sent on 
+        # each batch, here we only debug log it at the start of the programme. 
+        # It is highly unlikely that someone using the basic logger requires
+        # such information, so if you do, use the other logger!
+        self.debug(str(self._system_info))
 
     async def _flush_buffer(self):
         """
         Flushes the log message buffer to all handlers.
         """
-        if not self._buffer:
-            return
-            
         for handler in self._handlers:
-            await handler.push(self._buffer)
+            await handler.push(self._buffer[:self._buffer_size])
 
         self._buffer_size = 0
         self._buffer_start_time = time_s()
@@ -78,7 +95,7 @@ class Logger:
         Raises:
             Exception: If an error occurs during the log writing process.
         """
-        while not self._shutdown_flag or not self._msg_queue.empty():
+        while self._is_running or not self._msg_queue.empty():
             try:
                 # (log_msg: str, level: LogLevel)
                 log_msg, level = await self._msg_queue.get()
@@ -86,7 +103,7 @@ class Logger:
                 self._buffer[self._buffer_size] = log_msg
                 self._buffer_size += 1
 
-                if self._config.stout:
+                if self._config.do_stout:
                     print(log_msg)
 
                 # Immediate buffer flush for ERROR or higher.
@@ -95,17 +112,20 @@ class Logger:
                 else:
                     # For lower severity, flush if buffer is full or timed out.
                     is_buffer_full = self._buffer_size >= self._config.buffer_capacity
-                    is_buffer_expired = (time_s() - self._buffer_start_time) >= self._config.buffer_timeout_s
+                    is_buffer_expired = (time_s() - self._buffer_start_time) >= self._config.buffer_timeout
 
                     if is_buffer_full or is_buffer_expired:
                         await self._flush_buffer()
 
                 self._msg_queue.task_done()
-
+            
             except Exception:
                 traceback.print_exc(file=sys.stderr)
 
-    def _submit_log(self, level: LogLevel, msg: str):
+        if self._is_running:
+            return 
+        
+    def _process_log(self, level: LogLevel, msg: str):
         """
         Submits a log message to the queue if it meets the minimum base level.
 
@@ -114,110 +134,118 @@ class Logger:
             msg (str): The actual log message.
         """
         try:
-            if level.value >= self._config.base_level.value:
-                log_msg = self._format_log(level, msg)
-                self._msg_queue.put_nowait((log_msg, level))
+            log_msg = self._config.str_format % {
+                'asctime': time_iso8601(),
+                'name': self._name,
+                'levelname': level.name,
+                'message': msg
+            }
+            self._msg_queue.put_nowait((log_msg, level))
         except Exception:
             traceback.print_exc(file=sys.stderr)
-
-    def _format_log(self, level: LogLevel, msg: str) -> str:
+        
+    def set_format(self, format_string: str) -> None:
         """
-        Formats the log message according to the configured format string.
-
-        Args:
-            level (LogLevel): The severity level of the message.
-            msg (str): The actual log message.
-
-        Returns:
-            str: The formatted log message.
-        """
-        return self._format_string.format(
-            timestamp=time_iso8601(),
-            level=level.name,
-            message=msg
-        )
-
-    def set_format(self, format_string: str):
-        """
-        Sets a new format string for log messages.
+        Modify the format string for log messages in runtime.
 
         Args:
             format_string (str): The new format string.
                 Supports {timestamp}, {level}, and {message} placeholders.
         """
-        self._format_string = format_string
+        self.debug(f"Changing format string from {self._config.str_format} to {format_string}")
+        self._config.str_format = format_string
+        for handlers in self._handlers:
+            handlers.add_primary_config(self._config)
 
-    def set_log_level(self, level: LogLevel):
+    def set_log_level(self, level: LogLevel) -> None:
         """
-        Sets the logger's base log level at runtime.
+        Modify the logger's base log level at runtime.
 
         Args:
             level (LogLevel): The new base log level.
         """
+        self.debug(f"Changing base log level from {self._config.base_level} to {level}")
         self._config.base_level = level
+        for handlers in self._handlers:
+            handlers.add_primary_config(self._config)
 
-    def trace(self, msg: str):
+    def trace(self, msg: str) -> None:
         """
-        Logs a message at TRACE level.
-
-        Args:
-            msg (str): The text to log at TRACE level.
-        """
-        self._submit_log(LogLevel.TRACE, msg)
-
-    def debug(self, msg: str):
-        """
-        Logs a message at DEBUG level.
+        Send a trace-level log message.
 
         Args:
-            msg (str): The text to log at DEBUG level.
+            msg (str): The log message text.
         """
-        self._submit_log(LogLevel.DEBUG, msg)
+        valid_level = self._config.base_level == LogLevel.TRACE
+        if self._is_running and valid_level:
+            self._process_log(LogLevel.TRACE, msg)
 
-    def info(self, msg: str):
+    def debug(self, msg: str) -> None:
         """
-        Logs a message at INFO level.
-
-        Args:
-            msg (str): The text to log at INFO level.
-        """
-        self._submit_log(LogLevel.INFO, msg)
-
-    def warning(self, msg: str):
-        """
-        Logs a message at WARNING level.
+        Send a debug-level log message.
 
         Args:
-            msg (str): The text to log at WARNING level.
+            msg (str): The log message text.
         """
-        self._submit_log(LogLevel.WARNING, msg)
+        valid_level = self._config.base_level <= LogLevel.DEBUG
+        if self._is_running and valid_level:
+            self._process_log(LogLevel.DEBUG, msg)
 
-    def error(self, msg: str):
+    def info(self, msg: str) -> None:
         """
-        Logs a message at ERROR level.
-
-        Args:
-            msg (str): The text to log at ERROR level.
-        """
-        self._submit_log(LogLevel.ERROR, msg)
-
-    def critical(self, msg: str):
-        """
-        Logs a message at CRITICAL level.
+        Send an info-level log message.
 
         Args:
-            msg (str): The text to log at CRITICAL level.
+            msg (str): The log message text.
         """
-        self._submit_log(LogLevel.CRITICAL, msg)
+        valid_level = self._config.base_level <= LogLevel.INFO
+        if self._is_running and valid_level:
+            self._process_log(LogLevel.INFO, msg)
+
+    def warning(self, msg: str) -> None:
+        """
+        Send a warning-level log message.
+
+        Args:
+            msg (str): The log message text.
+        """
+        valid_level = self._config.base_level <= LogLevel.WARNING
+        if self._is_running and valid_level:
+            self._process_log(LogLevel.WARNING, msg)
+
+    def error(self, msg: str) -> None:
+        """
+        Send an error-level log message.
+
+        Args:
+            msg (str): The log message text.
+        """
+        valid_level = self._config.base_level <= LogLevel.ERROR
+        if self._is_running and valid_level:
+            self._process_log(LogLevel.ERROR, msg)
+
+    def critical(self, msg: str) -> None:
+        """
+        Send a critical-level log message.
+
+        Args:
+            msg (str): The log message text.
+        """
+        valid_level = self._config.base_level <= LogLevel.CRITICAL
+        if self._is_running and valid_level:
+            self._process_log(LogLevel.CRITICAL, msg)
 
     async def shutdown(self):
         """
         Shuts down the logger, ensuring all buffered messages are flushed
         and handlers are closed.
         """
-        self._shutdown_flag = True
+        self._is_running = False
+
+        # Let the log ingestor finish ingesting all the logs.
+        # Shutdown flag automatically kills it once the queue is empty.
         await self._msg_queue.join()
 
-        if self._buffer:
+        if self._buffer_size > 0:
             await self._flush_buffer()
-
+            self._buffer.clear()

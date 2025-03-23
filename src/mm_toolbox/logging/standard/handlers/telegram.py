@@ -1,8 +1,8 @@
 import asyncio
 from typing import Coroutine
-from .base import LogHandler
+from .base import BaseLogHandler
 
-class TelegramLogHandler(LogHandler):
+class TelegramLogHandler(BaseLogHandler):
     """
     A log handler that sends messages to a Telegram chat via bot API.
     """
