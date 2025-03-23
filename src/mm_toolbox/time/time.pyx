@@ -7,10 +7,11 @@
 # clock_gettime(). 
 
 import ciso8601
-from time import strftime, gmtime
+from datetime import datetime
 
 from libc.stdint cimport int64_t
 from libc.errno cimport errno
+from libc.string cimport strlen
 
 cdef extern from "<stdlib.h>" nogil:
     enum clockid_t:
@@ -59,7 +60,7 @@ cpdef int64_t time_ns():
     if clock_gettime(CLOCK_REALTIME, &tspec) == -1:
         raise RuntimeError(f"clock_gettime failed: {errno}")
     return tspec.tv_sec * 1_000_000_000 + tspec.tv_nsec
- 
+
 cpdef double iso8601_to_unix(str timestamp):
     """
     Converts an ISO 8601 formatted timestamp to a Unix timestamp.
@@ -71,6 +72,21 @@ cpdef double iso8601_to_unix(str timestamp):
         float: The Unix timestamp corresponding to the provided ISO 8601 date-time.
     """
     return ciso8601.parse_datetime(timestamp).timestamp()
+
+cpdef str unix_to_iso8601(double timestamp):
+    """
+    Converts a Unix timestamp to an ISO 8601 formatted timestamp.
+
+    This could use a faster implementation, will come in the future.
+    For now, this works and is stable (stdlib impl).
+
+    Parameters:
+        timestamp (float) : The Unix timestamp to convert.
+
+    Returns:
+        str: The ISO 8601 formatted timestamp.
+    """
+    return datetime.fromtimestamp(timestamp).isoformat()
 
 
 # ---------- Time ISO8601 ---------- #
@@ -113,7 +129,7 @@ cdef inline char* _format_timestamp_ns():
 
     cdef long long doe = z - era * 146097
     cdef long long yoe = (doe - (doe // 1460) + (doe // 36524) - (doe // 146096)) // 365
-    cdef long long year = yoe + era * 400
+    cdef long long year = yoe + era * 400 - 2  # Added -2 to fix the year error
     cdef long long t1 = (365*yoe + (yoe // 4) - (yoe // 100) + (yoe // 400))
     cdef long long doy = doe - t1
     cdef long long mp = (5*doy + 2) // 153
