@@ -27,17 +27,23 @@ def _get_system_info(machine: bool = False, network: bool = True, op_sys: bool =
     info = {}
 
     if machine:
-        info["architecture"] = platform.machine()
-        info["processor"] = platform.processor()
-        info["pid"] = str(os.getpid())
-        info["ram"] = str(round(psutil.virtual_memory().total / (1024 ** 3)))
+        info.update({
+            "architecture": platform.machine(),
+            "processor": platform.processor(),
+            "pid": str(os.getpid()),
+            "ram": str(round(psutil.virtual_memory().total / (1024 ** 3)))
+        })
 
     if op_sys:
-        info["platform-version"] = platform.version()
+        info.update({
+            "platform-version": platform.version()
+        })
 
     if network:
-        info["hostname"] = socket.gethostname()
-        info["ip-address"] = socket.gethostbyname(socket.gethostname())
-        info["mac-address"] = ':'.join(re.findall('..', '%012x' % uuid.getnode()))
+        info.update({
+            "hostname": socket.gethostname(),
+            "ip-address": socket.gethostbyname(socket.gethostname()),
+            "mac-address": ':'.join(re.findall('..', '%012x' % uuid.getnode()))
+        })
 
     return info
