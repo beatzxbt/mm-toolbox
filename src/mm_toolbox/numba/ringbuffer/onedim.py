@@ -14,12 +14,15 @@ class RingBufferOneDim:
     _right_index: uint64
     _size: uint64
     _buffer: float64[:]
- 
+
     def __init__(self, capacity: int):
         """
         Parameters:
             capacity (int): The maximum number of elements the buffer can hold.
         """
+        if capacity <= 0:
+            raise ValueError(f"Capacity cannot be negative; expected >0 but got {capacity}")
+        
         self._capacity = capacity
         self._left_index = 0
         self._right_index = 0
@@ -37,7 +40,7 @@ class RingBufferOneDim:
             The returned array includes all allocated space, not just the filled elements.
         """
         return self._buffer.copy()
-
+    
     def unsafe_raw(self) -> np.ndarray:
         """
         Return a view of the internal buffer array without copying.
@@ -57,15 +60,28 @@ class RingBufferOneDim:
 
         Returns:
             np.ndarray: A 1D NumPy array containing the buffer's data in order from oldest to newest.
-        """
-        if self.is_full():
-            return np.concatenate(
-                (self._buffer[self._left_index :], self._buffer[: self._right_index])
-            )
-        else:
-            return self._buffer[: self._right_index].copy()
 
-    def unsafe_write(self, value: float):
+        Tip:
+            If you intend to iterate over the buffer in order for read only purposes,
+            use `iter(self)` instead of `self.unwrapped()` for better performance.
+        """
+        if self.is_empty():
+            return np.empty_like(self._buffer)
+            
+        if self.is_full():
+            return np.concatenate((
+                self._buffer[self._left_index:], 
+                self._buffer[:self._right_index]
+            ))
+        elif self._left_index < self._right_index:
+            return np.asarray(self._buffer[self._left_index:self._right_index]).copy()
+        else:
+            return np.concatenate((
+                self._buffer[self._left_index:], 
+                self._buffer[:self._right_index]
+            ))
+
+    def unsafe_write(self, value: float) -> None:
         """
         Directly write a value to the buffer at the current right index without updating indices.
 
@@ -78,7 +94,7 @@ class RingBufferOneDim:
         """
         self._buffer[self._right_index] = value
 
-    def unsafe_push(self):
+    def unsafe_push(self) -> None:
         """
         Advance the buffer indices after writing a value, without checking for buffer fullness.
 
@@ -95,26 +111,21 @@ class RingBufferOneDim:
             self._left_index = (self._left_index + 1) % self._capacity
         else:
             self._size += 1
-
+        
         self._right_index = (self._right_index + 1) % self._capacity
-
-    def append(self, value: float):
+        
+    def append(self, value: float) -> None:
         """
         Add a new element to the end of the buffer.
 
         Parameters:
             value (float): The float value to be added to the buffer.
         """
-        if self.is_full():
-            self._left_index = (self._left_index + 1) % self._capacity
-        else:
-            self._size += 1
-
-        self._buffer[self._right_index] = value
-        self._right_index = (self._right_index + 1) % self._capacity
-
+        self.unsafe_write(value)
+        self.unsafe_push()
+        
     def popright(self) -> float:
-        """
+        """ 
         Remove and return the last element from the buffer.
 
         Returns:
@@ -124,7 +135,7 @@ class RingBufferOneDim:
             IndexError: If the buffer is empty.
         """
         if self._size == 0:
-            raise IndexError("Cannot pop from an empty RingBuffer.")
+            raise IndexError("Cannot pop from an empty RingBuffer")
 
         self._size -= 1
         self._right_index = (self._right_index - 1 + self._capacity) % self._capacity
@@ -141,7 +152,7 @@ class RingBufferOneDim:
             IndexError: If the buffer is empty.
         """
         if self._size == 0:
-            raise IndexError("Cannot pop from an empty RingBuffer.")
+            raise IndexError("Cannot pop from an empty RingBuffer")
 
         value = self._buffer[self._left_index]
         self._left_index = (self._left_index + 1) % self._capacity
@@ -159,13 +170,10 @@ class RingBufferOneDim:
             This method returns the data that was in the buffer before the reset.
         """
         result = self.unwrapped()
-        self._buffer.fill(0.0)
-        self._left_index = 0
-        self._right_index = 0
-        self._size = 0
+        self.fast_reset()
         return result
 
-    def fast_reset(self):
+    def fast_reset(self) -> None:
         """
         Quickly reset the buffer to its initial state without returning data.
 
@@ -173,7 +181,6 @@ class RingBufferOneDim:
             This method clears the buffer's contents and resets indices.
             It does not return the previous data.
         """
-        self._buffer.fill(0.0)
         self._left_index = 0
         self._right_index = 0
         self._size = 0
@@ -208,13 +215,17 @@ class RingBufferOneDim:
         """
         if self.is_empty():
             return False
-        
+            
         for i in range(self._size):
-            if self._buffer[i] == value:
+            idx = (self._left_index + i) % self._capacity
+            if self._buffer[idx] == value:
                 return True
-
         return False
 
+    # NOTE: This method is unfortunately not supported within jitclasses.
+    # You can work around this by doing 'for value in self.unwrapped()'
+    # although with a performance hit. Hopefully this is supported soon,
+    # at which point the code below can be uncommented. 
     # def __iter__(self):
     #     """
     #     Iterate over the elements in the buffer in order from oldest to newest.
@@ -222,7 +233,10 @@ class RingBufferOneDim:
     #     Yields:
     #         float: Each value in the buffer.
     #     """
-    #     raise NotImplementedError("Numba does not support '__iter__', iterate over '.unwrapped()' instead.")
+    #     idx = self._left_index
+    #     for _ in range(self._size):
+    #         yield self._buffer[idx]
+    #         idx = (idx + 1) % self._capacity
 
     def __len__(self):
         """
@@ -232,7 +246,7 @@ class RingBufferOneDim:
             int: The current size of the buffer.
         """
         return self._size
-    
+
     def __getitem__(self, idx: int):
         """
         Get the element at the given index.
@@ -246,10 +260,13 @@ class RingBufferOneDim:
         Raises:
             IndexError: If the index is out of range.
         """
+        # Save a few nanos by locally accessing size rather
+        # than repeatadly calling the attribute.
+        _size = self._size
         if idx < 0:
-            idx += self._size
-        if idx < 0 or idx >= self._size:
-            raise IndexError("Index out of range.")
+            idx += _size
+        if idx < 0 or idx >= _size:
+            raise IndexError(f"Index out of range; expected within ({-_size} <> {_size}) but got {idx}")
 
         fixed_idx = (self._left_index + idx) % self._capacity
         return self._buffer[fixed_idx]

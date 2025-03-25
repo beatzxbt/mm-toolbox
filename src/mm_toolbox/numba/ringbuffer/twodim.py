@@ -2,11 +2,10 @@ import numpy as np
 from numba.types import uint64, float64
 from numba.experimental import jitclass
 
-
 @jitclass
 class RingBufferTwoDim:
     """
-    A 2-dimensional fixed-size circular buffer for floats/doubles.
+    A two-dimensional circular buffer for storing sub-arrays of floats.
     """
 
     _capacity: uint64
@@ -18,102 +17,120 @@ class RingBufferTwoDim:
 
     def __init__(self, capacity: int, sub_array_len: int):
         """
-        Parameters:
-            capacity (int): The maximum number of elements the buffer can hold.
-            sub_array_len (int): The number of columns (length of each sub-array).
+        Initialize the 2D ring buffer.
+
+        Args:
+            capacity (int): Maximum number of rows the buffer can hold.
+            sub_array_len (int): Number of columns (length of each sub-array).
         """
+        if capacity <= 0:
+            raise ValueError(f"Negative capacity not allowed; expected >0 but got {capacity}")
+        if sub_array_len <= 0:
+            raise ValueError(f"Negative sub-array length not allowed; expected >0 but got {sub_array_len}")
+
         self._capacity = capacity
         self._sub_array_len = sub_array_len
         self._left_index = 0
         self._right_index = 0
         self._size = 0
-        self._buffer = np.empty(shape=(capacity, sub_array_len), dtype=float64)
+        self._buffer = np.empty(shape=(capacity, sub_array_len), dtype=np.float64)
 
     def raw(self) -> np.ndarray:
         """
-        Return a copy of the internal buffer array.
+        Create a copy of the entire underlying 2D buffer.
 
         Returns:
-            np.ndarray: A copy of the internal 1D NumPy array representing the buffer's contents.
-
-        Note:
-            The returned array includes all allocated space, not just the filled elements.
+            np.ndarray: A 2D array copy of the entire buffer space.
         """
-        return self._buffer.copy()
-
+        return np.asarray(self._buffer).copy()
+        
     def unsafe_raw(self) -> np.ndarray:
         """
-        Return a view of the internal buffer array without copying.
+        Return a direct view of the underlying 2D array without copying.
 
         Returns:
-            np.ndarray: A NumPy array view of the buffer's internal data.
+            np.ndarray: A NumPy array sharing memory with the buffer.
 
         Warning:
-            Modifying the returned array may affect the buffer's internal state.
-            Use with caution, as no copy is made.
+            Modifying the returned array will affect this ring buffer's state.
         """
-        return self._buffer
+        return np.asarray(self._buffer)
 
     def unwrapped(self) -> np.ndarray:
         """
-        Return a copy of the buffer's contents in the correct (unwrapped) order.
+        Return the buffer's contents in logical (unwrapped) order.
 
         Returns:
-            np.ndarray: A 1D NumPy array containing the buffer's data in order from oldest to newest.
+            np.ndarray: A 2D array in order from the oldest to the newest row.
+
+        Tip:
+            If you intend to iterate over the buffer in order for read only purposes,
+            use `iter(self)` instead of `self.unwrapped()` for better performance.
         """
+        if self.is_empty():
+            return np.empty_like(self._buffer)
+            
         if self.is_full():
-            return np.concatenate(
-                (self._buffer[self._left_index :], self._buffer[: self._right_index])
-            )
+            return np.concatenate((
+                self._buffer[self._left_index:], 
+                self._buffer[:self._right_index]
+            ))
+        elif self._left_index < self._right_index:
+            return np.asarray(self._buffer[self._left_index:self._right_index]).copy()
         else:
-            return self._buffer[: self._right_index].copy()
-
-    def unsafe_write(self, values: np.ndarray, insert_idx: int):
+            return np.concatenate((
+                self._buffer[self._left_index:], 
+                self._buffer[:self._right_index]
+            ))
+    
+    def unsafe_write(self, values: np.ndarray, insert_idx: int=0) -> None:
         """
-        Directly write a value to the buffer at the current right index without updating indices.
+        Write values into the current right index row without moving the buffer indices.
 
-        Parameters:
-            values (np.ndarray): The values to be added to the buffer.
-            insert_idx (int): The starting column index within the sub-array where values will be written.
+        Args:
+            values (np.ndarray): A 1D float array to write into the row.
+            insert_idx (int): Column offset where values will be written.
 
         Warning:
-            This method does not check if the buffer is full and does not update buffer indices.
-            It is intended for use in conjunction with `unsafe_push`. Use with caution to avoid data corruption.
+            Does not check if the buffer is full. Does not advance indices.
+            Intended to be paired with `unsafe_push`.
         """
-        start_idx = insert_idx
-        end_idx = values.size + insert_idx
-        self._buffer[self._right_index, start_idx:end_idx] = values
+        self._buffer[self._right_index, insert_idx:] = values
 
-    def unsafe_push(self):
+    def unsafe_push(self) -> None:
         """
-        Advance the buffer indices after writing a value, without checking for buffer fullness.
+        Advance indices after an `unsafe_write`, ignoring capacity checks.
 
         Warning:
-            This method assumes that a value has already been written to the buffer at the current right index.
-            It updates the buffer indices accordingly. It does not check if the buffer is full.
-            If the buffer is full, it will overwrite the oldest data. Use with caution to avoid data corruption.
-
-        Note:
-            This method is intended for use in conjunction with `unsafe_write` for performance
-            optimization when you are certain that the buffer management is correct.
+            Overwrites oldest data if the buffer is full. Use with caution.
         """
         if self.is_full():
             self._left_index = (self._left_index + 1) % self._capacity
         else:
             self._size += 1
-
+        
         self._right_index = (self._right_index + 1) % self._capacity
 
-    def append(self, values: np.ndarray):
+    def append(self, values: np.ndarray) -> None:
         """
-        Add a new element to the end of the buffer.
+        Append a new row to the buffer.
 
-        Parameters:
-            value (float): The float value to be added to the buffer.
+        Args:
+            values (np.ndarray): A 1D float array of length `sub_array_len`.
+
+        Raises:
+            IndexError: If `values` is not 1D or its length is incorrect.
         """
-        # Required for compilation for some reason.
-        assert values.size == self._sub_array_len, f"Invalid array len; expected {self._sub_array_len} but got {values.size}"
-        assert values.ndim == 1, f"Invalid array ndim; expected 1D but got {values.ndim}D"
+        values_ndim = values.ndim
+        values_len = values.shape[0]
+
+        if values_ndim != 1:
+            raise IndexError(f"Input array dimension mismatch; expected 1D but got {values_ndim}D")
+
+        if values_len != self._sub_array_len:
+            raise IndexError(
+                f"Input array length mismatch; expected {self._sub_array_len} but got {values_len}"
+            )
 
         if self.is_full():
             self._left_index = (self._left_index + 1) % self._capacity
@@ -122,154 +139,159 @@ class RingBufferTwoDim:
 
         self._buffer[self._right_index, :] = values
         self._right_index = (self._right_index + 1) % self._capacity
-
-    def popright(self) -> float:
+            
+    def popright(self) -> np.ndarray:
         """
-        Remove and return the last element from the buffer.
+        Remove and return the last (most recently added) row.
 
         Returns:
-            float: The last value in the buffer.
+            np.ndarray: A 1D float array representing the row.
 
         Raises:
             IndexError: If the buffer is empty.
         """
         if self._size == 0:
-            raise IndexError("Cannot pop from an empty RingBuffer.")
-
+            raise IndexError("Cannot pop from an empty RingBuffer")
+        
         self._size -= 1
         self._right_index = (self._right_index - 1 + self._capacity) % self._capacity
-        return self._buffer[self._right_index]
-
-    def popleft(self) -> float:
+        return np.asarray(self._buffer[self._right_index])
+    
+    def popleft(self) -> np.ndarray:
         """
-        Remove and return the first element from the buffer.
+        Remove and return the first (oldest) row.
 
         Returns:
-            float: The first value in the buffer.
+            np.ndarray: A 1D float array representing the row.
 
         Raises:
             IndexError: If the buffer is empty.
         """
         if self._size == 0:
-            raise IndexError("Cannot pop from an empty RingBuffer.")
+            raise IndexError("Cannot pop from an empty RingBuffer")
 
-        values = self._buffer[self._left_index]
+        values = np.asarray(self._buffer[self._left_index])
         self._left_index = (self._left_index + 1) % self._capacity
         self._size -= 1
         return values
-
+    
     def reset(self) -> np.ndarray:
         """
-        Clear the buffer and reset it to its initial state.
+        Reset the buffer, returning the unwrapped data prior to clearing.
 
         Returns:
-            np.ndarray: A copy of the buffer's contents before resetting.
-
-        Note:
-            This method returns the data that was in the buffer before the reset.
+            np.ndarray: A 2D array of the data in logical order before clearing.
         """
         result = self.unwrapped()
-        self._buffer.fill(0.0)
-        self._left_index = 0
-        self._right_index = 0
-        self._size = 0
+        self.fast_reset()
         return result
-
-    def fast_reset(self):
+    
+    def fast_reset(self) -> None:
         """
-        Quickly reset the buffer to its initial state without returning data.
-
-        Note:
-            This method clears the buffer's contents and resets indices.
-            It does not return the previous data.
+        Quickly clear the buffer without returning old data.
         """
-        self._buffer.fill(0.0)
         self._left_index = 0
         self._right_index = 0
         self._size = 0
-
+    
     def is_full(self) -> bool:
         """
         Check if the buffer is full.
 
         Returns:
-            bool: True if the buffer is full, False otherwise.
+            bool: True if size == capacity, False otherwise.
         """
         return self._size == self._capacity
-
+    
     def is_empty(self) -> bool:
         """
         Check if the buffer is empty.
 
         Returns:
-            bool: True if the buffer is empty, False otherwise.
+            bool: True if size == 0, False otherwise.
         """
         return self._size == 0
-
-    def __contains__(self, values: np.ndarray):
+    
+    def __contains__(self, values):
         """
-        Check if the array is present in the buffer.
+        Check whether a given 1D array is present in the buffer.
 
-        Parameters:
-            values (np.ndarray): The array to search for.
+        Args:
+            values (np.ndarray): A 1D float array to search for.
 
         Returns:
-            bool: True if the array is in the buffer, False otherwise.
+            bool: True if the array is found among the rows, otherwise False.
         """
-        if self.is_empty():
-            return False
-        
-        try:
-            # Required for compilation for some reason.
-            assert values.size == self._sub_array_len
-            assert values.ndim == 1
-        except Exception:
-            # AssertionError is not supported as an exception 
-            # handler by numba, so we must raise a general one
-            # to catch it. Not ideal, improvement needed.
-            return False
-        
-        for i in range(self._size):
-            if np.array_equal(self._buffer[i], values):
-                return True
+        # NOTE: Numba cannot support Python object input types anyways, so we just
+        # trust that it is a numpy array. The isinstance check is not possible in jitclasses
+        #
+        # if not isinstance(values, np.ndarray):
+        #     raise TypeError(f"Invalid input type; expected np.ndarray but got {type(values)}")
 
+        if values.ndim != 1:
+            raise ValueError(f"Invalid input dimensions; expected 1D but got {values.ndim}D")
+        if values.size != self._sub_array_len:
+            raise ValueError(f"Invalid input length; expected {self._sub_array_len} but got {values.size}")
+
+        for i in range(self._size):
+            idx = (self._left_index + i) % self._capacity
+            current_row = self._buffer[idx]
+            
+            all_match = True
+            for i in range(self._sub_array_len):
+                if current_row[i] != values[i]:
+                    all_match = False
+                    break
+                    
+            if all_match:
+                return True
+                
         return False
     
+    # NOTE: This method is unfortunately not supported within jitclasses.
+    # You can work around this by doing 'for value in self.unwrapped()'
+    # although with a performance hit. Hopefully this is supported soon,
+    # at which point the code below can be uncommented. 
+    #
     # def __iter__(self):
     #     """
-    #     Iterate over the elements in the buffer in order from oldest to newest.
+    #     Iterate over rows from oldest to newest.
 
     #     Yields:
-    #         float: Each value in the buffer.
+    #         np.ndarray: Each row as a 1D array.
     #     """
-    #     raise NotImplementedError("Numba does not support '__iter__', iterate over '.unwrapped()' instead.")
-
+    #     idx = self._left_index
+    #     for _ in range(self._size):
+    #         yield self._buffer[idx]
+    #         idx = (idx + 1) % self._capacity
+    
     def __len__(self):
         """
-        Get the number of elements currently in the buffer.
+        Number of rows currently stored in the buffer.
 
         Returns:
-            int: The current size of the buffer.
+            int: The size of the buffer.
         """
-        return self._size
+        return self._size 
     
     def __getitem__(self, idx: int):
         """
-        Get the element at the given index.
+        Access a row by its logical index.
 
-        Parameters:
-            idx (int): The index of the element to retrieve.
+        Args:
+            idx (int): The row index, 0-based from the oldest element. 
+                Negative indices count backward from the newest element.
 
         Returns:
-            float: The value at the specified index.
+            np.ndarray: The row as a 1D float array.
 
         Raises:
-            IndexError: If the index is out of range.
+            IndexError: If idx is out of range.
         """
+        _size = self._size
         if idx < 0:
-            idx += self._size
-        if idx < 0 or idx >= self._size:
-            raise IndexError("Index out of range.")
-
+            idx += _size
+        if idx < 0 or idx >= _size:
+            raise IndexError("Index out of range")
         fixed_idx = (self._left_index + idx) % self._capacity
         return self._buffer[fixed_idx]
