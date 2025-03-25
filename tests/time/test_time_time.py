@@ -59,12 +59,33 @@ class TestTime(unittest.TestCase):
         self.assertAlmostEqual(unix_time, expected_timestamp, delta=1)
     
     def test_unix_to_iso8601(self):
-        # Test with a known Unix timestamp
+        # Test with a known Unix timestamp (seconds)
         unix_time = 1672574400.0  # 2023-01-01T12:00:00Z
         iso_time = unix_to_iso8601(unix_time)
         # The exact format might vary slightly due to local timezone
         # So we'll check that it contains the expected date
-        self.assertIn("2023-01-01T", iso_time)
+        self.assertIn("2023-01-01T12:00:00.000Z", iso_time)
+
+        # Test with a known Unix timestamp (milliseconds)
+        unix_time = 1672574400000.0  # 2023-01-01T12:00:00.000Z
+        iso_time = unix_to_iso8601(unix_time)
+        # The exact format might vary slightly due to local timezone
+        # So we'll check that it contains the expected date
+        self.assertIn("2023-01-01T12:00:00.000Z", iso_time)
+
+        # Test with a known Unix timestamp (microseconds)
+        unix_time = 1672574400000000.0  # 2023-01-01T12:00:00.000000Z
+        iso_time = unix_to_iso8601(unix_time)
+        # The exact format might vary slightly due to local timezone
+        # So we'll check that it contains the expected date
+        self.assertIn("2023-01-01T12:00:00.000000Z", iso_time)
+
+        # Test with a known Unix timestamp (nanoseconds)
+        unix_time = 1672574400000000000.0  # 2023-01-01T12:00:00.000000000Z
+        iso_time = unix_to_iso8601(unix_time)
+        # The exact format might vary slightly due to local timezone
+        # So we'll check that it contains the expected date
+        self.assertIn("2023-01-01T12:00:00.000000000Z", iso_time)
     
     def test_iso8601_unix_roundtrip(self):
         # Test round trip conversion

@@ -75,18 +75,46 @@ cpdef double iso8601_to_unix(str timestamp):
 
 cpdef str unix_to_iso8601(double timestamp):
     """
-    Converts a Unix timestamp to an ISO 8601 formatted timestamp.
-
-    This could use a faster implementation, will come in the future.
-    For now, this works and is stable (stdlib impl).
+    Converts a Unix timestamp to an ISO 8601 formatted timestamp with high precision.
 
     Parameters:
-        timestamp (float) : The Unix timestamp to convert.
+        timestamp (float): The Unix timestamp to convert. Can be in:
+            - seconds (e.g., 1672574400.0)
+            - milliseconds (e.g., 1672574400000.0)
+            - microseconds (e.g., 1672574400000000.0)
+            - nanoseconds (e.g., 1672574400000000000.0)
 
     Returns:
-        str: The ISO 8601 formatted timestamp.
+        str: The ISO 8601 formatted timestamp with full precision.
     """
-    return datetime.fromtimestamp(timestamp).isoformat()
+    cdef:
+        double  seconds
+        int64_t fractional_part
+        str     fractional_str
+        str     base_time
+        
+    if timestamp >= 1e18:  # nanoseconds
+        seconds = timestamp / 1e9
+        fractional_part = <int64_t>(timestamp % 1e9)
+        fractional_str = f"{fractional_part:09d}"
+    elif timestamp >= 1e15:  # microseconds
+        seconds = timestamp / 1e6
+        fractional_part = <int64_t>(timestamp % 1e6)
+        fractional_str = f"{fractional_part:06d}"
+    elif timestamp >= 1e12:  # milliseconds
+        seconds = timestamp / 1e3
+        fractional_part = <int64_t>(timestamp % 1e3)
+        fractional_str = f"{fractional_part:03d}"
+    else:  # seconds
+        seconds = timestamp
+        fractional_part = <int64_t>((timestamp % 1) * 1e9)
+        fractional_str = f"{fractional_part:03d}"
+
+    # Get base time without fractional seconds
+    base_time = datetime.fromtimestamp(<int64_t>seconds).isoformat(timespec='seconds')
+    
+    # Add high precision fractional seconds
+    return f"{base_time}.{fractional_str}Z"
 
 
 # ---------- Time ISO8601 ---------- #
