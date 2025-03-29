@@ -1,8 +1,16 @@
 import msgspec
-from typing import Union
+from typing import Union, T
 
-from libc.stdint cimport uint16_t, UINT16_MAX
+from libc.stdint cimport uint8_t
 from mm_toolbox.time.time cimport time_s
+
+cpdef enum LogLevel:
+    TRACE = 0x0
+    DEBUG = 0x1
+    INFO = 0x2
+    WARNING = 0x3
+    ERROR = 0x4
+    CRITICAL = 0x5
 
 # Future optimization is converting these msgspec.Struct structs
 # to native Cython structs. Current penalty is in hundreds of nanos
@@ -10,15 +18,15 @@ from mm_toolbox.time.time cimport time_s
 #
 # Use binary packing so _buffer goes from list -> C array, will 
 # put individual append speeds into sub 50ns.
-class LogMessage(msgspec.Struct, tag=True):
-    time: int
+class LogMessage(msgspec.Struct, kw_only=True, tag=True, gc=False):
+    time: Union[int, float]
     level: int
-    msg: bytes
+    msg: LogMessage
 
-class LogMessageBatch(msgspec.Struct, tag=True):
+class LogMessageBatch(msgspec.Struct, kw_only=True, tag=True, gc=False):
     system: dict[str, str]
-    srcfilename: bytes
-    time: int
+    name: bytes
+    time: Union[int, float]
     size: int
     data: list[LogMessage]
 
@@ -28,23 +36,71 @@ class LogMessageBatch(msgspec.Struct, tag=True):
 #
 # In general, the batches here will be much larger than the logs 
 # buffer, to save on time blocked by encoding the messages. 
-class DataMessage(msgspec.Struct, tag=True):
-    time: int
+class DataMessage(msgspec.Struct, kw_only=True, tag=True, gc=False):
+    time: Union[int, float]
     msg: msgspec.Struct
 
-class DataMessageBatch(msgspec.Struct, tag=True):
+class DataMessageBatch(msgspec.Struct, kw_only=True, tag=True, gc=False):
     system: dict[str, str]
-    srcfilename: bytes
-    time: int
+    name: bytes
+    time: Union[int, float]
     size: int
-    data: list[DataMessage]
+
+    # We cant have msgspec.Struct here as it fails to correctly deserialize
+    # in the master logger to the original struct type. So it is kept as 
+    # type T temporarily.
+    data: list[T]
+
+# Useful later to map LogLevel's back to their readable form 
+# without the use of log_level_to_str().
+LogLevelMap: dict[int, str] = {
+    0: "TRACE",
+    1: "DEBUG",
+    2: "INFO",
+    3: "WARNING",
+    4: "ERROR",
+    5: "CRITICAL"
+}
+
+cpdef str log_level_to_str(uint8_t level):
+    """
+    Convert a LogLevel enum value to its corresponding string representation.
+
+    Rather than using LogLevelMap, this function is faster as comparing 
+    int<>int in Cython compiles to switch-case statements under the hood.
+
+    Args:
+        level (int): The LogLevel enum value to convert.
+
+    Returns:
+        str: The string representation of the LogLevel enum value.
+    """
+    if level == 0:
+        return "TRACE"
+    elif level == 1:
+        return "DEBUG"
+    elif level == 2:
+        return "INFO"
+    elif level == 3:
+        return "WARNING"
+    elif level == 4:
+        return "ERROR"
+    elif level == 5:
+        return "CRITICAL"
+    else:
+        raise ValueError(f"Invalid LogLevel; expected [{', '.join(LogLevelMap.values())}] but got {level}")
 
 cdef class MessageBuffer:
     """
     A fixed-size buffer of LogMessage structs for efficient batch storage and encoding.
     """
 
-    def __init__(self, object dump_to_queue_callback, Py_ssize_t capacity=UINT16_MAX, double timeout_s=1.0):
+    def __init__(
+        self, 
+        object dump_to_queue_callback, 
+        Py_ssize_t capacity=1000, 
+        double timeout_s=1.0
+    ):
         """
         Initialize the MessageBuffer with a given capacity and optional timeout.
 
@@ -58,7 +114,11 @@ cdef class MessageBuffer:
         self._size = 0
         self._timeout_s = timeout_s
         self._start_time = time_s()
+
+        # Defaulting to 1000 LogMessage structs is quite overkill, though 
+        # it's a safe default option incase of high log rates.
         self._buffer = [None] * self._capacity 
+
         self._dump_to_queue_callback = dump_to_queue_callback
 
     cdef inline bint _is_full(self):
@@ -100,6 +160,6 @@ cdef class MessageBuffer:
         Returns:
             list: The list of LogMessage objects that were in the buffer before clearing.
         """
-        cdef uint16_t _size = self._size
+        cdef list buffer = self._buffer[:self._size]
         self._size = 0
-        return self._buffer[:_size]
+        return buffer
