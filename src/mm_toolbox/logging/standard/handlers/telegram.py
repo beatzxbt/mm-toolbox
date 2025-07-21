@@ -1,6 +1,6 @@
 import asyncio
 from typing import Coroutine
-from .base import BaseLogHandler
+from mm_toolbox.logging.standard.handlers.base import BaseLogHandler
 
 class TelegramLogHandler(BaseLogHandler):
     """
@@ -19,7 +19,7 @@ class TelegramLogHandler(BaseLogHandler):
         self.chat_id = chat_id
         self.url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         self.headers = {"Content-Type": "application/json"}
-        self.partial_payload = {
+        self.payload = {
             "chat_id": self.chat_id,
             "text": "",
             "disable_web_page_preview": True,
@@ -29,12 +29,12 @@ class TelegramLogHandler(BaseLogHandler):
         try:
             tasks = []
             for log_msg in buffer:
-                self.partial_payload["text"] = log_msg
+                self.payload["text"] = log_msg
                 tasks.append(
                     self.http_session.post(
                         url=self.url,
                         headers=self.headers,
-                        data=self.json_encoder.encode(self.partial_payload),
+                        data=self.json_encode(self.payload),
                     )
                 )
             await asyncio.gather(*tasks)

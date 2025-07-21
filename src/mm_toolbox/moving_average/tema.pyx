@@ -1,14 +1,14 @@
-cimport numpy as np
+cimport numpy as cnp
 from libc.math cimport log, exp
 
 from mm_toolbox.time.time cimport time_s
 
-from .base cimport MovingAverage
+from mm_toolbox.moving_average.base cimport MovingAverage
 
 cdef class TimeExponentialMovingAverage(MovingAverage):
     """
     The TEMA uses variable weights based on the time of entry, 
-    with a 
+    with a half-life of `half_life_s`.
 
     Implementation
     --------------
@@ -19,7 +19,7 @@ cdef class TimeExponentialMovingAverage(MovingAverage):
     - If not ready, we simply set `self.value = input; self.time = t; ready = True`.
     """
 
-    def __init__(self, Py_ssize_t window, bint fast=False, double half_life_s=10.0):
+    def __init__(self, int window, bint fast=False, double half_life_s=10.0):
         super().__init__(window, fast)
 
         if half_life_s <= 0.0:
@@ -28,10 +28,9 @@ cdef class TimeExponentialMovingAverage(MovingAverage):
         self._time = time_s()
         self._lam = log(3.0) / half_life_s
 
-    cpdef double initialize(self, np.ndarray values):
+    cpdef double initialize(self, cnp.ndarray values):
         cdef:
-            Py_ssize_t i
-            Py_ssize_t n = values.shape[0]
+            int i, n = values.shape[0]
             double _temp_var
 
         if n < self._window:

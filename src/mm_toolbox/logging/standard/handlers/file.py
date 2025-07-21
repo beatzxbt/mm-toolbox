@@ -1,5 +1,5 @@
 import os
-from .base import BaseLogHandler
+from mm_toolbox.logging.standard.handlers.base import BaseLogHandler
 
 class FileLogHandler(BaseLogHandler):
     """

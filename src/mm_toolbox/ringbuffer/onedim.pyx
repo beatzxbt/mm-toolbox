@@ -1,12 +1,14 @@
 import numpy as np
 cimport numpy as cnp
 
+from libc.stdint cimport uint32_t as u32
+
 cdef class RingBufferOneDim:
     """
     A 1-dimensional fixed-size circular buffer for floats/doubles.
     """
 
-    def __init__(self, Py_ssize_t capacity):
+    def __cinit__(self, int capacity):
         """
         Parameters:
             capacity (int): The maximum number of elements the buffer can hold.
@@ -32,19 +34,6 @@ cdef class RingBufferOneDim:
         """
         return np.asarray(self._buffer).copy()
     
-    cpdef cnp.ndarray unsafe_raw(self):
-        """
-        Return a view of the internal buffer array without copying.
-
-        Returns:
-            np.ndarray: A NumPy array view of the buffer's internal data.
-
-        Warning:
-            Modifying the returned array may affect the buffer's internal state.
-            Use with caution, as no copy is made.
-        """
-        return np.asarray(self._buffer)
-
     cpdef cnp.ndarray unwrapped(self):
         """
         Return a copy of the buffer's contents in the correct (unwrapped) order.
@@ -72,39 +61,6 @@ cdef class RingBufferOneDim:
                 self._buffer[:self._right_index]
             ))
 
-    cpdef void unsafe_write(self, double value):
-        """
-        Directly write a value to the buffer at the current right index without updating indices.
-
-        Parameters:
-            value (float): The float value to be added to the buffer.
-
-        Warning:
-            This method does not check if the buffer is full and does not update buffer indices.
-            It is intended for use in conjunction with `unsafe_push`. Use with caution to avoid data corruption.
-        """
-        self._buffer[self._right_index] = value
-
-    cpdef void unsafe_push(self):
-        """
-        Advance the buffer indices after writing a value, without checking for buffer fullness.
-
-        Warning:
-            This method assumes that a value has already been written to the buffer at the current right index.
-            It updates the buffer indices accordingly. It does not check if the buffer is full.
-            If the buffer is full, it will overwrite the oldest data. Use with caution to avoid data corruption.
-
-        Note:
-            This method is intended for use in conjunction with `unsafe_write` for performance
-            optimization when you are certain that the buffer management is correct.
-        """
-        if self.is_full():
-            self._left_index = (self._left_index + 1) % self._capacity
-        else:
-            self._size += 1
-        
-        self._right_index = (self._right_index + 1) % self._capacity
-        
     cpdef void append(self, double value):
         """
         Add a new element to the end of the buffer.
@@ -112,8 +68,14 @@ cdef class RingBufferOneDim:
         Parameters:
             value (float): The float value to be added to the buffer.
         """
-        self.unsafe_write(value)
-        self.unsafe_push()
+        self._buffer[self._right_index] = value
+
+        if self.is_full():
+            self._left_index = (self._left_index + 1) % self._capacity
+        else:
+            self._size += 1
+        
+        self._right_index = (self._right_index + 1) % self._capacity
         
     cpdef double popright(self):
         """
@@ -150,6 +112,22 @@ cdef class RingBufferOneDim:
         self._size -= 1
         return value
 
+    cpdef double peekright(self):
+        """
+        Return the last element from the buffer without removing it.
+        """
+        if self._size == 0:
+            raise IndexError("Cannot peek into an empty RingBuffer")
+        return self._buffer[(self._right_index - 1 + self._capacity) % self._capacity]
+    
+    cpdef double peekleft(self):
+        """
+        Return the first element from the buffer without removing it.
+        """
+        if self._size == 0:
+            raise IndexError("Cannot peek into an empty RingBuffer")
+        return self._buffer[(self._left_index + self._capacity) % self._capacity]
+    
     cpdef cnp.ndarray reset(self):
         """
         Clear the buffer and reset it to its initial state.
@@ -196,7 +174,7 @@ cdef class RingBufferOneDim:
 
     def __contains__(self, double value):
         """
-        Check if a value is present in the buffer.
+        Check if a value is present in the buffer. 
 
         Parameters:
             value (float): The value to search for.
@@ -207,8 +185,8 @@ cdef class RingBufferOneDim:
         if self.is_empty():
             return False
             
-        cdef Py_ssize_t i, idx
-        for i in range(self._size):
+        cdef u32 i, idx
+        for i in range(self._size - 1, -1, -1):
             idx = (self._left_index + i) % self._capacity
             if self._buffer[idx] == value:
                 return True
@@ -221,7 +199,7 @@ cdef class RingBufferOneDim:
         Yields:
             float: Each value in the buffer.
         """
-        cdef Py_ssize_t idx = self._left_index
+        cdef u32 idx = self._left_index
         for _ in range(self._size):
             yield self._buffer[idx]
             idx = (idx + 1) % self._capacity
@@ -235,7 +213,7 @@ cdef class RingBufferOneDim:
         """
         return self._size
 
-    def __getitem__(self, Py_ssize_t idx):
+    def __getitem__(self, int idx):
         """
         Get the element at the given index.
 
@@ -250,11 +228,11 @@ cdef class RingBufferOneDim:
         """
         # Save a few nanos by locally accessing size rather
         # than repeatadly calling the attribute.
-        cdef Py_ssize_t _size = self._size
+        cdef u32 _size = self._size
         if idx < 0:
             idx += _size
         if idx < 0 or idx >= _size:
             raise IndexError(f"Index out of range; expected within ({-_size} <> {_size}) but got {idx}")
 
-        cdef Py_ssize_t fixed_idx = (self._left_index + idx) % self._capacity
+        cdef u32 fixed_idx = (self._left_index + idx) % self._capacity
         return self._buffer[fixed_idx]

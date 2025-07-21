@@ -6,7 +6,7 @@ cdef class RingBufferTwoDim:
     A two-dimensional circular buffer for storing sub-arrays of floats.
     """
 
-    def __init__(self, Py_ssize_t capacity, Py_ssize_t sub_array_len):
+    def __init__(self, int capacity, int sub_array_len):
         """
         Initialize the 2D ring buffer.
 
@@ -74,7 +74,7 @@ cdef class RingBufferTwoDim:
                 self._buffer[:self._right_index]
             ))
     
-    cpdef void unsafe_write(self, cnp.ndarray values, Py_ssize_t insert_idx=0):
+    cpdef void unsafe_write(self, cnp.ndarray values, int insert_idx=0):
         """
         Write values into the current right index row without moving the buffer indices.
 
@@ -114,8 +114,8 @@ cdef class RingBufferTwoDim:
             IndexError: If `values` is not 1D or its length is incorrect.
         """
         cdef:
-            Py_ssize_t values_ndim = values.ndim
-            Py_ssize_t values_len = values.shape[0]
+            int values_ndim = values.ndim
+            int values_len = values.shape[0]
             double[:] values_view = values
 
         if values_ndim != 1:
@@ -168,6 +168,22 @@ cdef class RingBufferTwoDim:
         self._left_index = (self._left_index + 1) % self._capacity
         self._size -= 1
         return values
+    
+    cpdef cnp.ndarray peekright(self):
+        """
+        Return the last (most recently added) row without removing it.
+        """
+        if self._size == 0:
+            raise IndexError("Cannot peek into an empty RingBuffer")
+        return self._buffer[(self._right_index - 1 + self._capacity) % self._capacity]
+    
+    cpdef cnp.ndarray peekleft(self):
+        """
+        Return the first (oldest) row without removing it.
+        """
+        if self._size == 0:
+            raise IndexError("Cannot peek into an empty RingBuffer")
+        return self._buffer[(self._left_index + self._capacity) % self._capacity]
     
     cpdef cnp.ndarray reset(self):
         """
@@ -224,14 +240,17 @@ cdef class RingBufferTwoDim:
             raise ValueError(f"Invalid input length; expected {self._sub_array_len} but got {values.size}")
 
         cdef:
-            double[:] value
-            double[:] values_view = values
-            Py_ssize_t i, matching_values
+            double[:]   value
+            double[:]   values_view = values
+            u32         i, j, matching_values, idx
 
-        for value in self:
+        for i in range(self._size - 1, -1, -1):
+            idx = (self._left_index + i) % self._capacity
+            value = self._buffer[idx]
+            
             matching_values = 0
-            for i in range(self._sub_array_len):
-                if value[i] == values_view[i]:
+            for j in range(self._sub_array_len):
+                if value[j] == values_view[j]:
                     matching_values += 1
                 else:
                     break
@@ -248,7 +267,7 @@ cdef class RingBufferTwoDim:
         Yields:
             np.ndarray: Each row as a 1D array.
         """
-        cdef Py_ssize_t idx = self._left_index
+        cdef u32 idx = self._left_index
         for _ in range(self._size):
             yield self._buffer[idx]
             idx = (idx + 1) % self._capacity
@@ -276,10 +295,10 @@ cdef class RingBufferTwoDim:
         Raises:
             IndexError: If idx is out of range.
         """
-        cdef Py_ssize_t _size = self._size
+        cdef u32 _size = self._size
         if idx < 0:
             idx += _size
         if idx < 0 or idx >= _size:
             raise IndexError("Index out of range")
-        cdef Py_ssize_t fixed_idx = (self._left_index + idx) % self._capacity
+        cdef u32 fixed_idx = (self._left_index + idx) % self._capacity
         return self._buffer[fixed_idx]

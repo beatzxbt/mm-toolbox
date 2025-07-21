@@ -1,165 +1,233 @@
-import msgspec
-from typing import Union, T
 
-from libc.stdint cimport uint8_t
-from mm_toolbox.time.time cimport time_s
+from libc.stdint cimport (
+    uint8_t as u8,
+    uint32_t as u32,
+    uint64_t as u64,
+)
+from libc.string cimport memcpy
 
-cpdef enum LogLevel:
-    TRACE = 0x0
-    DEBUG = 0x1
-    INFO = 0x2
-    WARNING = 0x3
-    ERROR = 0x4
-    CRITICAL = 0x5
+from mm_toolbox.time.time cimport time_ns
+from mm_toolbox.logging.advanced.structs cimport (
+    BufMsgType,
+    CLogLevel,
+    LogLevel,
+)
 
-# Future optimization is converting these msgspec.Struct structs
-# to native Cython structs. Current penalty is in hundreds of nanos
-# in the buffer due to object mode overhead. 
-#
-# Use binary packing so _buffer goes from list -> C array, will 
-# put individual append speeds into sub 50ns.
-class LogMessage(msgspec.Struct, kw_only=True, tag=True, gc=False):
-    time: Union[int, float]
-    level: int
-    msg: LogMessage
+cdef class LogBatch:
+    def __cinit__(self, bytes name):
+        self.name_len = len(name)
+        self.name = name
 
-class LogMessageBatch(msgspec.Struct, kw_only=True, tag=True, gc=False):
-    system: dict[str, str]
-    name: bytes
-    time: Union[int, float]
-    size: int
-    data: list[LogMessage]
+        # If you somehow hit the 1024 * 1024 log limit in 1s, god help you
+        self.num_logs_in_batch = 0
+        self.log_batch = [b""] * 1024 * 1024
 
-# Special types for handling data recordings. These MUST always be 
-# msgspec.Structs, but can be either be written to DataMessage or 
-# used in their native struct (eg OrderbookUpdate, TradeUpdate, etc). 
-#
-# In general, the batches here will be much larger than the logs 
-# buffer, to save on time blocked by encoding the messages. 
-class DataMessage(msgspec.Struct, kw_only=True, tag=True, gc=False):
-    time: Union[int, float]
-    msg: msgspec.Struct
+    cdef void add_log(self, CLogLevel level, bytes msg):
+        """
+        Format: {headers: {time: u64, level: u8, msg_len: u32}, msg: bytes}
 
-class DataMessageBatch(msgspec.Struct, kw_only=True, tag=True, gc=False):
-    system: dict[str, str]
-    name: bytes
-    time: Union[int, float]
-    size: int
+        0:7 = Time in nanoseconds
+        8 = Level
+        9:12 = Message length
+        13:(Message length) = Message
+        """ 
+        cdef u64 time = time_ns()
+        cdef u32 msg_len = len(msg)
+        
+        cdef bytes buffer = bytes(sizeof(u64) + sizeof(u8) + sizeof(u32) + msg_len)
 
-    # We cant have msgspec.Struct here as it fails to correctly deserialize
-    # in the master logger to the original struct type. So it is kept as 
-    # type T temporarily.
-    data: list[T]
+        memcpy(buffer, &time, sizeof(u64))
+        memcpy(buffer + sizeof(u64), &level, sizeof(u8))
+        memcpy(buffer + sizeof(u64) + sizeof(u8), &msg_len, sizeof(u32))
+        memcpy(buffer + sizeof(u64) + sizeof(u8) + sizeof(u32), msg, len(msg))
 
-# Useful later to map LogLevel's back to their readable form 
-# without the use of log_level_to_str().
-LogLevelMap: dict[int, str] = {
-    0: "TRACE",
-    1: "DEBUG",
-    2: "INFO",
-    3: "WARNING",
-    4: "ERROR",
-    5: "CRITICAL"
-}
+        self.log_batch[self.num_logs_in_batch] = buffer
+        self.num_logs_in_batch += 1
 
-cpdef str log_level_to_str(uint8_t level):
+    cdef bytes to_bytes(self, bint reset=True):
+        """
+        Format: {headers: {buf_msg_type: u8, len_name: u8, name: bytes, num_logs: u32}, logs: bytes[]}
+
+        Args:
+            name (bytes): The name of the log batch.
+            logs (list[bytes]): The list of Log structs to include in the batch.
+        """
+        cdef BufMsgType buf_msg_type = BufMsgType.LOG
+        cdef u32        num_logs = self.num_logs_in_batch
+        
+        # Calculate total size of all logs
+        cdef u32 total_logs_size = 0
+        cdef u32 i
+        for i in range(num_logs):
+            total_logs_size += len(self.log_batch[i])
+        
+        # Header size: buf_msg_type + len_name + name + num_logs
+        cdef u32 header_size = sizeof(u8) + sizeof(u8) + self.name_len + sizeof(u32)
+        cdef bytes buffer = bytes(header_size + total_logs_size)
+
+        # Write header
+        memcpy(buffer, &buf_msg_type, sizeof(u8))
+        memcpy(buffer + sizeof(u8), &self.name_len, sizeof(u8))
+        memcpy(buffer + sizeof(u8) + sizeof(u8), self.name, self.name_len)
+        memcpy(buffer + sizeof(u8) + sizeof(u8) + self.name_len, &num_logs, sizeof(u32))
+        
+        # Write logs
+        cdef u32 pos = header_size
+        for i in range(num_logs):
+            cdef bytes log_data = self.log_batch[i]
+            memcpy(buffer + pos, log_data, len(log_data))
+            pos += len(log_data)
+            
+        if reset:
+            self.num_logs_in_batch = 0
+
+        return buffer
+
+    cdef list[tuple] get_all_logs(self, bint reset=True):
+        """
+        For use in the MasterLogger's own generated logs.
+
+        Logs returned in the format: [(time_ns: int, level: LogLevel, msg: bytes)]
+        """
+        cdef list[tuple] logs = []
+
+        # Individual log components
+        cdef bytes log_data
+        cdef u64 time
+        cdef u8 level
+        cdef u32 msg_len
+        cdef bytes msg
+
+        cdef u32 i, pos
+        for i in range(self.num_logs_in_batch):
+            log_data = self.log_batch[i]
+            pos = 0
+
+            # Extract time (u64)
+            memcpy(&time, log_data + pos, sizeof(u64))
+            pos += sizeof(u64)
+            
+            # Extract level (u8)
+            memcpy(&level, log_data + pos, sizeof(u8))
+            pos += sizeof(u8)
+            
+            # Extract message length (u32)
+            memcpy(&msg_len, log_data + pos, sizeof(u32))
+            pos += sizeof(u32)
+            
+            # Extract message (bytes)
+            msg = log_data[pos:pos + msg_len]
+            pos += msg_len
+
+            logs.append((time, clog_level_to_log_level(level), msg))
+
+        if reset:
+            self.num_logs_in_batch = 0
+
+        return logs
+
+    @staticmethod
+    cdef tuple from_bytes(bytes buffer):
+        """
+        Buffer must be the exact output given by .to_bytes()
+
+        Logs returned in the format: (name: bytes, [(time_ns: int, level: LogLevel, msg: bytes)])
+
+        This is only ever called within the MasterLogger, so speed is not a priority.
+        """
+        # Name 
+        cdef u8 len_name = buffer[1]
+        cdef bytes name = buffer[2:2 + len_name]
+
+        # Batch of logs
+        cdef list[tuple] logs = []
+        cdef u32 num_logs
+        memcpy(&num_logs, buffer + 2 + len_name, sizeof(u32))
+
+        # Individual log components
+        cdef u64 time
+        cdef u8 level
+        cdef u32 msg_len
+        cdef bytes msg
+
+        cdef u32 pos = 2 + len_name + sizeof(u32)
+        cdef u32 buffer_len = len(buffer)
+        
+        for i in range(num_logs):
+            # Check bounds before reading
+            if pos + sizeof(u64) + sizeof(u8) + sizeof(u32) > buffer_len:
+                break
+                
+            # Extract time (u64)
+            memcpy(&time, buffer + pos, sizeof(u64))
+            pos += sizeof(u64)
+            
+            # Extract level (u8)
+            memcpy(&level, buffer + pos, sizeof(u8))
+            pos += sizeof(u8)
+            
+            # Extract message length (u32)
+            memcpy(&msg_len, buffer + pos, sizeof(u32))
+            pos += sizeof(u32)
+            
+            # Check bounds for message
+            if pos + msg_len > buffer_len:
+                break  # Avoid buffer overrun
+                
+            # Extract message (bytes)
+            msg = buffer[pos:pos + msg_len]
+            pos += msg_len
+
+            logs.append((time, clog_level_to_log_level(level), msg))
+
+        return (name, logs)
+
+cdef bytes heartbeat_to_bytes(bytes name, u64 time, u64 next_checkin_time):
     """
-    Convert a LogLevel enum value to its corresponding string representation.
+    {buf_msg_type: u8, len_name: u8, name: bytes, time: u64, next_checkin_time: u64}
+    """
+    cdef const u8 buf_msg_type = BufMsgType.HEARTBEAT
+    cdef u8 len_name = len(name)
 
-    Rather than using LogLevelMap, this function is faster as comparing 
-    int<>int in Cython compiles to switch-case statements under the hood.
+    cdef bytes buffer = bytes(sizeof(u8) + sizeof(u8) + len_name + sizeof(u64) + sizeof(u64))
 
-    Args:
-        level (int): The LogLevel enum value to convert.
+    memcpy(buffer, &buf_msg_type, sizeof(u8))
+    memcpy(buffer + sizeof(u8), &len_name, sizeof(u8))
+    memcpy(buffer + sizeof(u8) + sizeof(u8), name, len_name)
+    memcpy(buffer + sizeof(u8) + sizeof(u8) + len_name, &time, sizeof(u64))
+    memcpy(buffer + sizeof(u8) + sizeof(u8) + len_name + sizeof(u64), &next_checkin_time, sizeof(u64))
+    return buffer
+
+cdef tuple[bytes, u64, u64] heartbeat_from_bytes(bytes buffer):
+    """
+    {buf_msg_type: u8, len_name: u8, name: bytes, time: u64, next_checkin_time: u64}
 
     Returns:
-        str: The string representation of the LogLevel enum value.
+        tuple[bytes, u64, u64]: A tuple of (name, time, next_checkin_time)
     """
-    if level == 0:
-        return "TRACE"
-    elif level == 1:
-        return "DEBUG"
-    elif level == 2:
-        return "INFO"
-    elif level == 3:
-        return "WARNING"
-    elif level == 4:
-        return "ERROR"
-    elif level == 5:
-        return "CRITICAL"
-    else:
-        raise ValueError(f"Invalid LogLevel; expected [{', '.join(LogLevelMap.values())}] but got {level}")
+    cdef u8 len_name = buffer[1]
+    cdef bytes name = buffer[2:2 + len_name]
 
-cdef class MessageBuffer:
+    cdef u64 time = buffer[2 + len_name:2 + len_name + sizeof(u64)]
+    cdef u64 next_checkin_time = buffer[2 + len_name + sizeof(u64):2 + len_name + sizeof(u64) + sizeof(u64)]
+    return name, time, next_checkin_time
+
+cdef LogLevel clog_level_to_log_level(CLogLevel clog_level):
     """
-    A fixed-size buffer of LogMessage structs for efficient batch storage and encoding.
+    Maps a LogLevel to a CLogLevel.
+    
+    Args:
+        level (LogLevel): The log level to map.
     """
-
-    def __init__(
-        self, 
-        object dump_to_queue_callback, 
-        Py_ssize_t capacity=1000, 
-        double timeout_s=1.0
-    ):
-        """
-        Initialize the MessageBuffer with a given capacity and optional timeout.
-
-        Args:
-            dump_to_queue_callback (callable): The callback function that handles dumping messages to a queue.
-            capacity (int): The maximum number of LogMessage entries this buffer can hold.
-            timeout_s (float, optional): The maximum number of seconds that can elapse before
-                the buffer is considered full, even if not at capacity. If 0, no timeout is applied.
-        """
-        self._capacity = capacity
-        self._size = 0
-        self._timeout_s = timeout_s
-        self._start_time = time_s()
-
-        # Defaulting to 1000 LogMessage structs is quite overkill, though 
-        # it's a safe default option incase of high log rates.
-        self._buffer = [None] * self._capacity 
-
-        self._dump_to_queue_callback = dump_to_queue_callback
-
-    cdef inline bint _is_full(self):
-        """
-        Check whether the buffer is currently full due to capacity and timeout.
-
-        Returns:
-            bool: True if the buffer has reached capacity and the timeout has expired;
-                  False otherwise.
-        """
-        cdef bint expired = (time_s() - self._start_time) >= self._timeout_s
-        cdef bint full = self._size == self._capacity
-        return expired or full
-
-    cdef void append(self, object msg):
-        """
-        Append a single LogMessage to the buffer.
-
-        Args:
-            msg (LogMessage): A fully-initialized LogMessage struct to store in the buffer.
-
-        Raises:
-            IndexError: If the buffer is full and cannot accept more messages.
-        """
-        if self._size == 0:
-            self._start_time = time_s()
-
-        self._buffer[self._size] = msg
-        self._size += 1
-
-        if self._is_full():
-            self._dump_to_queue_callback(self._buffer[:self._size])
-            self._size = 0
-
-    cdef list acquire_all(self):
-        """
-        Retrieve and clear all messages currently stored in the buffer.
-
-        Returns:
-            list: The list of LogMessage objects that were in the buffer before clearing.
-        """
-        cdef list buffer = self._buffer[:self._size]
-        self._size = 0
-        return buffer
+    if clog_level == CLogLevel.TRACE:
+        return LogLevel.TRACE
+    elif clog_level == CLogLevel.DEBUG:
+        return LogLevel.DEBUG
+    elif clog_level == CLogLevel.INFO:
+        return LogLevel.INFO
+    elif clog_level == CLogLevel.WARNING:
+        return LogLevel.WARNING
+    elif clog_level == CLogLevel.ERROR:
+        return LogLevel.ERROR
+    elif clog_level == CLogLevel.CRITICAL:
+        return LogLevel.CRITICAL

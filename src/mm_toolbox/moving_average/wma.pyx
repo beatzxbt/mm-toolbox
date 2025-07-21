@@ -1,14 +1,14 @@
-cimport numpy as np
+cimport numpy as cnp
 
 from mm_toolbox.ringbuffer.onedim cimport RingBufferOneDim
-from .base cimport MovingAverage
+from mm_toolbox.moving_average.base cimport MovingAverage
 
 cdef class WeightedMovingAverage(MovingAverage):
     """
     The WMA uses linearly increasing weights from 1 to N, where N is the window size.
     """
 
-    def __init__(self, Py_ssize_t window, bint fast=False):
+    def __init__(self, int window, bint fast=False):
         super().__init__(window, fast)
         
         # Cast window to a double as many calculations require
@@ -19,10 +19,9 @@ cdef class WeightedMovingAverage(MovingAverage):
         self._rolling_sum = 0.0    
         self._rolling_wsum = 0.0   
 
-    cpdef double initialize(self, np.ndarray values):
+    cpdef double initialize(self, cnp.ndarray values):
         cdef:
-            Py_ssize_t i
-            Py_ssize_t n = values.shape[0]
+            int i, n = values.shape[0]
             double val
 
         if n < self._window:
@@ -45,7 +44,7 @@ cdef class WeightedMovingAverage(MovingAverage):
         self._value = self._rolling_wsum / (self._window_double * (self._window_double + 1.0) / 2.0)
         self._is_warm = True
         self.push_to_ringbuffer()
-        
+
         return self._value
 
     cpdef double next(self, double new_val):

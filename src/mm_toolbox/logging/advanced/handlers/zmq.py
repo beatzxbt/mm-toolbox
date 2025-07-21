@@ -1,70 +1,57 @@
 import zmq
-from mm_toolbox.time import time_iso8601
-from .base import LogHandler
-from ...utils.zmq import ZmqConnection
 
-class ZMQLogHandler(LogHandler):
+from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
+from mm_toolbox.logging.utils.zmq import ZmqConnection
+
+class ZMQLogHandler(BaseLogHandler):
     """
     A log handler that publishes messages to a ZeroMQ socket.
-
-    Can use either 'ipc' or 'tcp' transport for distributing log messages.
     """
 
-    def __init__(self, transport: str, path: str) -> None:
+    def __init__(self, path: str, do_format: bool = True) -> None:
         """
-        Initialize the ZMQLogHandler, binding a SUB socket at the specified path.
+        Initialize the ZMQLogHandler, binding a PUB socket at the specified path.
 
         Args:
-            transport (str): Either "ipc" or "tcp".
-            path (str): The endpoint path (e.g. "ipc:///some/path.ipc" or "tcp://127.0.0.1:5556").
-
-        Raises:
-            ValueError: If the transport or path is invalid.
+            path (str): The endpoint path (e.g. "ipc:///some/path.ipc", "tcp://127.0.0.1:5556", 
+                        or "inproc://logger").
+            do_format (bool, optional): If True, format the log messages before sending. 
+                                        If False, send the raw log objects. Defaults to True.
         """
-        self.transport = transport.lower()
-        
-        if self.transport == "ipc":
-            if not path.startswith("ipc://"):
-                raise ValueError(f"Invalid IPC path '{path}'. Must start with 'ipc://'.")
-            self.path = path
+        super().__init__()
+        self.path = path
 
-        elif self.transport == "tcp":
-            if not path.startswith("tcp://"):
-                raise ValueError(f"Invalid TCP path '{path}'. Must start with 'tcp://'.")
-            
-            # Additional validation for host:port
-            tcp_part = path[len("tcp://"):]
-            slash_split = tcp_part.split("/", 1)
-            host_port = slash_split[0]
-            if ":" not in host_port:
-                raise ValueError(f"TCP path '{path}' has no port specified.")
-            
-            host, port_str = host_port.split(":", 1)
-            try:
-                port = int(port_str)
-            except ValueError:
-                raise ValueError(f"Invalid port in TCP path '{path}'. Must be an integer.")
-            
-            if not (1 <= port <= 65535):
-                raise ValueError(f"Port must be between 1 and 65535, got {port}.")
+        self.do_format = do_format
 
-            self.path = path
-        else:
-            raise ValueError(f"Invalid transport; expected ['ipc', 'tcp'] but got '{self.transport}'")
-
+        # Any formatting issues with the path will be thrown within the ZmqConnection constructor 
+        # by ZMQ, so we don't need to handle it beforehand. 
         self.connection = ZmqConnection(
-            socket_type=zmq.SUB,
+            socket_type=zmq.PUB,
             path=self.path,
             bind=True
         )
         self.connection.start()
 
-    def push(self, buffer) -> None:
+    def push(self, name, logs) -> None:
         """
         Publish each message in the buffer via the ZeroMQ connection.
 
         Args:
-            buffer (list[str]): The messages to publish.
+            buffer: A batch of log messages.
         """
-        for log in buffer:
-            self.connection.send(self.json_encoder.encode(log))
+        try:
+            for log in logs:
+                if self.do_format:
+                    encoded_log = self.format_log(
+                        name=name, 
+                        time_ns=log[0], 
+                        level=log[1], 
+                        msg=log[2]
+                    )
+                else:
+                    encoded_log = self.encode_json(log)
+
+                self.connection.send(encoded_log)
+                
+        except Exception as e:
+            print(f"Failed to publish logs via ZMQ; {e}")

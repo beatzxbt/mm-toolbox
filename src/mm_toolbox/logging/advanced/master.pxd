@@ -1,5 +1,5 @@
-from .config cimport LoggerConfig
-from .structs cimport MessageBuffer, LogLevel
+from mm_toolbox.logging.advanced.config cimport LoggerConfig
+from mm_toolbox.logging.advanced.structs cimport CLogLevel, LogLevel, LogBatch
 
 cdef class MasterLogger:
     """
@@ -8,38 +8,26 @@ cdef class MasterLogger:
     """
     cdef:
         LoggerConfig    _config
-        dict            _system_info
-        object          _ev_loop
         bytes           _name
-        object          _batch_encoder
-        object          _batch_decoder
-        object          _master_conn
         list            _log_handlers
-        list            _data_handlers
-        MessageBuffer   _log_buffer
-        MessageBuffer   _data_buffer
+        LogBatch        _log_batch
+        dict            _heartbeats
+        object          _conn
+        object          _timed_operations_thread
         bint            _is_running
 
-    # def __init__(self, LoggerConfig config, list log_handlers, list data_handlers, str name="")
-    cdef inline void    _ensure_running(self)
+    # def __cinit__(self, LoggerConfig config=None, list log_handlers=None)
     cpdef void          _process_worker_msg(self, bytes msg)
-    cdef void           _logs_dump_to_queue_callback(self, list raw_log_buffer)
-    cdef void           _data_dump_to_queue_callback(self, list raw_data_buffer)
-    cdef inline void    _process_log(self, LogLevel level, bytes msg)
-    cdef inline void    _process_data(self, object msg)
+    cpdef void          _timed_operations(self)
 
-    cpdef void          set_format(self, str format_string)
-    cpdef void          set_log_level(self, int level)
-    cpdef void          data(self, object data, bint unsafe=*)
-    cpdef void          trace(self, str msg)
-    cpdef void          debug(self, str msg)
-    cpdef void          info(self, str msg)
-    cpdef void          warning(self, str msg)
-    cpdef void          error(self, str msg)
-    cpdef void          critical(self, str msg)
+    cpdef void          set_log_level(self, LogLevel level)
+    cpdef void          trace(self, str msg_str=*, bytes msg_bytes=*)
+    cpdef void          debug(self, str msg_str=*, bytes msg_bytes=*)
+    cpdef void          info(self, str msg_str=*, bytes msg_bytes=*)
+    cpdef void          warning(self, str msg_str=*, bytes msg_bytes=*)
+    cpdef void          error(self, str msg_str=*, bytes msg_bytes=*)
+    cpdef void          critical(self, str msg_str=*, bytes msg_bytes=*)
     cpdef void          shutdown(self)
 
     cpdef bint          is_running(self)
-    cpdef str           get_name(self)
     cpdef LoggerConfig  get_config(self)
-    cpdef dict          get_system_info(self)

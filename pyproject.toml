@@ -1,51 +1,48 @@
 [tool.poetry]
 package-mode = true
 name = "mm-toolbox"
-version = "0.1.2"
-description = "\"high-performance python tools for market making strategies.\""
+version = "1.0.0"
+description = "high-performance python tools for market making systems."
 license = "MIT"
 authors = [
     "beatzxbt <121855680+beatzxbt@users.noreply.github.com>"
 ]
 readme = "README.md"
 repository = "https://github.com/beatzxbt/mm-toolbox"
-keywords = ["market making", "high performance python", "orderbook"]
+keywords = ["market making", "hft", "high performance python"]
 
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Natural Language :: English",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Libraries :: Python Modules"
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.10.0,<3.13"
-numpy = "^2.0.1"
+python = ">=3.11.0,<3.14.0"
+numpy = "^2.0.0"
 numba = "^0.60.0"
-picows = "^1.1.0"
-aiosonic = "^0.21.0"
-ciso8601 = "^2.3.1"
-msgspec = "^0.18.6"
+picows = "*"
+ciso8601 = "*"
+msgspec = "*"
+zmq = "^0.0.0"
+aiohttp = "^3.11.11"
+setuptools = "^78.1.0"
 
 [tool.poetry.group.dev.dependencies]
-poetry = "^1.8.3"
-pytest = "^8.3.2"
-ruff = "^0.6.2"
-
-[tool.poetry.group.linalg.dependencies]
-scipy = "^1.14.1"
-
-[tool.poetry.extras]
-linalg = ["scipy"]
+poetry = "*"
+pytest = "*"
+ruff = "*"
+cython = "^3.0.11"
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=61.0", "wheel", "cython"]
+build-backend = "setuptools.build_meta"
