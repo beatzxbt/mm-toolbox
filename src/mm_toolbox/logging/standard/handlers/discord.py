@@ -1,6 +1,6 @@
 import asyncio
 from typing import List, Coroutine
-from .base import BaseLogHandler
+from mm_toolbox.logging.standard.handlers.base import BaseLogHandler
 
 class DiscordLogHandler(BaseLogHandler):
     """
@@ -33,7 +33,7 @@ class DiscordLogHandler(BaseLogHandler):
                     self.http_session.post(
                         url=self.url,
                         headers=self.headers,
-                        data=self.json_encoder.encode({"content": log_msg}),
+                        data=self.json_encode({"content": log_msg}),
                     )
                 )
             await asyncio.gather(*tasks)

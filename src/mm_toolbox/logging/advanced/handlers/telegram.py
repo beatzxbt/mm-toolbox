@@ -1,8 +1,6 @@
-import asyncio
-from typing import Coroutine
-from .base import LogHandler
+from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
 
-class TelegramLogHandler(LogHandler):
+class TelegramLogHandler(BaseLogHandler):
     """
     A log handler that sends messages to a Telegram chat via bot API.
     """
@@ -15,6 +13,7 @@ class TelegramLogHandler(LogHandler):
             bot_token (str): The Telegram bot token for authorization.
             chat_id (str): The ID of the Telegram chat to receive messages.
         """
+        super().__init__()
         self.chat_id = chat_id
         self.url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         self.headers = {"Content-Type": "application/json"}
@@ -24,15 +23,22 @@ class TelegramLogHandler(LogHandler):
             "disable_web_page_preview": True,
         }
 
-    def push(self, buffer):
+    def push(self, name, logs):
         try:
-            for log in buffer.data:
-                self.partial_payload["text"] = f"{log.time} - {log.level} - {log.msg}"
+            for log in logs:
+                self.partial_payload.update({
+                    "text": self.format_log(
+                        name=name, 
+                        time_ns=log[0], 
+                        level=log[1], 
+                        msg=log[2]
+                    )
+                })
                 self.ev_loop.create_task(
                     self.http_session.post(
                         url=self.url,
                         headers=self.headers,
-                        data=self.json_encoder.encode(self.partial_payload),
+                        data=self.encode_json(self.partial_payload),
                     )
                 )
 

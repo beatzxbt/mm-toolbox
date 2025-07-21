@@ -3,7 +3,7 @@ cimport numpy as cnp
 from mm_toolbox.ringbuffer.onedim cimport RingBufferOneDim
 
 cdef class MovingAverage:
-    def __init__(self, Py_ssize_t window, bint is_fast):
+    def __init__(self, int window, bint is_fast):
         if window <= 1:
             raise ValueError(f"Moving average window must be positive; expected >1 but got {window}")
 
@@ -94,7 +94,7 @@ cdef class MovingAverage:
         self.ensure_not_fast()
         return iter(self._values)
 
-    def __getitem__(self, Py_ssize_t idx):
+    def __getitem__(self, int idx):
         """
         Get the element at the given index.
 

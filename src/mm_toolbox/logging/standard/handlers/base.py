@@ -11,17 +11,17 @@ class BaseLogHandler(ABC):
     should be pushed to their respective destinations.
     """
     def __init__(self):
-        self._json_encoder = None
+        self._json_encode = None
         self._http_session = None
         self._ev_loop = None
         self._primary_config = None
 
     @property
-    def json_encoder(self):
+    def json_encode(self):
         """Lazily initialize the JSON encoder."""
-        if self._json_encoder is None:
-            self._json_encoder = msgspec.json.Encoder()
-        return self._json_encoder
+        if self._json_encode is None:
+            self._json_encode = msgspec.json.Encoder().encode
+        return self._json_encode
 
     @property
     def http_session(self):

@@ -1,5 +1,5 @@
 cimport numpy as cnp 
-from .base cimport MovingAverage
+from mm_toolbox.moving_average.base cimport MovingAverage
 
 cdef class ExponentialMovingAverage(MovingAverage):
     """
@@ -8,16 +8,15 @@ cdef class ExponentialMovingAverage(MovingAverage):
     This can be overridden in the `alpha` parameter.
     """
 
-    def __init__(self, Py_ssize_t window, bint is_fast=False, double alpha=0.0):
+    def __init__(self, int window, bint is_fast=False, double alpha=0.0):
         super().__init__(window, is_fast)
         
         self._alpha = alpha if alpha != 0.0 else 3.0 / <double>(self._window + 1)
 
     cpdef double initialize(self, cnp.ndarray values):
         cdef: 
-            Py_ssize_t i
-            Py_ssize_t n = values.shape[0]
-            double _temp_var 
+            int     i, n = values.shape[0]
+            double  _temp_var 
 
         if n < self._window:
             raise ValueError(
@@ -35,11 +34,11 @@ cdef class ExponentialMovingAverage(MovingAverage):
         return self._value
 
     cpdef double next(self, double new_val):
-        self.ensure_warm()
+        # self.ensure_warm()
         return self._alpha * new_val + (1.0 - self._alpha) * self._value
  
     cpdef double update(self, double new_val):
-        self.ensure_warm()
+        # self.ensure_warm()
         self._value = self.next(new_val)
         self.push_to_ringbuffer()
         return self._value

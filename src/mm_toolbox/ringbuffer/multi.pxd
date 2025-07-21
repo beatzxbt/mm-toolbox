@@ -1,13 +1,14 @@
 cimport numpy as cnp
+from libc.stdint cimport uint32_t as u32
 
 cdef class RingBufferMulti:
     cdef:
-        Py_ssize_t          _ndim     
-        Py_ssize_t          _capacity
-        Py_ssize_t          _sub_array_len      
-        Py_ssize_t          _left_index    
-        Py_ssize_t          _right_index   
-        Py_ssize_t          _size          
+        u32                 _ndim     
+        u32                 _capacity
+        u32                 _sub_array_len      
+        u32                 _left_index    
+        u32                 _right_index   
+        u32                 _size          
         object              _dtype       
         cnp.ndarray         _buffer   
     
@@ -15,11 +16,13 @@ cdef class RingBufferMulti:
     cpdef cnp.ndarray       raw(self)
     cpdef cnp.ndarray       unsafe_raw(self)
     cpdef cnp.ndarray       unwrapped(self)
-    cpdef void              unsafe_write(self, object value, Py_ssize_t insert_idx=*)
+    cpdef void              unsafe_write(self, object value, int insert_idx=*)
     cpdef void              unsafe_push(self)
     cpdef void              append(self, object value)
     cpdef object            popright(self)
     cpdef object            popleft(self)
+    cpdef cnp.ndarray       peekright(self)
+    cpdef cnp.ndarray       peekleft(self)
     cpdef cnp.ndarray       reset(self)
     cpdef void              fast_reset(self)
     cpdef bint              is_full(self)

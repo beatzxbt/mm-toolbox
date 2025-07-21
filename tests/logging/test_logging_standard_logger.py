@@ -10,13 +10,12 @@ from mm_toolbox.logging.standard import (
     FileLogHandler,
 )
 
-
 class TestLoggerConfig(unittest.TestCase):
     def test_valid_config(self):
         config = LoggerConfig(
             base_level=LogLevel.WARNING, 
             buffer_capacity=20, 
-            buffer_timeout_s=15, 
+            buffer_timeout=15, 
             do_stout=True, 
             str_format="%(asctime)s - %(levelname)s - %(message)s"
         )
@@ -26,14 +25,14 @@ class TestLoggerConfig(unittest.TestCase):
         config = LoggerConfig(
             base_level=LogLevel.DEBUG,
             buffer_capacity=100,
-            buffer_timeout_s=30,
+            buffer_timeout=30,
             do_stout=False,
             str_format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
         
         self.assertEqual(config.base_level, LogLevel.DEBUG)
         self.assertEqual(config.buffer_capacity, 100)
-        self.assertEqual(config.buffer_timeout_s, 30)
+        self.assertEqual(config.buffer_timeout, 30)
         self.assertFalse(config.do_stout)
         self.assertEqual(config.str_format, "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         
@@ -55,7 +54,7 @@ class TestLoggerConfig(unittest.TestCase):
     def test_invalid_buffer_timeout(self):
         """Test that invalid buffer timeout raises ValueError."""
         with self.assertRaises(ValueError):
-            LoggerConfig(buffer_timeout_s=-5.0)
+            LoggerConfig(buffer_timeout=-5.0)
             
     def test_invalid_str_format(self):
         """Test that invalid string format raises ValueError."""
@@ -67,7 +66,7 @@ class TestLoggerConfig(unittest.TestCase):
         LoggerConfig(
             base_level=LogLevel.ERROR,
             buffer_capacity=500,
-            buffer_timeout_s=10.0
+            buffer_timeout=10.0
         )
 
 

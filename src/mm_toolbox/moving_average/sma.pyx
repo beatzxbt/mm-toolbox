@@ -1,25 +1,24 @@
-cimport numpy as np
+cimport numpy as cnp
 
 from mm_toolbox.ringbuffer.onedim cimport RingBufferOneDim
-from .base cimport MovingAverage
+from mm_toolbox.moving_average.base cimport MovingAverage
 
 cdef class SimpleMovingAverage(MovingAverage):
     """
     The SMA uses equal weights 1/N, where N is the window size.
     """
 
-    def __init__(self, Py_ssize_t window, bint fast=False):
+    def __init__(self, int window, bint fast=False):
         super().__init__(window, fast)
         
         self._raw_values = RingBufferOneDim(window) 
         self._rolling_sum = 0.0
 
-    cpdef double initialize(self, np.ndarray values):
+    cpdef double initialize(self, cnp.ndarray values):
         cdef:
-            Py_ssize_t i
-            Py_ssize_t n = values.shape[0]
-            double raw_value
-
+            int     i, n = values.shape[0]
+            double  raw_value
+    
         if n < self._window:
             raise ValueError(
                 f"Input array must same length as window; expected {self._window} but got {n}"
@@ -35,7 +34,7 @@ cdef class SimpleMovingAverage(MovingAverage):
         self._value = self._rolling_sum / self._window
         self._is_warm = True
         self.push_to_ringbuffer()
-        
+
         return self._value
 
     cpdef double next(self, double new_val):

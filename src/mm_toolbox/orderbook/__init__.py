@@ -1,1 +1,3 @@
-from .array import ArrayOrderbook
+from .orderbook import Orderbook as Orderbook
+
+__all__ = ["Orderbook"]

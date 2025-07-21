@@ -100,7 +100,7 @@ cdef class RingBufferMulti:
                 self._buffer[:self._right_index]
             ))
 
-    cpdef void unsafe_write(self, object value, Py_ssize_t insert_idx=0):
+    cpdef void unsafe_write(self, object value, int insert_idx=0):
         """
         Write a value directly into the buffer at the current right index.
 
@@ -150,8 +150,8 @@ cdef class RingBufferMulti:
         """
         cdef:
             object      casted_value
-            Py_ssize_t  value_ndim
-            Py_ssize_t  value_len
+            int         value_ndim
+            int         value_len
             object      value_dtype
         
         if self._ndim == 1:
@@ -251,6 +251,22 @@ cdef class RingBufferMulti:
         self._size -= 1
         return value
 
+    cpdef cnp.ndarray peekright(self):
+        """
+        Return the last (most recently added) row without removing it.
+        """
+        if self._size == 0:
+            raise IndexError("Cannot peek into an empty RingBuffer")
+        return self._buffer[(self._right_index - 1 + self._capacity) % self._capacity]
+
+    cpdef cnp.ndarray peekleft(self):
+        """
+        Return the first (oldest) row without removing it.
+        """
+        if self._size == 0:
+            raise IndexError("Cannot peek into an empty RingBuffer")
+        return self._buffer[(self._left_index + self._capacity) % self._capacity]
+
     cpdef cnp.ndarray reset(self):
         """
         Clear the buffer and return its contents in logical order before clearing.
@@ -349,7 +365,7 @@ cdef class RingBufferMulti:
         Yields:
             object: Each element in the buffer.
         """
-        cdef Py_ssize_t idx = self._left_index
+        cdef u32 idx = self._left_index
         for _ in range(self._size):
             yield self._buffer[idx]
             idx = (idx + 1) % self._capacity
@@ -376,13 +392,13 @@ cdef class RingBufferMulti:
         Raises:
             IndexError: If the index is out of range.
         """
-        cdef Py_ssize_t _size = self._size
+        cdef u32 _size = self._size
         if idx < 0:
             idx += _size
         if idx < 0 or idx >= _size:
             raise IndexError("Index out of range")
 
-        cdef Py_ssize_t fixed_idx = (self._left_index + idx) % self._capacity
+        cdef u32 fixed_idx = (self._left_index + idx) % self._capacity
         
         # Return a copy to avoid potential data corruption
         if self._ndim == 1:

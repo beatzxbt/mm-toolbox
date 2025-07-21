@@ -1,23 +1,23 @@
 import zmq
-import msgspec
-from typing import Union
+import threading
 
-from mm_toolbox.time.time cimport time_us
-
-from .handlers.base import BaseLogHandler
-from ..utils.system import _get_system_info
-from ..utils.zmq import ZmqConnection
-
-from .config cimport LoggerConfig
-from .structs import (
-    LogMessage, 
-    LogMessageBatch, 
-    DataMessage, 
-    DataMessageBatch,
-    log_level_to_str
+from libc.stdint cimport (
+    uint8_t as u8,
+    uint64_t as u64,
 )
-from .structs cimport LogLevel, MessageBuffer
 
+from mm_toolbox.logging.utils.zmq import ZmqConnection
+from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
+
+from mm_toolbox.time.time cimport time_ns
+from mm_toolbox.logging.advanced.config cimport LoggerConfig
+from mm_toolbox.logging.advanced.structs cimport (
+    BufMsgType,
+    LogBatch,
+    LogLevel, 
+    CLogLevel,
+    heartbeat_from_bytes,
+)
 
 cdef class MasterLogger:
     """
@@ -25,12 +25,10 @@ cdef class MasterLogger:
     It receives binary, multipart messages, decodes them, and stores them in a buffer until full.
     Once the buffer is full, it flushes them to external handlers.
     """
-    def __init__(
+    def __cinit__(
         self, 
         LoggerConfig config=None, 
-        str name="",
         list log_handlers=None,  
-        list data_handlers=None, 
     ):
         self._config = config
         if self._config is None:
@@ -40,12 +38,10 @@ cdef class MasterLogger:
         if self._log_handlers is None:
             self._log_handlers: list[BaseLogHandler] = []
 
-        self._data_handlers = data_handlers
-        if self._data_handlers is None:
-            self._data_handlers: list[BaseLogHandler] = []
+        self._name = b"MASTER"
 
         # Verify that all handlers are valid 
-        for handler in self._log_handlers + self._data_handlers:
+        for handler in self._log_handlers:
             handler_base_class = handler.__class__.__base__
             if not handler_base_class == BaseLogHandler:
                 raise TypeError(f"Invalid handler base class; expected BaseLogHandler but got {handler_base_class}")
@@ -54,47 +50,27 @@ cdef class MasterLogger:
             # where the final point is not a code environment (eg Discord, Telegram, etc).
             handler.add_primary_config(config)
 
-        self._system_info = _get_system_info(
-            machine=True, 
-            network=True, 
-            op_sys=True
-        )
-        self._name = name.encode()
+        self._log_batch = LogBatch(name=self._name)
 
-        self._batch_encoder = msgspec.msgpack.Encoder()
-        self._batch_decoder = msgspec.msgpack.Decoder(Union[LogMessageBatch, DataMessageBatch])
+        self._heartbeats: dict[bytes, tuple[int, int]] = {} # name -> (time_ns, next_checkin_time_ns)
 
-        # PUSH/PULL sockets are more performant for MPSC style queues.
-        self._master_conn = ZmqConnection(
+        self._conn = ZmqConnection(
             socket_type=zmq.PULL,
             path=config.path,
             bind=True
         )
-        self._master_conn.start()
-
-        self._log_buffer = MessageBuffer(
-            dump_to_queue_callback=self._logs_dump_to_queue_callback,
-            capacity=config.log_buffer_size,
-            timeout_s=config.log_timeout_s,
-        )
-        self._data_buffer = MessageBuffer(
-            dump_to_queue_callback=self._data_dump_to_queue_callback,
-            capacity=config.data_buffer_size,
-            timeout_s=config.data_timeout_s,
-        )
-        self._master_conn.listen(self._process_worker_msg)
+        self._conn.start()
+        self._conn.listen(self._process_worker_msg)
 
         self._is_running = True
 
-        self.info(f"Master logger initialized; name: {self._name.decode()}")
+        self._timed_operations_thread = threading.Thread(
+            target=self._timed_operations,
+            daemon=True
+        )
+        self._timed_operations_thread.start()
 
-    cdef inline void _ensure_running(self):
-        """
-        Ensure that the master logger is running. 
-        If it is not, raise a RuntimeError.
-        """
-        if not self._is_running:
-            raise RuntimeError("Master logger is not running; cannot send/recv messages")
+        self.info(f"Master logger started;")
 
     cpdef void _process_worker_msg(self, bytes msg):
         """
@@ -103,254 +79,166 @@ cdef class MasterLogger:
         Args:
             msg (bytes): The raw message bytes to process.
         """
-        # Do not perform actions if not running.
         if not self._is_running:
             return 
             
-        try:
-            decoded_msg = self._batch_decoder.decode(msg)
-        except Exception as e:
-            # Log the error but don't crash the master logger
-            print(f"CRITICAL: Error decoding message; {e}")
-            print(f"CRITICAL: Message: {msg}")
-            print(f"CRITICAL: General decoder output: {msgspec.msgpack.decode(msg)}")
-            return
-            
-        decoded_msg_type = type(decoded_msg)
+        # First byte is the message type
+        cdef u8 msg_type = msg[0]
 
-        if decoded_msg_type == LogMessageBatch:
+        if msg_type == BufMsgType.LOG:
+            cdef tuple[bytes, list[tuple]] log_batch = LogBatch.from_bytes(msg)
+            name, logs = log_batch
             for handler in self._log_handlers:
-                handler.push(decoded_msg)
-        elif decoded_msg_type == DataMessageBatch:
-            for handler in self._data_handlers:
-                handler.push(decoded_msg)
+                handler.push(name, logs)
 
-    cdef void _logs_dump_to_queue_callback(self, list raw_log_buffer):
-        """
-        Internal callback to push batched log messages to the respective 
-        handlers.
+        elif msg_type == BufMsgType.HEARTBEAT:
+            cdef tuple[bytes, u64, u64] heartbeat = heartbeat_from_bytes(msg)
+            name, time, next_checkin_time = heartbeat
+            self._heartbeats[name] = (time, next_checkin_time)
+            self.trace(f"Received heartbeat from worker; name: {name.decode()}")            
 
-        Args:
-            raw_log_buffer (list[LogMessage]): A list of LogMessage objects to be encoded and sent.
+    cpdef void _timed_operations(self):
         """
-        # Usually the buffer will never be empty, but in .shutdown() it may be.
-        # Later, explore doing this in an exception handler to avoid this check.
-        if not raw_log_buffer:
-            return
+        Background thread that periodically flushes the local log buffer and 
+        checks worker heartbeats for being late.
+        """
+        cdef u64    ONE_SECOND_IN_NS = 1000000000
+        cdef u64    current_time_ns = time_ns()
+        cdef double current_time_s = <double>(current_time_ns / ONE_SECOND_IN_NS)
+        cdef double last_flush_time = current_time_s
+
+        while self._is_running:
+            time.sleep(0.1)
             
-        cdef Py_ssize_t log_buffer_size = len(raw_log_buffer)
+            current_time_ns = time_ns()
+            current_time_s = <double>(current_time_ns / ONE_SECOND_IN_NS)
 
-        cdef object log_batch = LogMessageBatch(
-            system=self._system_info,
-            name=self._name,
-            time=time_us(),
-            size=log_buffer_size,
-            data=raw_log_buffer
-        ) 
+            # Check if it's time to flush the log buffer
+            if (current_time_s - last_flush_time) >= self._config.flush_interval_s:
+                if self._log_batch.num_logs_in_batch > 0:
+                    logs = self._log_batch.get_all_logs(reset=True)
+                    for handler in self._log_handlers:
+                        handler.push(self._name, logs)
+                last_flush_time = current_time_s
 
-        for handler in self._log_handlers:
-            handler.push(log_batch)
-
-    cdef void _data_dump_to_queue_callback(self, list raw_data_buffer):
-        """
-        Internal callback to push batched data messages to the respective 
-        handlers.
-
-        Args:
-            raw_data_buffer (list[DataMessage]): A list of data objects (DataMessage or otherwise) 
-                to be encoded and sent.
-        """
-        # Usually the buffer will never be empty, but in .shutdown() it may be.
-        # Later, explore doing this in an exception handler to avoid this check.
-        if not raw_data_buffer:
-            return
+            # Check if any heartbeats are overdue (allow 1s delay before emitting warnings of dead workers)
+            for name, (time, next_checkin_time) in self._heartbeats.items():                
+                if current_time_ns < next_checkin_time + ONE_SECOND_IN_NS: 
+                    self.warning(f"Worker {name.decode()} has not checked in for {next_checkin_time - time} seconds")
+                    self._heartbeats.pop(name)
             
-        cdef Py_ssize_t data_buffer_size = len(raw_data_buffer)
-
-        cdef object data_batch = DataMessageBatch(
-            system=self._system_info,
-            name=self._name,
-            time=time_us(),
-            size=data_buffer_size,
-            data=raw_data_buffer
-        ) 
-
-        for handler in self._data_handlers:
-            handler.push(data_batch)
-
-    cdef inline void _process_log(self, LogLevel level, bytes msg):
-        """
-        Process a single log message by creating a LogMessage struct and buffering it.
-
-        Args:
-            level (LogLevel): The log level, e.g. LogLevel.INFO.
-            msg (bytes): The log message text, encoded as bytes.
-        """   
-        cdef object log_msg_struct = LogMessage(
-            time=time_us(),
-            level=level,
-            msg=msg
-        )
-        self._log_buffer.append(log_msg_struct)
-
-    cdef inline void _process_data(self, object msg):
-        """
-        Process a single data item by buffering it for later batch sending.
-
-        Args:
-            msg (object): The msg to buffer. DataMessage.
-        """
-        cdef object data_msg_struct = DataMessage(
-            time=time_us(),
-            msg=msg
-        )
-        self._data_buffer.append(data_msg_struct)
-
-    cpdef void set_format(self, str format_string):
-        """
-        Modify the format string for log messages in runtime.
-
-        Args:
-            format_string (str): The new format string.
-                Supports {timestamp}, {level}, and {message} placeholders.
-        """
-        self.debug(f"Changing format string from '{self._config.str_format}' to '{format_string}'")
-        self._config.str_format = format_string
-        for handlers in self._log_handlers + self._data_handlers:
-            handlers.add_primary_config(self._config)
-
-    cpdef void set_log_level(self, int level):
+    cpdef void set_log_level(self, LogLevel level):
         """
         Modify the logger's base log level at runtime.
 
         Args:
             level (LogLevel): The new base log level.
         """
-        self.debug(f"Changing base log level from '{log_level_to_str(self._config.base_level)}' to '{log_level_to_str(level)}'")
-        self._config.base_level = level
-        for handlers in self._log_handlers + self._data_handlers:
-            handlers.add_primary_config(self._config)
+        self.debug(f"Changing base log level to '{level.value}'")
+        self._config.set_base_level(level)
 
-    cpdef void data(self, object data, bint unsafe=False):
-        """
-        Enqueue data to be sent to the master logger.
-
-        Args:
-            data (object): A msgspec.Struct representing the data.
-            unsafe (bool, optional): If True, skips type checking on data for performance.
-                Only use when you're certain all data objects are msgspec.Structs. Defaults to False.
-
-        Raises:
-            TypeError: If data is not a msgspec.Struct and type checking is enabled.
-        """
-        if not self._is_running:
-            return
-            
-        if unsafe:
-            self._process_data(data)
-        else:
-            if isinstance(data, msgspec.Struct):
-                self._process_data(data)
-            else:
-                raise TypeError(
-                    f"Invalid data type; expected 'msgspec.Struct' but got '{type(data).__name__}'"
-                )
-
-    cpdef void trace(self, str msg):
+    cpdef void trace(self, str msg_str=None, bytes msg_bytes=b""):
         """
         Send a trace-level log message.
 
         Args:
-            msg (str): The log message text.
+            msg_str (str, optional): The log message text as a string.
+            msg_bytes (bytes, optional): The log message text as bytes.
         """
-        cdef bint valid_level = self._config.base_level == LogLevel.TRACE
+        cdef bint valid_level = self._config.base_level == CLogLevel.TRACE
         if self._is_running and valid_level:
-            self._process_log(LogLevel.TRACE, msg.encode())
+            cdef bytes msg = msg_str.encode() if msg_str is not None else msg_bytes
+            self._log_batch.add_log(CLogLevel.TRACE, msg)
 
-    cpdef void debug(self, str msg):
+    cpdef void debug(self, str msg_str=None, bytes msg_bytes=b""):
         """
         Send a debug-level log message.
 
         Args:
-            msg (str): The log message text.
+            msg_str (str, optional): The log message text as a string.
+            msg_bytes (bytes, optional): The log message text as bytes.
         """
-        cdef bint valid_level = self._config.base_level <= LogLevel.DEBUG
+        cdef bint valid_level = self._config.base_level <= CLogLevel.DEBUG
         if self._is_running and valid_level:
-            self._process_log(LogLevel.DEBUG, msg.encode())
+            cdef bytes msg = msg_str.encode() if msg_str is not None else msg_bytes
+            self._log_batch.add_log(CLogLevel.DEBUG, msg)
 
-    cpdef void info(self, str msg):
+    cpdef void info(self, str msg_str=None, bytes msg_bytes=b""):
         """
         Send an info-level log message.
 
         Args:
-            msg (str): The log message text.
+            msg_str (str, optional): The log message text as a string.
+            msg_bytes (bytes, optional): The log message text as bytes.
         """
-        cdef bint valid_level = self._config.base_level <= LogLevel.INFO
+        cdef bint valid_level = self._config.base_level <= CLogLevel.INFO
         if self._is_running and valid_level:
-            self._process_log(LogLevel.INFO, msg.encode())
+            cdef bytes msg = msg_str.encode() if msg_str is not None else msg_bytes
+            self._log_batch.add_log(CLogLevel.INFO, msg)
 
-    cpdef void warning(self, str msg):
+    cpdef void warning(self, str msg_str=None, bytes msg_bytes=b""):
         """
         Send a warning-level log message.
 
         Args:
-            msg (str): The log message text.
+            msg_str (str, optional): The log message text as a string.
+            msg_bytes (bytes, optional): The log message text as bytes.
         """
-        cdef bint valid_level = self._config.base_level <= LogLevel.WARNING
+        cdef bint valid_level = self._config.base_level <= CLogLevel.WARNING
         if self._is_running and valid_level:
-            self._process_log(LogLevel.WARNING, msg.encode())
+            cdef bytes msg = msg_str.encode() if msg_str is not None else msg_bytes
+            self._log_batch.add_log(CLogLevel.WARNING, msg)
 
-    cpdef void error(self, str msg):
+    cpdef void error(self, str msg_str=None, bytes msg_bytes=b""):
         """
         Send an error-level log message.
 
         Args:
-            msg (str): The log message text.
+            msg_str (str, optional): The log message text as a string.
+            msg_bytes (bytes, optional): The log message text as bytes.
         """
-        cdef bint valid_level = self._config.base_level <= LogLevel.ERROR
+        cdef bint valid_level = self._config.base_level <= CLogLevel.ERROR
         if self._is_running and valid_level:
-            self._process_log(LogLevel.ERROR, msg.encode())
+            cdef bytes msg = msg_str.encode() if msg_str is not None else msg_bytes
+            self._log_batch.add_log(CLogLevel.ERROR, msg)
 
-    cpdef void critical(self, str msg):
+    cpdef void critical(self, str msg_str=None, bytes msg_bytes=b""):
         """
         Send a critical-level log message.
 
         Args:
-            msg (str): The log message text.
+            msg_str (str, optional): The log message text as a string.
+            msg_bytes (bytes, optional): The log message text as bytes.
         """
-        cdef bint valid_level = self._config.base_level <= LogLevel.CRITICAL
+        cdef bint valid_level = self._config.base_level <= CLogLevel.CRITICAL
         if self._is_running and valid_level:
-            self._process_log(LogLevel.CRITICAL, msg.encode())
+            cdef bytes msg = msg_str.encode() if msg_str is not None else msg_bytes
+            self._log_batch.add_log(CLogLevel.CRITICAL, msg)
 
     cpdef void shutdown(self):
         """
-        Flush any remaining messages and shuts down the worker logger.
+        Flush any remaining messages and shuts down the master logger.
 
-        This method drains both the log buffer and the data buffer, sending any 
-        remaining items to the master logger, and then stops the connection.
+        This method stops accepting new messages from worker loggers and 
+        then stops the connection.
 
         Warning:
-            After calling `shutdown()`, this logger cannot not be used again.
+            After calling `shutdown()`, this logger cannot be used again.
         """
         if not self._is_running:
             return
             
-        self.warning("Shutting down master logger; flushing buffers and stopping connection")
-
-        # No longer accept new messages from worker loggers from this point on.
+        # No longer accept new messages from worker loggers from this point on
         self._is_running = False
 
-        cdef:
-            list raw_log_buffer = self._log_buffer.acquire_all()
-            list raw_data_buffer = self._data_buffer.acquire_all()
-        
-        if raw_log_buffer:
-            self._logs_dump_to_queue_callback(raw_log_buffer)
+        if self._log_batch.num_logs_in_batch > 0:
+            logs = self._log_batch.get_all_logs(reset=True)
+            for handler in self._log_handlers:
+                handler.push(self._name, logs)
 
-        if raw_data_buffer:
-            self._data_dump_to_queue_callback(raw_data_buffer)
+        self._timed_operations_thread.join()
 
-        self._master_conn.stop()
+        self._conn.stop()
     
     cpdef bint is_running(self):
         """
@@ -358,20 +246,8 @@ cdef class MasterLogger:
         """
         return self._is_running
 
-    cpdef str get_name(self):
-        """
-        Get the name of the master logger.
-        """
-        return self._name.decode()
-
     cpdef LoggerConfig get_config(self):
         """
         Get the configuration of the master logger.
         """
         return self._config
-
-    cpdef dict get_system_info(self):
-        """
-        Get the system information of the master logger.
-        """
-        return self._system_info
