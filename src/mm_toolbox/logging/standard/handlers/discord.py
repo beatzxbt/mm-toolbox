@@ -1,11 +1,12 @@
 import asyncio
-from typing import List, Coroutine
 from mm_toolbox.logging.standard.handlers.base import BaseLogHandler
+
 
 class DiscordLogHandler(BaseLogHandler):
     """
     A log handler that sends messages to a Discord webhook.
     """
+
     def __init__(self, webhook: str):
         """
         Initializes the DiscordLogHandler.
@@ -17,10 +18,12 @@ class DiscordLogHandler(BaseLogHandler):
             ValueError: If webhook is invalid.
         """
         super().__init__()
-        
+
         if not webhook.startswith("https://discord.com/api/webhooks/"):
-            raise ValueError(f"Invalid webhook format; expected 'https://discord.com/api/webhooks/*' but got {webhook}")
-        
+            raise ValueError(
+                f"Invalid webhook format; expected 'https://discord.com/api/webhooks/*' but got {webhook}"
+            )
+
         self.url = webhook
         self.headers = {"Content-Type": "application/json"}
 

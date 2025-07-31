@@ -7,17 +7,22 @@ from typing import Any
 from numpy import ndarray
 
 class Orderbook:
-    def __init__(self, tick_size: float, lot_size: float, size: int = ...) -> None:
-        ...
-    
+    def __init__(self, tick_size: float, lot_size: float, size: int = ...) -> None: ...
     def warmup(self, new_asks: ndarray, new_bids: ndarray, new_seq_id: int) -> Any:
         """
         Refresh the order book with new bid and ask levels, as well as setting
         a new seq id for future updates.
         """
         ...
-    
-    def update_bbo(self, bid_px: float, bid_sz: float, ask_px: float, ask_sz: float, new_seq_id: int) -> Any:
+
+    def update_bbo(
+        self,
+        bid_px: float,
+        bid_sz: float,
+        ask_px: float,
+        ask_sz: float,
+        new_seq_id: int,
+    ) -> Any:
         """
         Update the best bid and best ask (BBO) based on a new quote.
 
@@ -26,85 +31,87 @@ class Orderbook:
             bid_sz (float): The new best bid size.
             ask_px (float): The new best ask price.
             ask_sz (float): The new best ask size.
-            new_seq_id (int): Sequence ID for this quote update. If it's 
+            new_seq_id (int): Sequence ID for this quote update. If it's
                 <= the current seq_id, the update is considered stale.
 
         Notes:
-            - We first check if the new bid/ask matches the existing best 
-            bid/ask. If both match, we simply update their sizes. 
-            If both matched, we return early, since no other changes 
+            - We first check if the new bid/ask matches the existing best
+            bid/ask. If both match, we simply update their sizes.
+            If both matched, we return early, since no other changes
             would apply.
-            - Otherwise, if the new bid is higher, we insert a 'higher bid'. 
+            - Otherwise, if the new bid is higher, we insert a 'higher bid'.
             If the new ask is lower, we insert a 'lower ask'.
         """
         ...
-    
+
     def update_asks(self, updated_asks: ndarray, new_seq_id: int) -> Any:
         """
         Update the ask side of the orderbook using a new array of ask levels.
 
         Args:
-            updated_asks (cnp.ndarray): A 2D NumPy array of asks. Typically sorted 
-                ascending by price. Must have at least one row and at least two columns 
+            updated_asks (cnp.ndarray): A 2D NumPy array of asks. Typically sorted
+                ascending by price. Must have at least one row and at least two columns
                 (price, size).
-            new_seq_id (int): The sequence ID for this batch of updates. If it's 
+            new_seq_id (int): The sequence ID for this batch of updates. If it's
                 older than the current seq_id, the update is considered stale.
         """
         ...
-    
+
     def update_bids(self, updated_bids: ndarray, new_seq_id: int) -> Any:
         """
         Update the bid side of the orderbook using a new array of bid levels.
 
         Args:
-            updated_bids (cnp.ndarray): A 2D NumPy array of bids. Typically sorted 
-                ascending by price. Must have at least one row and at least two columns 
+            updated_bids (cnp.ndarray): A 2D NumPy array of bids. Typically sorted
+                ascending by price. Must have at least one row and at least two columns
                 (price, size).
-            new_seq_id (int): The sequence ID for this batch of updates. If it's 
+            new_seq_id (int): The sequence ID for this batch of updates. If it's
                 older than the current seq_id, the update is considered stale.
         """
         ...
-    
-    def update_full(self, updated_asks: ndarray, updated_bids: ndarray, new_seq_id: int) -> Any:
+
+    def update_full(
+        self, updated_asks: ndarray, updated_bids: ndarray, new_seq_id: int
+    ) -> Any:
         """
         Update both the asks and the bids of the orderbook using new arrays.
 
         Args:
-            updated_asks (cnp.ndarray): A 2D array of ask levels, 
+            updated_asks (cnp.ndarray): A 2D array of ask levels,
                 each row typically [price, size] (plus possibly other columns).
             updated_bids (cnp.ndarray): A 2D array of bid levels,
                 each row typically [price, size] (plus possibly other columns).
-            new_seq_id (int): The sequence ID for this update. If it's older 
+            new_seq_id (int): The sequence ID for this update. If it's older
                 than the current seq_id, this update is ignored.
 
         Raises:
             IndexError: If the provided arrays are not 2D or have no rows.
         """
         ...
-    
+
     def get_mid(self) -> float:
         """
         Return the midpoint between the best bid and best ask prices.
 
         Returns:
-            float: 
+            float:
                 The midpoint, calculated as (best_bid + best_ask) / 2.0.
 
         Raises:
             RuntimeError: If the orderbook is not warmed (caught via `ensure_warm()`).
         """
         ...
-    
+
     def get_wmid(self) -> float:
         """
         Return a 'weighted mid' price considering size at the top bid and ask.
 
-        This method computes an imbalance ratio based on the top bid size and top ask size, 
+        This method computes an imbalance ratio based on the top bid size and top ask size,
         and uses that ratio to do a linear interpolation between best_bid and best_ask prices.
 
         Returns:
             float:
-                The weighted mid, computed as 
+                The weighted mid, computed as
                 (best_bid_price * imbalance + best_ask_price * (1 - imbalance)),
                 where imbalance = top_bid_size / (top_bid_size + top_ask_size).
 
@@ -112,7 +119,7 @@ class Orderbook:
             RuntimeError: If the orderbook is not warmed (caught via `ensure_warm()`).
         """
         ...
-    
+
     def get_bbo_spread(self) -> float:
         """
         Calculate the spread between the best ask and the best bid.
@@ -122,42 +129,42 @@ class Orderbook:
                 and the best bid price (bids[0,0]).
         """
         ...
-    
+
     def get_vamp(self, size: float, is_base_currency: bool = ...) -> float:
         """
-        Calculate the volume-weighted average market price (VAMP) up to a specified 'size' 
+        Calculate the volume-weighted average market price (VAMP) up to a specified 'size'
         from both bid and ask sides.
 
         Args:
-            size (float): 
+            size (float):
                 The target size (or 'depth') for which we compute the volume-weighted average price.
-            is_base_currency (bool, optional): 
-                If True, the 'size' is in base currency units; we convert it to quote 
+            is_base_currency (bool, optional):
+                If True, the 'size' is in base currency units; we convert it to quote
                 currency by multiplying with the mid price. Defaults to False.
 
         Returns:
             float:
-                The volume-weighted average of top bids and asks, up to the 'size' 
-                on each side. If 'size' is in base currency, it's converted to quote 
+                The volume-weighted average of top bids and asks, up to the 'size'
+                on each side. If 'size' is in base currency, it's converted to quote
                 currency first.
 
         Raises:
-            RuntimeError: 
+            RuntimeError:
                 - If the orderbook is not warmed (caught via `ensure_warm()`).
                 - If total cumulative size from both sides ends up zero (cannot compute VAMP).
         """
         ...
-    
+
     def get_vamp_bps(self, bps: float) -> float:
         """
-        Calculate the VAMP (Volume-Weighted Average Market Price) in basis points (bps) 
+        Calculate the VAMP (Volume-Weighted Average Market Price) in basis points (bps)
         based on a specified percentage of the spread.
 
         Args:
-            bps (float): 
+            bps (float):
                 The percentage of the spread (in basis points) to consider for VAMP calculation.
                 E.g., bps=50 means we consider 0.5% of the spread.
-        
+
         Returns:
             float:
                 The VAMP in basis points (bps).
@@ -166,25 +173,27 @@ class Orderbook:
             RuntimeError: If the orderbook is not warmed (caught via `ensure_warm()`).
         """
         ...
-    
-    def get_slippage(self, sz: float, is_bid: bool, is_base_currency: bool = ...) -> float:
+
+    def get_slippage(
+        self, sz: float, is_bid: bool, is_base_currency: bool = ...
+    ) -> float:
         """
-        Calculate the average slippage for a hypothetical order of 'sz' 
+        Calculate the average slippage for a hypothetical order of 'sz'
         on either the bid or ask side, relative to the mid price.
 
         Args:
-            sz (float): 
+            sz (float):
                 The size of the order for which slippage is being calculated.
-            is_bid (bool): 
-                If True, we treat this as a sell order (filling the bid side). 
+            is_bid (bool):
+                If True, we treat this as a sell order (filling the bid side).
                 If False, a buy order (filling the ask side).
-            is_base_currency (bool, optional): 
-                If True, 'sz' is in base currency, converted to quote currency 
+            is_base_currency (bool, optional):
+                If True, 'sz' is in base currency, converted to quote currency
                 by multiplying with `get_mid()`. Defaults to False.
 
         Returns:
             float:
-                The average slippage, defined as the volume-weighted difference 
+                The average slippage, defined as the volume-weighted difference
                 from the mid price. It is capped so it never exceeds the mid price.
 
         Raises:
@@ -193,15 +202,15 @@ class Orderbook:
                 - If total cumulative size is zero after processing (meaning no liquidity).
         """
         ...
-    
+
     def get_imbalance(self, depth_pct: float) -> float:
         """
-        Compute the volume imbalance of the orderbook within a symmetric 
+        Compute the volume imbalance of the orderbook within a symmetric
         price band around the mid price, proportional to `depth_pct`.
 
         This function:
         1) Calculates mid = (best_bid + best_ask) / 2
-        2) Defines a band around mid by a fraction of the spread: 
+        2) Defines a band around mid by a fraction of the spread:
             spread = best_ask - best_bid
             min_px = mid - (spread * depth_pct / 2)
             max_px = mid + (spread * depth_pct / 2)
@@ -210,14 +219,14 @@ class Orderbook:
         4) Defines imbalance = bid_vol / (bid_vol + ask_vol).
 
         Args:
-            depth_pct (float): 
-                A fraction (0 < depth_pct <= 1, typically) indicating the fraction 
-                of the half-spread around mid to consider. E.g., depth_pct=0.2 
+            depth_pct (float):
+                A fraction (0 < depth_pct <= 1, typically) indicating the fraction
+                of the half-spread around mid to consider. E.g., depth_pct=0.2
                 means ±10% of the spread around the mid.
 
         Returns:
             float:
-                A ratio between 0 and 1 representing the fraction of volume 
+                A ratio between 0 and 1 representing the fraction of volume
                 on the bid side vs. total volume in that band.
 
         Raises:
@@ -225,53 +234,53 @@ class Orderbook:
             ValueError: If depth_pct <= 0.
         """
         ...
-    
+
     def get_bids(self) -> ndarray:
         """
         Return the entire bids array.
 
         Returns:
-            np.ndarray: The NumPy array representing the bid side 
+            np.ndarray: The NumPy array representing the bid side
                 of the orderbook.
         """
         ...
-    
+
     def get_bids_unsafe(self) -> ndarray:
         """
-        Return the entire bids array. This returns a view into the 
+        Return the entire bids array. This returns a view into the
         internal array, so changes to it will affect the orderbook.
 
         Ideal for read-only access to the bids array.
 
         Returns:
-            np.ndarray: The NumPy array representing the bid side 
+            np.ndarray: The NumPy array representing the bid side
                 of the orderbook.
         """
         ...
-    
+
     def get_asks(self) -> ndarray:
         """
         Return the entire asks array.
 
         Returns:
-            np.ndarray: The NumPy array representing the ask side 
+            np.ndarray: The NumPy array representing the ask side
                 of the orderbook.
         """
         ...
-    
+
     def get_asks_unsafe(self) -> ndarray:
         """
-        Return the entire asks array. This returns a view into the 
+        Return the entire asks array. This returns a view into the
         internal array, so changes to it will affect the orderbook.
 
         Ideal for read-only access to the asks array.
 
         Returns:
-            np.ndarray: The NumPy array representing the ask side 
+            np.ndarray: The NumPy array representing the ask side
                 of the orderbook.
         """
         ...
-    
+
     def get_seq_id(self) -> int:
         """
         Get the current sequence ID of the orderbook.
@@ -280,7 +289,7 @@ class Orderbook:
             int: The latest sequence ID used for updates to this orderbook.
         """
         ...
-    
+
     def get_best_bid(self) -> ndarray:
         """
         Return the top (best) bid price/size pair.
@@ -289,7 +298,7 @@ class Orderbook:
             np.ndarray: A 1D NumPy array [price, size] at the best bid level.
         """
         ...
-    
+
     def get_best_ask(self) -> ndarray:
         """
         Return the top (best) ask price/size pair.
@@ -298,7 +307,7 @@ class Orderbook:
             np.ndarray: A 1D NumPy array [price, size] at the best ask level.
         """
         ...
-    
+
     def get_bbo(self) -> ndarray:
         """
         Return the current best bid and best ask in a single array.
@@ -309,7 +318,7 @@ class Orderbook:
                 [1] => best ask [price, size]
         """
         ...
-    
+
     def is_warm(self) -> bool:
         """
         Check if the orderbook is considered 'warm' (i.e., has been initialized).
@@ -318,7 +327,7 @@ class Orderbook:
             bool: True if warmed up, False otherwise.
         """
         ...
-    
+
     def ensure_warm(self) -> Any:
         """
         Raise an error if the orderbook is not 'warm'.
@@ -327,6 +336,3 @@ class Orderbook:
             RuntimeError: If the orderbook is not initialized via '.warmup()'.
         """
         ...
-    
-
-

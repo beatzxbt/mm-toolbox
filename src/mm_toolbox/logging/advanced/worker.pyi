@@ -18,7 +18,7 @@ class WorkerLogger:
         Background thread that periodically sends heartbeat messages to the master logger.
         """
         ...
-    
+
     def set_log_level(self, level: LogLevel) -> Any:
         """
         Modify the logger's base log level at runtime.
@@ -27,7 +27,7 @@ class WorkerLogger:
             level (LogLevel): The new base log level.
         """
         ...
-    
+
     def trace(self, msg_str: str = ..., msg_bytes: bytes = ...) -> Any:
         """
         Send a trace-level log message.
@@ -37,7 +37,7 @@ class WorkerLogger:
             msg_bytes (bytes, optional): The log message text as bytes.
         """
         ...
-    
+
     def debug(self, msg_str: str = ..., msg_bytes: bytes = ...) -> Any:
         """
         Send a debug-level log message.
@@ -47,7 +47,7 @@ class WorkerLogger:
             msg_bytes (bytes, optional): The log message text as bytes.
         """
         ...
-    
+
     def info(self, msg_str: str = ..., msg_bytes: bytes = ...) -> Any:
         """
         Send an info-level log message.
@@ -57,7 +57,7 @@ class WorkerLogger:
             msg_bytes (bytes, optional): The log message text as bytes.
         """
         ...
-    
+
     def warning(self, msg_str: str = ..., msg_bytes: bytes = ...) -> Any:
         """
         Send a warning-level log message.
@@ -67,7 +67,7 @@ class WorkerLogger:
             msg_bytes (bytes, optional): The log message text as bytes.
         """
         ...
-    
+
     def error(self, msg_str: str = ..., msg_bytes: bytes = ...) -> Any:
         """
         Send an error-level log message.
@@ -77,7 +77,7 @@ class WorkerLogger:
             msg_bytes (bytes, optional): The log message text as bytes.
         """
         ...
-    
+
     def critical(self, msg_str: str = ..., msg_bytes: bytes = ...) -> Any:
         """
         Send a critical-level log message.
@@ -87,36 +87,33 @@ class WorkerLogger:
             msg_bytes (bytes, optional): The log message text as bytes.
         """
         ...
-    
+
     def shutdown(self) -> Any:
         """
         Flush any remaining messages and shuts down the worker logger.
 
-        This method drains the log buffer, sending any remaining items to the master logger, 
+        This method drains the log buffer, sending any remaining items to the master logger,
         and then stops the connection.
 
         Warning:
             After calling `shutdown()`, this logger should not be used again.
         """
         ...
-    
+
     def is_running(self) -> bool:
         """
         Check if the logger is running.
         """
         ...
-    
+
     def get_name(self) -> str:
         """
         Get the name of the logger.
         """
         ...
-    
+
     def get_config(self) -> LoggerConfig:
         """
         Get the configuration of the logger.
         """
         ...
-    
-
-

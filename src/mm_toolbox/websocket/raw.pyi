@@ -23,20 +23,22 @@ class WsConnection(WSListener):
             conn_id (int): Unique connection identifier (e.g., an incrementing ID).
         """
         ...
-    
+
     def _timed_operations(self) -> Any:
         """
         Performs timed operations for the connection.
         """
         ...
-    
-    async def _attempt_reconnect(self): # -> None:
+
+    async def _attempt_reconnect(self):  # -> None:
         """
         Attempts to reconnect to the websocket server with exponential backoff.
         """
         ...
-    
-    async def open(self, url: str, on_connect: list[bytes], process_ws_frame: object): # -> None:
+
+    async def open(
+        self, url: str, on_connect: list[bytes], process_ws_frame: object
+    ):  # -> None:
         """
         Opens a Websocket connection to the specified URL.
 
@@ -49,22 +51,19 @@ class WsConnection(WSListener):
                 `process_ws_frame(conn_id: int, seq_id: int, recv_time_ns: float, data: bytes)`
         """
         ...
-    
-    async def __aenter__(self): # -> Self@WsConnection:
+
+    async def __aenter__(self):  # -> Self@WsConnection:
         """
         Async context manager entry point.
 
         Opens the Websocket connection if it is not already open.
         """
         ...
-    
-    async def __aexit__(self, exc_type, exc_val, exc_tb): # -> None:
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):  # -> None:
         """
         Async context manager exit point.
 
         Closes the Websocket connection if it is open.
         """
         ...
-    
-
-

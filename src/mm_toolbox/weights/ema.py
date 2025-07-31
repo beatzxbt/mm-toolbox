@@ -1,7 +1,10 @@
 import numpy as np
 from typing import Optional
 
-def ema_weights(window: int, alpha: Optional[float] = None, normalized: bool=True) -> np.ndarray:
+
+def ema_weights(
+    window: int, alpha: Optional[float] = None, normalized: bool = True
+) -> np.ndarray:
     """
     Calculate EMA (Exponential Moving Average)-like weights for a given window size.
 

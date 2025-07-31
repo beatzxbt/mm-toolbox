@@ -8,8 +8,8 @@ from .base import MovingAverage
 
 class TimeExponentialMovingAverage(MovingAverage):
     """
-    The TEMA uses variable weights based on the time of entry, 
-    with a 
+    The TEMA uses variable weights based on the time of entry,
+    with a
 
     Implementation
     --------------
@@ -19,17 +19,9 @@ class TimeExponentialMovingAverage(MovingAverage):
     - We store `self.time = t`.
     - If not ready, we simply set `self.value = input; self.time = t; ready = True`.
     """
-    def __init__(self, window: int, fast: bool = ..., half_life_s: float = ...) -> None:
-        ...
-    
-    def initialize(self, values: ndarray) -> float:
-        ...
-    
-    def next(self, new_val: float) -> float:
-        ...
-    
-    def update(self, new_val: float) -> float:
-        ...
-    
-
-
+    def __init__(
+        self, window: int, fast: bool = ..., half_life_s: float = ...
+    ) -> None: ...
+    def initialize(self, values: ndarray) -> float: ...
+    def next(self, new_val: float) -> float: ...
+    def update(self, new_val: float) -> float: ...

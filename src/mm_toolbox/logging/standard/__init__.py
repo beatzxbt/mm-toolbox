@@ -1,5 +1,5 @@
 from .logger import (
-    Logger as Logger,   
+    Logger as Logger,
 )
 
 from .config import (

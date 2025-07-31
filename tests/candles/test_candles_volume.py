@@ -7,17 +7,12 @@ class TestVolumeCandles(unittest.TestCase):
     def setUp(self):
         self.dummy_ms = time_ms()
         self.candles = VolumeCandles(
-            volume_per_bucket=10.0, 
+            volume_per_bucket=10.0,
             num_candles=5,
         )
 
     def test_incomplete_candle(self):
-        self.candles.process_trade(
-            time=self.dummy_ms,
-            is_buy=True,
-            px=114.0,
-            sz=8.0
-        )
+        self.candles.process_trade(time=self.dummy_ms, is_buy=True, px=114.0, sz=8.0)
 
         current_candle = self.candles[0]
         self.assertEqual(current_candle[0], 114.0)
@@ -33,10 +28,7 @@ class TestVolumeCandles(unittest.TestCase):
     def test_complete_candle(self):
         for i in range(4):
             self.candles.process_trade(
-                time=self.dummy_ms + (i * 1000.0),
-                is_buy=True,
-                px=100.0 + i,
-                sz=6.0
+                time=self.dummy_ms + (i * 1000.0), is_buy=True, px=100.0 + i, sz=6.0
             )
 
         first_candle = self.candles[0]
@@ -87,14 +79,12 @@ class TestVolumeCandles(unittest.TestCase):
     def test_new_candle_creation(self):
         self.candles.update(timestamp=self.dummy_ms, side=1.0, price=114.0, size=8.0)
 
-
         self.candles.update(
             timestamp=self.dummy_ms + 50.0,
             side=0.0,
             price=115.0,
             size=1.0,  # Not yet enough
         )
-
 
         self.candles.update(
             timestamp=self.dummy_ms + 60.0, side=0.0, price=117.0, size=8.0

@@ -20,7 +20,7 @@ class TestOrderbook(unittest.TestCase):
         self.orderbook.warmup(self.asks, self.bids, self.seq_id)
 
     def test_class_initialization(self):
-        # Difficult to test initialization in isolation as attributes cannot 
+        # Difficult to test initialization in isolation as attributes cannot
         # be accessed directly like a Python class. It calls 'get_*' functions
         # to check and verify they are correct, assuming the functions work.
         # They are tested later in the suite anyways, so this should be fine.
@@ -91,8 +91,12 @@ class TestOrderbook(unittest.TestCase):
         self.assertEqual(self.orderbook.get_asks()[0, 0], 59997.5)
         self.assertEqual(self.orderbook.get_asks()[0, 1], 8.0)
 
-        np.testing.assert_array_equal(self.orderbook.get_bids()[-1], np.array([59993.0, 0.0]))
-        np.testing.assert_array_equal(self.orderbook.get_bids()[-2], np.array([59994.0, 0.0]))
+        np.testing.assert_array_equal(
+            self.orderbook.get_bids()[-1], np.array([59993.0, 0.0])
+        )
+        np.testing.assert_array_equal(
+            self.orderbook.get_bids()[-2], np.array([59994.0, 0.0])
+        )
 
     def test_update_bbo_new_bid(self):
         best_bid = self.bids[0].copy() + 1.5
@@ -113,13 +117,17 @@ class TestOrderbook(unittest.TestCase):
         self.assertEqual(self.orderbook.get_asks()[0, 0], 60001.0)
         self.assertEqual(self.orderbook.get_asks()[0, 1], 2.0)
 
-        np.testing.assert_array_equal(self.orderbook.get_asks()[-1], np.array([60004.0, 5.0]))
+        np.testing.assert_array_equal(
+            self.orderbook.get_asks()[-1], np.array([60004.0, 5.0])
+        )
 
     def test_update_bids_existing_bba(self):
         best_bid = self.bids[0].copy()
         best_bid[1] = 10.0  # Change size only
 
-        self.orderbook.update_bids(np.array([best_bid]), self.orderbook.get_seq_id() + 1)
+        self.orderbook.update_bids(
+            np.array([best_bid]), self.orderbook.get_seq_id() + 1
+        )
 
         self.assertEqual(self.orderbook.get_bids()[0, 0], 59999.0)
         self.assertEqual(self.orderbook.get_bids()[0, 1], 10.0)
@@ -130,7 +138,9 @@ class TestOrderbook(unittest.TestCase):
         best_ask = self.asks[0].copy()
         best_ask[1] = 10.0  # Change size only
 
-        self.orderbook.update_asks(np.array([best_ask]), self.orderbook.get_seq_id() + 1)
+        self.orderbook.update_asks(
+            np.array([best_ask]), self.orderbook.get_seq_id() + 1
+        )
 
         self.assertEqual(self.orderbook.get_bids()[0, 0], 59999.0)
         self.assertEqual(self.orderbook.get_bids()[0, 1], 1.0)
@@ -185,7 +195,9 @@ class TestOrderbook(unittest.TestCase):
 
         self.assertEqual(self.orderbook.get_bids()[1, 0], 59998.5)
         self.assertEqual(self.orderbook.get_bids()[1, 1], 0.25)
-        self.assertEqual(self.orderbook.get_bids()[2, 0], 59998.0)  # Unchanged from before
+        self.assertEqual(
+            self.orderbook.get_bids()[2, 0], 59998.0
+        )  # Unchanged from before
         self.assertEqual(self.orderbook.get_bids()[2, 1], 2.0)  # Unchanged from before
         self.assertEqual(
             self.orderbook.get_bids()[4, 0], 59996.0
@@ -209,7 +221,9 @@ class TestOrderbook(unittest.TestCase):
 
         self.assertEqual(self.orderbook.get_asks()[1, 0], 60000.5)
         self.assertEqual(self.orderbook.get_asks()[1, 1], 0.25)
-        self.assertEqual(self.orderbook.get_asks()[2, 0], 60001.0)  # Unchanged from before
+        self.assertEqual(
+            self.orderbook.get_asks()[2, 0], 60001.0
+        )  # Unchanged from before
         self.assertEqual(self.orderbook.get_asks()[2, 1], 2.0)  # Unchanged from before
         self.assertEqual(
             self.orderbook.get_asks()[4, 0], 60003.0
@@ -224,38 +238,58 @@ class TestOrderbook(unittest.TestCase):
             [60000.5, 1.75]
         )  # This is higher than the current best ask
 
-        self.orderbook.update_bids(np.array([jump_level]), self.orderbook.get_seq_id() + 1)
+        self.orderbook.update_bids(
+            np.array([jump_level]), self.orderbook.get_seq_id() + 1
+        )
 
         self.assertEqual(self.orderbook.get_bids()[0, 0], 60000.5)
         self.assertEqual(self.orderbook.get_bids()[0, 1], 1.75)
-        self.assertEqual(self.orderbook.get_bids()[1, 0], 59999.0)  # Unchanged from before
+        self.assertEqual(
+            self.orderbook.get_bids()[1, 0], 59999.0
+        )  # Unchanged from before
         self.assertEqual(self.orderbook.get_bids()[1, 1], 1.0)  # Unchanged from before
 
         self.assertEqual(
             self.orderbook.get_asks()[0, 0], 60001.0
         )  # 2nd level becomes the 1st
-        self.assertEqual(self.orderbook.get_asks()[0, 1], 2.0)  # 2nd level becomes the 1st
-        self.assertEqual(self.orderbook.get_asks()[4, 0], 0.0)  # Last level is fresh (new)
-        self.assertEqual(self.orderbook.get_asks()[4, 1], 0.0)  # Last level is fresh (new)
+        self.assertEqual(
+            self.orderbook.get_asks()[0, 1], 2.0
+        )  # 2nd level becomes the 1st
+        self.assertEqual(
+            self.orderbook.get_asks()[4, 0], 0.0
+        )  # Last level is fresh (new)
+        self.assertEqual(
+            self.orderbook.get_asks()[4, 1], 0.0
+        )  # Last level is fresh (new)
 
     def test_update_asks_add_new_jump(self):
         jump_level = np.array(
             [59998.5, 1.75]
         )  # This is lower than the current best bid
 
-        self.orderbook.update_asks(np.array([jump_level]), self.orderbook.get_seq_id() + 1)
+        self.orderbook.update_asks(
+            np.array([jump_level]), self.orderbook.get_seq_id() + 1
+        )
 
         self.assertEqual(self.orderbook.get_asks()[0, 0], 59998.5)
         self.assertEqual(self.orderbook.get_asks()[0, 1], 1.75)
-        self.assertEqual(self.orderbook.get_asks()[1, 0], 60000.0)  # Unchanged from before
+        self.assertEqual(
+            self.orderbook.get_asks()[1, 0], 60000.0
+        )  # Unchanged from before
         self.assertEqual(self.orderbook.get_asks()[1, 1], 1.0)  # Unchanged from before
 
         self.assertEqual(
             self.orderbook.get_bids()[0, 0], 59998.0
         )  # 2nd level becomes the 1st
-        self.assertEqual(self.orderbook.get_bids()[0, 1], 2.0)  # 2nd level becomes the 1st
-        self.assertEqual(self.orderbook.get_bids()[4, 0], 0.0)  # Last level is fresh (new)
-        self.assertEqual(self.orderbook.get_bids()[4, 1], 0.0)  # Last level is fresh (new)
+        self.assertEqual(
+            self.orderbook.get_bids()[0, 1], 2.0
+        )  # 2nd level becomes the 1st
+        self.assertEqual(
+            self.orderbook.get_bids()[4, 0], 0.0
+        )  # Last level is fresh (new)
+        self.assertEqual(
+            self.orderbook.get_bids()[4, 1], 0.0
+        )  # Last level is fresh (new)
 
     def test_mid_price(self):
         self.assertAlmostEqual(
@@ -297,7 +331,8 @@ class TestOrderbook(unittest.TestCase):
 
     def test_get_slippage(self):
         self.assertAlmostEqual(
-            self.orderbook.get_slippage(self.orderbook.get_bids(), 4.0), 1.8333333333333333
+            self.orderbook.get_slippage(self.orderbook.get_bids(), 4.0),
+            1.8333333333333333,
         )
 
     def test_length(self):

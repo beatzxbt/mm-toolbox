@@ -1,5 +1,6 @@
 from enum import StrEnum
 
+
 class LogLevel(StrEnum):
     TRACE = "TRACE"
     DEBUG = "DEBUG"
@@ -8,16 +9,17 @@ class LogLevel(StrEnum):
     ERROR = "ERROR"
     CRITICAL = "CRITICAL"
 
+
 class LoggerConfig:
     def __init__(
-        self, 
-        base_level: LogLevel=LogLevel.INFO,
-        do_stout: bool=True,
-        str_format: str="%(asctime)s [%(levelname)s] %(name)s - %(message)s",  
-        flush_interval_s: float=1.0,
-    ):  
+        self,
+        base_level: LogLevel = LogLevel.INFO,
+        do_stout: bool = True,
+        str_format: str = "%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+        flush_interval_s: float = 1.0,
+    ):
         """
-        Initializes the LoggerConfig.   
+        Initializes the LoggerConfig.
 
         Args:
             base_level (LogLevel): The minimum log level that will be logged.

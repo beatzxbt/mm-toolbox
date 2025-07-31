@@ -4,8 +4,8 @@ from .wma import WeightedMovingAverage as WeightedMovingAverage
 from .tema import TimeExponentialMovingAverage as TimeExponentialMovingAverage
 
 __all__ = [
-    "SimpleMovingAverage", 
-    "ExponentialMovingAverage", 
-    "WeightedMovingAverage", 
-    "TimeExponentialMovingAverage"
+    "SimpleMovingAverage",
+    "ExponentialMovingAverage",
+    "WeightedMovingAverage",
+    "TimeExponentialMovingAverage",
 ]

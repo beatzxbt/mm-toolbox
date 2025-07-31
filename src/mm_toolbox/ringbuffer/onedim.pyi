@@ -16,7 +16,7 @@ class RingBufferOneDim:
             capacity (int): The maximum number of elements the buffer can hold.
         """
         ...
-    
+
     def raw(self) -> ndarray:
         """
         Return a copy of the internal buffer array.
@@ -28,7 +28,7 @@ class RingBufferOneDim:
             The returned array includes all allocated space, not just the filled elements.
         """
         ...
-    
+
     def unsafe_raw(self) -> ndarray:
         """
         Return a view of the internal buffer array without copying.
@@ -41,7 +41,7 @@ class RingBufferOneDim:
             Use with caution, as no copy is made.
         """
         ...
-    
+
     def unwrapped(self) -> ndarray:
         """
         Return a copy of the buffer's contents in the correct (unwrapped) order.
@@ -54,7 +54,7 @@ class RingBufferOneDim:
             use `iter(self)` instead of `self.unwrapped()` for better performance.
         """
         ...
-    
+
     def unsafe_write(self, value: float) -> Any:
         """
         Directly write a value to the buffer at the current right index without updating indices.
@@ -67,7 +67,7 @@ class RingBufferOneDim:
             It is intended for use in conjunction with `unsafe_push`. Use with caution to avoid data corruption.
         """
         ...
-    
+
     def unsafe_push(self) -> Any:
         """
         Advance the buffer indices after writing a value, without checking for buffer fullness.
@@ -82,7 +82,7 @@ class RingBufferOneDim:
             optimization when you are certain that the buffer management is correct.
         """
         ...
-    
+
     def append(self, value: float) -> Any:
         """
         Add a new element to the end of the buffer.
@@ -91,7 +91,7 @@ class RingBufferOneDim:
             value (float): The float value to be added to the buffer.
         """
         ...
-    
+
     def popright(self) -> float:
         """
         Remove and return the last element from the buffer.
@@ -103,7 +103,7 @@ class RingBufferOneDim:
             IndexError: If the buffer is empty.
         """
         ...
-    
+
     def popleft(self) -> float:
         """
         Remove and return the first element from the buffer.
@@ -115,7 +115,7 @@ class RingBufferOneDim:
             IndexError: If the buffer is empty.
         """
         ...
-    
+
     def reset(self) -> ndarray:
         """
         Clear the buffer and reset it to its initial state.
@@ -127,7 +127,7 @@ class RingBufferOneDim:
             This method returns the data that was in the buffer before the reset.
         """
         ...
-    
+
     def fast_reset(self) -> Any:
         """
         Quickly reset the buffer to its initial state without returning data.
@@ -137,7 +137,7 @@ class RingBufferOneDim:
             It does not return the previous data.
         """
         ...
-    
+
     def is_full(self) -> bool:
         """
         Check if the buffer is full.
@@ -146,7 +146,7 @@ class RingBufferOneDim:
             bool: True if the buffer is full, False otherwise.
         """
         ...
-    
+
     def is_empty(self) -> bool:
         """
         Check if the buffer is empty.
@@ -155,8 +155,8 @@ class RingBufferOneDim:
             bool: True if the buffer is empty, False otherwise.
         """
         ...
-    
-    def __contains__(self, value: float): # -> bool:
+
+    def __contains__(self, value: float):  # -> bool:
         """
         Check if a value is present in the buffer.
 
@@ -167,8 +167,8 @@ class RingBufferOneDim:
             bool: True if the value is in the buffer, False otherwise.
         """
         ...
-    
-    def __iter__(self): # -> Generator[__MemoryView__[double, Any], None, None]:
+
+    def __iter__(self):  # -> Generator[__MemoryView__[double, Any], None, None]:
         """
         Iterate over the elements in the buffer in order from oldest to newest.
 
@@ -176,8 +176,8 @@ class RingBufferOneDim:
             float: Each value in the buffer.
         """
         ...
-    
-    def __len__(self): # -> Py_ssize_t:
+
+    def __len__(self):  # -> Py_ssize_t:
         """
         Get the number of elements currently in the buffer.
 
@@ -185,8 +185,8 @@ class RingBufferOneDim:
             int: The current size of the buffer.
         """
         ...
-    
-    def __getitem__(self, idx: int): # -> __MemoryView__[double, Any]:
+
+    def __getitem__(self, idx: int):  # -> __MemoryView__[double, Any]:
         """
         Get the element at the given index.
 
@@ -200,6 +200,3 @@ class RingBufferOneDim:
             IndexError: If the index is out of range.
         """
         ...
-    
-
-

@@ -26,7 +26,7 @@ class TestEMA(unittest.TestCase):
         expected_value = 4.0625
         self.assertAlmostEqual(result, expected_value)
         self.assertAlmostEqual(self.fast_ema.get_value(), expected_value)
-        
+
         # Should raise error when trying to access values in fast mode
         with self.assertRaises(ValueError):
             len(self.fast_ema)
@@ -47,7 +47,7 @@ class TestEMA(unittest.TestCase):
         expected_value = 5.03125
         self.assertAlmostEqual(update_value, expected_value)
         self.assertAlmostEqual(self.ema.get_value(), expected_value)
-        
+
         # Check that values are stored in the buffer
         values = self.ema.get_values()
         self.assertEqual(len(values), self.window)
@@ -60,7 +60,7 @@ class TestEMA(unittest.TestCase):
         expected_value = 5.03125
         self.assertAlmostEqual(update_value, expected_value)
         self.assertAlmostEqual(self.fast_ema.get_value(), expected_value)
-        
+
         # Should raise error when trying to access values in fast mode
         with self.assertRaises(ValueError):
             self.fast_ema.get_values()
@@ -69,30 +69,32 @@ class TestEMA(unittest.TestCase):
         # Test that default alpha is 3/(window+1)
         default_ema = EMA(self.window)
         default_ema.initialize(self.data)
-        
+
         # Calculate expected values with default alpha
         expected_alpha = 3.0 / float(self.window + 1)
         expected_value = self.data[0]
         for i in range(1, len(self.data)):
-            expected_value = expected_alpha * self.data[i] + (1.0 - expected_alpha) * expected_value
-            
+            expected_value = (
+                expected_alpha * self.data[i] + (1.0 - expected_alpha) * expected_value
+            )
+
         self.assertAlmostEqual(default_ema.get_value(), expected_value)
 
     def test_invalid_window(self):
         # Test that window <= 1 raises ValueError
         with self.assertRaises(ValueError):
             EMA(1)
-        
+
         with self.assertRaises(ValueError):
             EMA(0)
-            
+
     def test_warm_requirement(self):
         # Test that methods raise error if not initialized
         uninitialized_ema = EMA(self.window)
-        
+
         with self.assertRaises(ValueError):
             uninitialized_ema.next(1.0)
-            
+
         with self.assertRaises(ValueError):
             uninitialized_ema.update(1.0)
 

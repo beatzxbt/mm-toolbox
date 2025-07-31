@@ -1,12 +1,12 @@
 import sys
 import traceback
 import asyncio
-import threading
 from typing import Optional
 
 from mm_toolbox.time.time import time_iso8601, time_s
 from mm_toolbox.logging.standard.config import LogLevel, LoggerConfig
 from mm_toolbox.logging.standard.handlers import BaseLogHandler
+
 
 class Logger:
     """
@@ -16,9 +16,9 @@ class Logger:
 
     def __init__(
         self,
-        name: str="",
-        config: LoggerConfig=None,
-        handlers: Optional[list[BaseLogHandler]]=None,
+        name: str = "",
+        config: LoggerConfig = None,
+        handlers: Optional[list[BaseLogHandler]] = None,
     ):
         """
         Initializes a Logger with specified configuration and handlers.
@@ -26,7 +26,7 @@ class Logger:
         Args:
             name (str): Name of the logger. Defaults to an empty string.
             config (LoggerConfig): Configuration settings for the logger (base level, stdout, buffer size, etc.).
-            handlers (list[BaseLogHandler], optional): A list of handler objects that inherit from BaseLogHandler. 
+            handlers (list[BaseLogHandler], optional): A list of handler objects that inherit from BaseLogHandler.
                 Defaults to an empty list if not provided.
 
         Raises:
@@ -37,7 +37,7 @@ class Logger:
         self._config = config
         if self._config is None:
             self._config = LoggerConfig()
-        
+
         self._handlers = handlers
         if self._handlers is None:
             self._handlers = []
@@ -45,14 +45,16 @@ class Logger:
         for handler in self._handlers:
             handler_base_class = handler.__class__.__base__
             if not handler_base_class == BaseLogHandler:
-                raise TypeError(f"Invalid handler base class; expected BaseLogHandler but got {handler_base_class}")
-            
+                raise TypeError(
+                    f"Invalid handler base class; expected BaseLogHandler but got {handler_base_class}"
+                )
+
             # Mainly for forwarding the str_format to the handler for formatting log messages
             # where the final point is not a code environment (eg Discord, Telegram, etc).
             handler.add_primary_config(config)
 
         self._buffer_size = 0
-        self._buffer: list[str] = [None] * 10000 # Should be enough for most apps
+        self._buffer: list[str] = [None] * 10000  # Should be enough for most apps
         self._buffer_start_time_s = time_s()
 
         self._msg_queue = asyncio.Queue()
@@ -68,12 +70,12 @@ class Logger:
         """
         if self._buffer_size == 0:
             return
-        
+
         if self._config.do_stout:
-            print(self._buffer[:self._buffer_size])
-        
+            print(self._buffer[: self._buffer_size])
+
         for handler in self._handlers:
-            await handler.push(self._buffer[:self._buffer_size])
+            await handler.push(self._buffer[: self._buffer_size])
 
         self._buffer_size = 0
         self._buffer_start_time_s = time_s()
@@ -91,22 +93,26 @@ class Logger:
             try:
                 # (log_msg: str, level: LogLevel)
                 log_msg, level = await asyncio.wait_for(
-                    self._msg_queue.get(), 
-                    timeout=0.1  # 100ms timeout
+                    self._msg_queue.get(),
+                    timeout=0.1,  # 100ms timeout
                 )
-                
+
                 self._buffer[self._buffer_size] = log_msg
                 self._buffer_size += 1
 
-                if (time_s() - self._buffer_start_time) >= self._config.flush_interval_s:
+                if (
+                    time_s() - self._buffer_start_time
+                ) >= self._config.flush_interval_s:
                     await self._flush_buffer()
 
                 self._msg_queue.task_done()
-                    
+
             except asyncio.TimeoutError:
-                if (time_s() - self._buffer_start_time) >= self._config.flush_interval_s:
+                if (
+                    time_s() - self._buffer_start_time
+                ) >= self._config.flush_interval_s:
                     await self._flush_buffer()
-        
+
     def _process_log(self, level: LogLevel, msg: str):
         """
         Submits a log message to the queue if it meets the minimum base level.
@@ -117,15 +123,15 @@ class Logger:
         """
         try:
             log_msg = self._config.str_format % {
-                'asctime': time_iso8601(),
-                'name': self._name,
-                'levelname': level.value,
-                'message': msg
+                "asctime": time_iso8601(),
+                "name": self._name,
+                "levelname": level.value,
+                "message": msg,
             }
             self._msg_queue.put_nowait((log_msg, level))
         except Exception:
             traceback.print_exc(file=sys.stderr)
-        
+
     def set_log_level(self, level: LogLevel) -> None:
         """
         Modify the logger's base log level at runtime.

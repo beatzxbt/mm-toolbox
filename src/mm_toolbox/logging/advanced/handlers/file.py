@@ -2,6 +2,7 @@ import os
 
 from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
 
+
 class FileLogHandler(BaseLogHandler):
     """
     A log handler that appends log messages to a text file.
@@ -20,7 +21,9 @@ class FileLogHandler(BaseLogHandler):
         """
         super().__init__()
         if not filepath.endswith(".txt"):
-            raise ValueError(f"Invalid filepath; expected string ending with '.txt' but got '{filepath}'")
+            raise ValueError(
+                f"Invalid filepath; expected string ending with '.txt' but got '{filepath}'"
+            )
         self.filepath = filepath
 
         self.create = create
@@ -30,9 +33,9 @@ class FileLogHandler(BaseLogHandler):
                 directory = os.path.dirname(self.filepath)
                 if directory:
                     os.makedirs(directory, exist_ok=True)
-                
+
                 # Create or truncate the file
-                with open(self.filepath, "w") as f:
+                with open(self.filepath, "w"):
                     pass
             except Exception as e:
                 print(f"Failed to create or truncate file; {e}")
@@ -40,14 +43,14 @@ class FileLogHandler(BaseLogHandler):
     def push(self, name, logs):
         try:
             with open(self.filepath, "a") as file:
-                msgs = "\n".join([
-                    self.format_log(
-                        name=name, 
-                        time_ns=log[0], 
-                        level=log[1], 
-                        msg=log[2]
-                    ) for log in logs
-                ])
+                msgs = "\n".join(
+                    [
+                        self.format_log(
+                            name=name, time_ns=log[0], level=log[1], msg=log[2]
+                        )
+                        for log in logs
+                    ]
+                )
                 file.write(msgs)
                 file.flush()
 

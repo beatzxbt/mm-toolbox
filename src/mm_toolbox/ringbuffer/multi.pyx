@@ -1,6 +1,8 @@
 import numpy as np
 cimport numpy as cnp
 
+from libc.stdint cimport uint32_t as u32
+
 cdef class RingBufferMulti:
     """
     A fixed-size circular buffer supporting up to 2D shapes.

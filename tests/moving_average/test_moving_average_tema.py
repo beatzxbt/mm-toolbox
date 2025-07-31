@@ -25,7 +25,7 @@ class TestTEMA(unittest.TestCase):
         result = self.fast_tema.initialize(self.data)
 
         self.assertIsNotNone(result)
-        
+
         # Should raise error when trying to access values in fast mode
         with self.assertRaises(ValueError):
             len(self.fast_tema)
@@ -41,12 +41,12 @@ class TestTEMA(unittest.TestCase):
 
     def test_update(self):
         self.tema.initialize(self.data)
-        initial_value = self.tema.get_value()
+        self.tema.get_value()
         update_value = self.tema.update(6.0)
 
         self.assertIsNotNone(update_value)
         self.assertEqual(self.tema.get_value(), update_value)
-        
+
         # Check that values are stored in the buffer
         values = self.tema.get_values()
         self.assertEqual(len(values), self.window)
@@ -54,12 +54,12 @@ class TestTEMA(unittest.TestCase):
 
     def test_update_fast(self):
         self.fast_tema.initialize(self.data)
-        initial_value = self.fast_tema.get_value()
+        self.fast_tema.get_value()
         update_value = self.fast_tema.update(6.0)
 
         self.assertIsNotNone(update_value)
         self.assertEqual(self.fast_tema.get_value(), update_value)
-        
+
         # Should raise error when trying to access values in fast mode
         with self.assertRaises(ValueError):
             self.fast_tema.get_values()
@@ -67,15 +67,15 @@ class TestTEMA(unittest.TestCase):
     def test_time_dependency(self):
         # Test that the algorithm is time-dependent
         self.tema.initialize(self.data)
-        initial_value = self.tema.get_value()
-        
+        self.tema.get_value()
+
         # First update immediately
         first_update = self.tema.update(6.0)
-        
+
         # Wait a short time and update with same value
         time.sleep(0.1)
         second_update = self.tema.update(6.0)
-        
+
         # The second update should be different due to time factor
         self.assertNotEqual(first_update, second_update)
 
@@ -90,4 +90,3 @@ class TestTEMA(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -18,14 +18,14 @@ class TestSMA(unittest.TestCase):
         self.assertAlmostEqual(result, expected_value)
         self.assertAlmostEqual(self.sma.get_value(), expected_value)
         self.assertEqual(len(self.sma), 1)
-        
+
     def test_initialize_fast(self):
         result = self.fast_sma.initialize(self.data)
 
         expected_value = 3.0
         self.assertAlmostEqual(result, expected_value)
         self.assertAlmostEqual(self.fast_sma.get_value(), expected_value)
-        
+
         # Should raise error when trying to access values in fast mode
         with self.assertRaises(ValueError):
             len(self.fast_sma)
@@ -46,7 +46,7 @@ class TestSMA(unittest.TestCase):
         expected_value = 4.0  # (2 + 3 + 4 + 5 + 6) / 5
         self.assertAlmostEqual(update_value, expected_value)
         self.assertAlmostEqual(self.sma.get_value(), expected_value)
-        
+
         # Check that values are stored in the buffer
         values = self.sma.get_values()
         self.assertEqual(len(values), 2)
@@ -59,7 +59,7 @@ class TestSMA(unittest.TestCase):
         expected_value = 4.0
         self.assertAlmostEqual(update_value, expected_value)
         self.assertAlmostEqual(self.fast_sma.get_value(), expected_value)
-        
+
         # Should raise error when trying to access values in fast mode
         with self.assertRaises(ValueError):
             self.fast_sma.get_values()

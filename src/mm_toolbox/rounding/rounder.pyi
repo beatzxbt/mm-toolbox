@@ -19,7 +19,7 @@ class Rounder:
             float: The rounded (bid) price.
         """
         ...
-    
+
     def ask(self, px: float) -> float:
         """
         Round a price up to the nearest tick size multiple.
@@ -31,7 +31,7 @@ class Rounder:
             float: The rounded (ask) price.
         """
         ...
-    
+
     def size(self, size: float) -> float:
         """
         Round a size down to the nearest lot size multiple.
@@ -43,7 +43,7 @@ class Rounder:
             float: The rounded size.
         """
         ...
-    
+
     def bids(self, pxs: ndarray) -> ndarray:
         """
         Round an array of prices down to the nearest tick size multiple (bids).
@@ -55,7 +55,7 @@ class Rounder:
             np.ndarray: A new array containing rounded bid prices.
         """
         ...
-    
+
     def asks(self, pxs: ndarray) -> ndarray:
         """
         Round an array of prices up to the nearest tick size multiple (asks).
@@ -67,7 +67,7 @@ class Rounder:
             np.ndarray: A new array containing rounded ask prices.
         """
         ...
-    
+
     def sizes(self, sizes: ndarray) -> ndarray:
         """
         Round an array of sizes down to the nearest lot size multiple.
@@ -79,6 +79,3 @@ class Rounder:
             np.ndarray: A new array containing rounded sizes.
         """
         ...
-    
-
-

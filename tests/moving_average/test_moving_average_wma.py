@@ -14,7 +14,9 @@ class TestWMA(unittest.TestCase):
     def test_initialize(self):
         result = self.wma.initialize(self.data)
 
-        expected_value = 3.6666666666666665  # (1*1 + 2*2 + 3*3 + 4*4 + 5*5) / (1+2+3+4+5)
+        expected_value = (
+            3.6666666666666665  # (1*1 + 2*2 + 3*3 + 4*4 + 5*5) / (1+2+3+4+5)
+        )
         self.assertAlmostEqual(result, expected_value)
         self.assertAlmostEqual(self.wma.get_value(), expected_value)
         self.assertEqual(len(self.wma), 1)
@@ -25,7 +27,7 @@ class TestWMA(unittest.TestCase):
         expected_value = 3.6666666666666665
         self.assertAlmostEqual(result, expected_value)
         self.assertAlmostEqual(self.fast_wma.get_value(), expected_value)
-        
+
         # Should raise error when trying to access values in fast mode
         with self.assertRaises(ValueError):
             len(self.fast_wma)
@@ -34,7 +36,9 @@ class TestWMA(unittest.TestCase):
         self.wma.initialize(self.data)
         next_value = self.wma.next(6.0)
 
-        expected_value = 4.6666666666666665  # (2*1 + 3*2 + 4*3 + 5*4 + 6*5) / (1+2+3+4+5)
+        expected_value = (
+            4.6666666666666665  # (2*1 + 3*2 + 4*3 + 5*4 + 6*5) / (1+2+3+4+5)
+        )
         self.assertAlmostEqual(next_value, expected_value)
         # next() doesn't update internal state
         self.assertAlmostEqual(self.wma.get_value(), 3.6666666666666665)
@@ -46,7 +50,7 @@ class TestWMA(unittest.TestCase):
         expected_value = 4.6666666666666665
         self.assertAlmostEqual(update_value, expected_value)
         self.assertAlmostEqual(self.wma.get_value(), expected_value)
-        
+
         # Check that values are stored in the buffer
         values = self.wma.get_values()
         self.assertEqual(len(values), 2)
@@ -59,7 +63,7 @@ class TestWMA(unittest.TestCase):
         expected_value = 4.6666666666666665
         self.assertAlmostEqual(update_value, expected_value)
         self.assertAlmostEqual(self.fast_wma.get_value(), expected_value)
-        
+
         # Should raise error when trying to access values in fast mode
         with self.assertRaises(ValueError):
             self.fast_wma.get_values()

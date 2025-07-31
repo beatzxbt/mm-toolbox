@@ -7,6 +7,7 @@ from mm_toolbox.time import time_iso8601
 from mm_toolbox.logging.advanced.config import LoggerConfig
 from mm_toolbox.logging.advanced.structs import LogLevel
 
+
 class BaseLogHandler(ABC):
     """
     Abstract base class for log handlers.
@@ -14,9 +15,10 @@ class BaseLogHandler(ABC):
     All handlers must implement `.push(buffer)`, called from the
     main logger whenever the buffer fills up.
 
-    Validation for any params/args should be done in '__init__' 
+    Validation for any params/args should be done in '__init__'
     to catch config errors early.
     """
+
     def __init__(self):
         self._encode_json = None
         self._http_session = None
@@ -48,38 +50,45 @@ class BaseLogHandler(ABC):
                 self._ev_loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(self._ev_loop)
         return self._ev_loop
-    
+
     @property
     def primary_config(self):
         """Get the primary config."""
         return self._primary_config
-    
+
     def add_primary_config(self, config: LoggerConfig):
         """Add the primary config to the handler."""
         self._primary_config = config
 
-    def format_log(self, name: bytes, time_ns: int, level: LogLevel, msg: bytes) -> bytes:
+    def format_log(
+        self, name: bytes, time_ns: int, level: LogLevel, msg: bytes
+    ) -> bytes:
         """Format a log message to a string."""
         if self._primary_config:
-            return self.primary_config.str_format % {
-                "asctime": time_iso8601(float(time_ns)),
-                "levelname": level.value,
-                "name": name.decode(),
-                "message": msg.decode()
-            }.encode()
+            return (
+                self.primary_config.str_format
+                % {
+                    "asctime": time_iso8601(float(time_ns)),
+                    "levelname": level.value,
+                    "name": name.decode(),
+                    "message": msg.decode(),
+                }.encode()
+            )
         else:
-            raise RuntimeError(f"No primary config found for handler {self.__class__.__name__}")
-    
+            raise RuntimeError(
+                f"No primary config found for handler {self.__class__.__name__}"
+            )
+
     @abstractmethod
     def push(self, name: bytes, logs: list[tuple[int, LogLevel, bytes]]):
         """Push a batch of log messages to the external system.
-        
+
         Args:
             name: The name of the log batch.
             logs: A batch of log messages in the format: [(time_ns: int, level: LogLevel, msg: bytes)]
         """
         pass
-    
+
     def __del__(self):
         """Clean up resources when the handler is garbage collected."""
         if self._http_session is not None and not self._http_session.closed:

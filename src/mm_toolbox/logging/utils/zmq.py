@@ -10,12 +10,13 @@ from typing import Callable
 # Rebind it so its easier to understand and access as an Enum
 from zmq.constants import SocketType as ZmqSocketType
 
+
 class ZmqConnection:
     """
     A synchronous ZeroMQ connection capable of creating and managing
     various socket types (PUB, SUB, REQ, REP, DEALER, ROUTER, etc.).
-    
-    This class can either bind or connect to a specified endpoint. 
+
+    This class can either bind or connect to a specified endpoint.
     An optional subscription filter can be applied to SUB/XSUB sockets,
     and an optional warm-up can be applied to PUB/XPUB sockets before sending.
 
@@ -43,7 +44,7 @@ class ZmqConnection:
                 Defaults to "tcp://127.0.0.1:5555".
             subscribe_filter (str, optional): The subscription filter for SUB/XSUB sockets.
                 Ignored otherwise. Defaults to "" (empty string).
-            warmup_timeout (float, optional): If > 0 and the socket is PUB/XPUB, we wait this many 
+            warmup_timeout (float, optional): If > 0 and the socket is PUB/XPUB, we wait this many
                 seconds after `start()` to give subscribers time to connect. Defaults to 0.0.
             bind (bool, optional): If True, call bind() on the socket; otherwise call connect().
                 Defaults to False.
@@ -100,8 +101,11 @@ class ZmqConnection:
             self._is_started = True
 
             # If PUB/XPUB and warmup_timeout is set, give subscribers time to connect
-            if self.socket_type in (ZmqSocketType.PUB, ZmqSocketType.XPUB) and self.warmup_timeout > 0:
-                # These args were provided to maintain 1:1 compatibility with the 
+            if (
+                self.socket_type in (ZmqSocketType.PUB, ZmqSocketType.XPUB)
+                and self.warmup_timeout > 0
+            ):
+                # These args were provided to maintain 1:1 compatibility with the
                 # Async version, however it's not advisable to block the main loop
                 # for that long. This change may be reversed in the future, but for now
                 # it stays disabled.
@@ -111,12 +115,12 @@ class ZmqConnection:
             if self._socket is not None:
                 self._socket.close()
                 self._socket = None
-            
+
             action = "binding to" if self.bind else "connecting to"
             raise RuntimeError(
                 f"ZMQ error when {action} {self.path} with socket type {self.socket_type}: {str(e)}"
             ) from e
-        
+
     def send(self, data: bytes):
         """
         Send data on this socket.
@@ -169,14 +173,16 @@ class ZmqConnection:
 
         if self._listener_thread:
             return
-        
+
         # Validate the callback function's signature
         sig = inspect.signature(on_message)
         if len(sig.parameters) != 1:
             raise ValueError("Callback function must take exactly one argument.")
         if inspect.iscoroutinefunction(on_message):
-            raise ValueError("Invalid function signature; expected a regular function but got an async function.")
-        
+            raise ValueError(
+                "Invalid function signature; expected a regular function but got an async function."
+            )
+
         # NOTE: Having issues with Cython functions due to their "type name" format
         # compared to Python's "name: type" format. For now, this type check will
         # remain disabled until there is a way to make it Cython compatible.
@@ -210,8 +216,8 @@ class ZmqConnection:
         self._is_listening = False
         if self._listener_thread and self._listener_thread.is_alive():
             # We can try closing the socket or do something else to break recv()
-            # For now, we rely on .stop() or .close() to break the recv() loop 
-            # or raise a ZMQError. 
+            # For now, we rely on .stop() or .close() to break the recv() loop
+            # or raise a ZMQError.
             self._listener_thread.join(timeout=1.0)
         self._listener_thread = None
 
@@ -285,8 +291,8 @@ class AsyncZmqConnection:
         """
         if not self._is_started:
             raise RuntimeError("Socket has not started; call '.start()' first")
-        
-    async def start(self):  
+
+    async def start(self):
         """
         Create the socket and either bind or connect. If the socket is PUB/XPUB
         and warmup_timeout > 0, pause briefly to let subscribers connect.
@@ -315,7 +321,10 @@ class AsyncZmqConnection:
             self._is_started = True
 
             # If PUB/XPUB and warmup_timeout is set, give subscribers time to connect
-            if self.socket_type in (ZmqSocketType.PUB, ZmqSocketType.XPUB) and self.warmup_timeout > 0:
+            if (
+                self.socket_type in (ZmqSocketType.PUB, ZmqSocketType.XPUB)
+                and self.warmup_timeout > 0
+            ):
                 start_ts = time.time()
                 while time.time() - start_ts < self.warmup_timeout:
                     await asyncio.sleep(0.1)
@@ -324,7 +333,7 @@ class AsyncZmqConnection:
             if self._socket is not None:
                 self._socket.close()
                 self._socket = None
-            
+
             action = "binding to" if self.bind else "connecting to"
             raise RuntimeError(
                 f"ZMQ error when {action} {self.path} with socket type {self.socket_type}: {str(e)}"
@@ -382,14 +391,18 @@ class AsyncZmqConnection:
         if isinstance(self._listen_task, asyncio.Task):
             # Already listening
             return
-        
+
         # Validate the callback function's signature and that its an async function
         sig = inspect.signature(on_message)
         if len(sig.parameters) != 1:
-            raise ValueError(f"Invalid function signature; expected exactly one argument but got {len(sig.parameters)}")
+            raise ValueError(
+                f"Invalid function signature; expected exactly one argument but got {len(sig.parameters)}"
+            )
         if not inspect.iscoroutinefunction(on_message):
-            raise ValueError("Invalid function signature; expected an async function but got a regular function.")
-        
+            raise ValueError(
+                "Invalid function signature; expected an async function but got a regular function."
+            )
+
         # NOTE: Having issues with Cython functions due to their "type name" format
         # compared to Python's "name: type" format. For now, this type check will
         # remain disabled until there is a way to make it Cython compatible.
@@ -412,7 +425,7 @@ class AsyncZmqConnection:
             except Exception:
                 # We expect any exceptions caused in the on_message()
                 # to be handled/logged properly by the user.
-                pass     
+                pass
 
     def cancel_listening(self):
         """
