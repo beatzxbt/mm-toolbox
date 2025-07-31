@@ -15,8 +15,8 @@ from mm_toolbox.logging.standard import (
     TelegramLogHandler as TelegramLogHandler,
 )
 
-# NOTE: For accessing advanced logging, it is only accessible by 
-#       doing 'mm_toolbox.logging.advanced'. This prevents any 
+# NOTE: For accessing advanced logging, it is only accessible by
+#       doing 'mm_toolbox.logging.advanced'. This prevents any
 #       naming clashes with the standard logger.
 #
 # from .logging.advanced import (
@@ -39,8 +39,8 @@ from .moving_average import (
     TimeExponentialMovingAverage as TimeExponentialMovingAverage,
 )
 
-# NOTE: For accessing Numba compatible methods, it is only accessible by 
-#       doing 'mm_toolbox.numba.*'. This prevents any naming clashes with 
+# NOTE: For accessing Numba compatible methods, it is only accessible by
+#       doing 'mm_toolbox.numba.*'. This prevents any naming clashes with
 #       the rest of the toolbox's API.
 #
 # from .numba import (
@@ -79,12 +79,9 @@ from .weights import (
 from .orderbook import Orderbook as Orderbook
 
 from .ringbuffer import (
-    RingBufferOneDim as RingBufferOneDim,
-    RingBufferTwoDim as RingBufferTwoDim,
     RingBufferMulti as RingBufferMulti,
 )
 
-from .rounding import Round as Round
 
 from src.mm_toolbox.time.time import (
     time_s as time_s,
@@ -104,11 +101,6 @@ from src.mm_toolbox.time.time import (
 #     WsPoolEvictionPolicy as WsPoolEvictionPolicy,
 # )
 
-from .weights import (
-    ema_weights as ema_weights,
-    geometric_weights as geometric_weights,
-    logarithmic_weights as logarithmic_weights,
-)
 
 __all__ = [
     #     "TickCandles",

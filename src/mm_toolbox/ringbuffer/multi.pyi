@@ -27,7 +27,7 @@ class RingBufferMulti:
             TypeError: If shape is not int, tuple, or list, or if dtype is unsupported.
         """
         ...
-    
+
     def raw(self) -> ndarray:
         """
         Create a copy of the entire buffer array.
@@ -36,7 +36,7 @@ class RingBufferMulti:
             np.ndarray: A copy of the internal buffer (including unused capacity).
         """
         ...
-    
+
     def unsafe_raw(self) -> ndarray:
         """
         Return a direct view of the underlying buffer array without copying.
@@ -48,7 +48,7 @@ class RingBufferMulti:
             Modifying the returned array also changes the buffer's internal state.
         """
         ...
-    
+
     def unwrapped(self) -> ndarray:
         """
         Return the buffer contents in logical order (oldest to newest).
@@ -57,7 +57,7 @@ class RingBufferMulti:
             np.ndarray: A copy of the buffer's data from oldest to newest.
         """
         ...
-    
+
     def unsafe_write(self, value: object, insert_idx: int = ...) -> Any:
         """
         Write a value directly into the buffer at the current right index.
@@ -70,7 +70,7 @@ class RingBufferMulti:
             This does not check buffer capacity or update indices. Use `unsafe_push` afterward.
         """
         ...
-    
+
     def unsafe_push(self) -> Any:
         """
         Advance the right index after an `unsafe_write`.
@@ -79,7 +79,7 @@ class RingBufferMulti:
             Overwrites the oldest data if the buffer is full. This does not check capacity.
         """
         ...
-    
+
     def append(self, value: object) -> Any:
         """
         Append a new element (scalar or 1D array) to the buffer.
@@ -93,7 +93,7 @@ class RingBufferMulti:
             ValueError: If `value` has invalid shape or length for a 2D buffer.
         """
         ...
-    
+
     def popright(self) -> object:
         """
         Remove and return the most recently appended element.
@@ -105,7 +105,7 @@ class RingBufferMulti:
             IndexError: If the buffer is empty.
         """
         ...
-    
+
     def popleft(self) -> object:
         """
         Remove and return the oldest element in the buffer.
@@ -117,7 +117,7 @@ class RingBufferMulti:
             IndexError: If the buffer is empty.
         """
         ...
-    
+
     def reset(self) -> ndarray:
         """
         Clear the buffer and return its contents in logical order before clearing.
@@ -126,13 +126,13 @@ class RingBufferMulti:
             cnp.ndarray: The data in the buffer (unwrapped) prior to reset.
         """
         ...
-    
+
     def fast_reset(self) -> Any:
         """
         Quickly clear the buffer without returning old data.
         """
         ...
-    
+
     def is_full(self) -> bool:
         """
         Check if the buffer is currently full.
@@ -141,7 +141,7 @@ class RingBufferMulti:
             bool: True if buffer size == capacity, False otherwise.
         """
         ...
-    
+
     def is_empty(self) -> bool:
         """
         Check if the buffer is empty.
@@ -150,8 +150,8 @@ class RingBufferMulti:
             bool: True if size == 0, False otherwise.
         """
         ...
-    
-    def __contains__(self, other: object): # -> bool:
+
+    def __contains__(self, other: object):  # -> bool:
         """
         Check whether a given value is stored in the buffer.
 
@@ -162,8 +162,8 @@ class RingBufferMulti:
             bool: True if found, False otherwise.
         """
         ...
-    
-    def __iter__(self): # -> Generator[Any, None, None]:
+
+    def __iter__(self):  # -> Generator[Any, None, None]:
         """
         Yield elements in logical order from oldest to newest.
 
@@ -171,8 +171,8 @@ class RingBufferMulti:
             object: Each element in the buffer.
         """
         ...
-    
-    def __len__(self): # -> int:
+
+    def __len__(self):  # -> int:
         """
         Get the number of elements currently in the buffer.
 
@@ -180,7 +180,7 @@ class RingBufferMulti:
             int: The current size of the buffer.
         """
         ...
-    
+
     def __getitem__(self, idx: int):
         """
         Access an element by logical index.
@@ -195,6 +195,3 @@ class RingBufferMulti:
             IndexError: If the index is out of range.
         """
         ...
-    
-
-

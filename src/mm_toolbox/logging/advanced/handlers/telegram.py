@@ -1,5 +1,6 @@
 from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
 
+
 class TelegramLogHandler(BaseLogHandler):
     """
     A log handler that sends messages to a Telegram chat via bot API.
@@ -26,14 +27,13 @@ class TelegramLogHandler(BaseLogHandler):
     def push(self, name, logs):
         try:
             for log in logs:
-                self.partial_payload.update({
-                    "text": self.format_log(
-                        name=name, 
-                        time_ns=log[0], 
-                        level=log[1], 
-                        msg=log[2]
-                    )
-                })
+                self.partial_payload.update(
+                    {
+                        "text": self.format_log(
+                            name=name, time_ns=log[0], level=log[1], msg=log[2]
+                        )
+                    }
+                )
                 self.ev_loop.create_task(
                     self.http_session.post(
                         url=self.url,

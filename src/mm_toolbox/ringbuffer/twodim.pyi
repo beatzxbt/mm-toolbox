@@ -19,7 +19,7 @@ class RingBufferTwoDim:
             sub_array_len (int): Number of columns (length of each sub-array).
         """
         ...
-    
+
     def raw(self) -> ndarray:
         """
         Create a copy of the entire underlying 2D buffer.
@@ -28,7 +28,7 @@ class RingBufferTwoDim:
             np.ndarray: A 2D array copy of the entire buffer space.
         """
         ...
-    
+
     def unsafe_raw(self) -> ndarray:
         """
         Return a direct view of the underlying 2D array without copying.
@@ -40,7 +40,7 @@ class RingBufferTwoDim:
             Modifying the returned array will affect this ring buffer's state.
         """
         ...
-    
+
     def unwrapped(self) -> ndarray:
         """
         Return the buffer's contents in logical (unwrapped) order.
@@ -53,7 +53,7 @@ class RingBufferTwoDim:
             use `iter(self)` instead of `self.unwrapped()` for better performance.
         """
         ...
-    
+
     def unsafe_write(self, values: ndarray, insert_idx: int = ...) -> Any:
         """
         Write values into the current right index row without moving the buffer indices.
@@ -67,7 +67,7 @@ class RingBufferTwoDim:
             Intended to be paired with `unsafe_push`.
         """
         ...
-    
+
     def unsafe_push(self) -> Any:
         """
         Advance indices after an `unsafe_write`, ignoring capacity checks.
@@ -76,7 +76,7 @@ class RingBufferTwoDim:
             Overwrites oldest data if the buffer is full. Use with caution.
         """
         ...
-    
+
     def append(self, values: ndarray) -> Any:
         """
         Append a new row to the buffer.
@@ -88,7 +88,7 @@ class RingBufferTwoDim:
             IndexError: If `values` is not 1D or its length is incorrect.
         """
         ...
-    
+
     def popright(self) -> ndarray:
         """
         Remove and return the last (most recently added) row.
@@ -100,7 +100,7 @@ class RingBufferTwoDim:
             IndexError: If the buffer is empty.
         """
         ...
-    
+
     def popleft(self) -> ndarray:
         """
         Remove and return the first (oldest) row.
@@ -112,7 +112,7 @@ class RingBufferTwoDim:
             IndexError: If the buffer is empty.
         """
         ...
-    
+
     def reset(self) -> ndarray:
         """
         Reset the buffer, returning the unwrapped data prior to clearing.
@@ -121,13 +121,13 @@ class RingBufferTwoDim:
             np.ndarray: A 2D array of the data in logical order before clearing.
         """
         ...
-    
+
     def fast_reset(self) -> Any:
         """
         Quickly clear the buffer without returning old data.
         """
         ...
-    
+
     def is_full(self) -> bool:
         """
         Check if the buffer is full.
@@ -136,7 +136,7 @@ class RingBufferTwoDim:
             bool: True if size == capacity, False otherwise.
         """
         ...
-    
+
     def is_empty(self) -> bool:
         """
         Check if the buffer is empty.
@@ -145,8 +145,8 @@ class RingBufferTwoDim:
             bool: True if size == 0, False otherwise.
         """
         ...
-    
-    def __contains__(self, values): # -> bool:
+
+    def __contains__(self, values):  # -> bool:
         """
         Check whether a given 1D array is present in the buffer.
 
@@ -157,8 +157,8 @@ class RingBufferTwoDim:
             bool: True if the array is found among the rows, otherwise False.
         """
         ...
-    
-    def __iter__(self): # -> Generator[Any, None, None]:
+
+    def __iter__(self):  # -> Generator[Any, None, None]:
         """
         Iterate over rows from oldest to newest.
 
@@ -166,8 +166,8 @@ class RingBufferTwoDim:
             np.ndarray: Each row as a 1D array.
         """
         ...
-    
-    def __len__(self): # -> int:
+
+    def __len__(self):  # -> int:
         """
         Number of rows currently stored in the buffer.
 
@@ -175,13 +175,13 @@ class RingBufferTwoDim:
             int: The size of the buffer.
         """
         ...
-    
-    def __getitem__(self, idx: int): # -> Any:
+
+    def __getitem__(self, idx: int):  # -> Any:
         """
         Access a row by its logical index.
 
         Args:
-            idx (int): The row index, 0-based from the oldest element. 
+            idx (int): The row index, 0-based from the oldest element.
                 Negative indices count backward from the newest element.
 
         Returns:
@@ -191,6 +191,3 @@ class RingBufferTwoDim:
             IndexError: If idx is out of range.
         """
         ...
-    
-
-

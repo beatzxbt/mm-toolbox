@@ -1,6 +1,7 @@
 import numpy as np
 
-def logarithmic_weights(num: int, normalized: bool=True) -> np.ndarray:
+
+def logarithmic_weights(num: int, normalized: bool = True) -> np.ndarray:
     """
     Generates a list of `num` weights that follow a logarithmic distribution and sum to 1.
 

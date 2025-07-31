@@ -10,16 +10,17 @@ from mm_toolbox.logging.standard import (
     FileLogHandler,
 )
 
+
 class TestLoggerConfig(unittest.TestCase):
     def test_valid_config(self):
-        config = LoggerConfig(
-            base_level=LogLevel.WARNING, 
-            buffer_capacity=20, 
-            buffer_timeout=15, 
-            do_stout=True, 
-            str_format="%(asctime)s - %(levelname)s - %(message)s"
+        LoggerConfig(
+            base_level=LogLevel.WARNING,
+            buffer_capacity=20,
+            buffer_timeout=15,
+            do_stout=True,
+            str_format="%(asctime)s - %(levelname)s - %(message)s",
         )
-        
+
     def test_config_values(self):
         """Test that config values are correctly set and retrieved."""
         config = LoggerConfig(
@@ -27,46 +28,48 @@ class TestLoggerConfig(unittest.TestCase):
             buffer_capacity=100,
             buffer_timeout=30,
             do_stout=False,
-            str_format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            str_format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         )
-        
+
         self.assertEqual(config.base_level, LogLevel.DEBUG)
         self.assertEqual(config.buffer_capacity, 100)
         self.assertEqual(config.buffer_timeout, 30)
         self.assertFalse(config.do_stout)
-        self.assertEqual(config.str_format, "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-        
+        self.assertEqual(
+            config.str_format, "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+
     def test_config_defaults(self):
         """Test that default config values are set correctly."""
         config = LoggerConfig()
-        
+
         self.assertEqual(config.base_level, LogLevel.INFO)
         self.assertEqual(config.buffer_capacity, 100)
         self.assertEqual(config.buffer_timeout, 5.0)
         self.assertTrue(config.do_stout)
-        self.assertEqual(config.str_format, "%(asctime)s [%(levelname)s] %(name)s - %(message)s")
-        
+        self.assertEqual(
+            config.str_format, "%(asctime)s [%(levelname)s] %(name)s - %(message)s"
+        )
+
     def test_invalid_buffer_capacity(self):
         """Test that invalid buffer capacity raises ValueError."""
         with self.assertRaises(ValueError):
             LoggerConfig(buffer_capacity=-10)
-            
+
     def test_invalid_buffer_timeout(self):
         """Test that invalid buffer timeout raises ValueError."""
         with self.assertRaises(ValueError):
             LoggerConfig(buffer_timeout=-5.0)
-            
+
     def test_invalid_str_format(self):
         """Test that invalid string format raises ValueError."""
         with self.assertRaises(ValueError):
             LoggerConfig(str_format="")  # Empty string
-            
+
     def test_config_validation_success(self):
         """Test that a valid config passes validation."""
         LoggerConfig(
-            base_level=LogLevel.ERROR,
-            buffer_capacity=500,
-            buffer_timeout=10.0
+            base_level=LogLevel.ERROR, buffer_capacity=500, buffer_timeout=10.0
         )
 
 
@@ -80,16 +83,11 @@ class TestLogger(unittest.TestCase):
             do_stout=True,
             str_format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
             buffer_capacity=10,
-            buffer_timeout=5.0
+            buffer_timeout=5.0,
         )
-        self.file_config = FileLogHandler(
-            filepath="test_logs.txt",
-            create=True
-        )
+        self.file_config = FileLogHandler(filepath="test_logs.txt", create=True)
         self.logger = Logger(
-            config=self.logger_config, 
-            handlers=[self.file_config],
-            name="TestLogger"
+            config=self.logger_config, handlers=[self.file_config], name="TestLogger"
         )
         self.loop = asyncio.get_event_loop()
 
@@ -97,9 +95,9 @@ class TestLogger(unittest.TestCase):
         """Clean up after tests."""
         if os.path.exists(self.file_config.filepath):
             os.remove(self.file_config.filepath)
-        
+
         # Ensure logger is shut down
-        if hasattr(self, 'logger') and self.logger._is_running:
+        if hasattr(self, "logger") and self.logger._is_running:
             self.loop.run_until_complete(self.logger.shutdown())
 
     def read_log_file(self):
@@ -110,9 +108,7 @@ class TestLogger(unittest.TestCase):
     def test_initialization(self):
         """Test logger initialization with explicit config."""
         self.logger = Logger(
-            config=self.logger_config, 
-            handlers=[self.file_config],
-            name="TestLogger"
+            config=self.logger_config, handlers=[self.file_config], name="TestLogger"
         )
         # Validate all the attrs are set correctly
         self.assertEqual(self.logger._config, self.logger_config)
@@ -135,57 +131,54 @@ class TestLogger(unittest.TestCase):
 
     def test_failed_initialization(self):
         """Test initialization with invalid handler."""
+
         class InvalidHandler:
             pass
 
-        # Handlers that don't inherit from BaseLogHandler will 
-        # raise a TypeError on initialization. 
+        # Handlers that don't inherit from BaseLogHandler will
+        # raise a TypeError on initialization.
         with self.assertRaises(TypeError):
-            Logger(
-                config=self.logger_config, 
-                handlers=[InvalidHandler()]
-            )
+            Logger(config=self.logger_config, handlers=[InvalidHandler()])
 
     def test_set_log_level(self):
         """Test setting log level at runtime."""
         # Start with INFO level
         self.assertEqual(self.logger._config.base_level, LogLevel.INFO)
-        
+
         # Set to DEBUG level
         self.logger.set_log_level(LogLevel.DEBUG)
         self.assertEqual(self.logger._config.base_level, LogLevel.DEBUG)
-        
+
         # Debug message should appear
         self.logger.debug("Debug after level change")
-        
+
         # Set to WARNING level
         self.logger.set_log_level(LogLevel.WARNING)
         self.assertEqual(self.logger._config.base_level, LogLevel.WARNING)
-        
+
         # Debug message should not be processed
         self.logger.debug("Debug after setting to WARNING")
-        
+
         self.loop.run_until_complete(self.logger.shutdown())
-        
+
         log_content = self.read_log_file()
         self.assertIn("Debug after level change", log_content)
         self.assertNotIn("Debug after setting to WARNING", log_content)
 
     def test_set_format(self):
         """Test changing format string at runtime."""
-        original_format = self.logger._config.str_format
         new_format = "%(asctime)s [TEST-%(levelname)s] %(message)s"
-        
+
         # Log a message with original format
         self.logger.info("Message with original format")
-        
+
         # Change format and log another message
         self.logger.set_format(new_format)
         self.assertEqual(self.logger._config.str_format, new_format)
         self.logger.info("Message with new format")
-        
+
         self.loop.run_until_complete(self.logger.shutdown())
-        
+
         log_content = self.read_log_file()
         # First message should have the original format
         self.assertIn("Message with original format", log_content)
@@ -263,14 +256,14 @@ class TestLogger(unittest.TestCase):
         # Add more messages to trigger buffer flush
         self.logger.info("Buffered message 10")
         self.logger.info("Buffered message 11")
-        
+
         # Allow time for async operations
         self.loop.run_until_complete(asyncio.sleep(0.1))
 
         log_content = self.read_log_file()
         self.assertIn("Buffered message 1", log_content)
         self.assertIn("Buffered message 10", log_content)
-        
+
         self.loop.run_until_complete(self.logger.shutdown())
 
     def test_error_and_critical_bypass_buffer(self):
@@ -310,7 +303,7 @@ class TestLogger(unittest.TestCase):
 
         # Add another message after timeout
         self.logger.warning("Message 3")
-        
+
         # Allow time for async operations
         self.loop.run_until_complete(asyncio.sleep(1.0))
 
@@ -327,7 +320,7 @@ class TestLogger(unittest.TestCase):
 
         log_content = self.read_log_file()
         self.assertIn("Message before shutdown", log_content)
-        
+
         # Verify logger is no longer running
         self.assertFalse(self.logger._is_running)
 
@@ -338,7 +331,7 @@ class TestLogger(unittest.TestCase):
         self.logger.debug("This should not be logged")
         self.logger.info("This should not be logged")
         self.logger.warning("This should not be logged")
-        
+
         # Add a message that should be logged
         self.logger.error("This should be logged")
 
@@ -352,15 +345,15 @@ class TestLogger(unittest.TestCase):
         with StringIO() as buf, redirect_stdout(buf):
             self.logger.info("This should appear in stdout")
             self.logger.warning("Another stdout message")
-            
+
             # Allow time for async operations
             self.loop.run_until_complete(asyncio.sleep(0.1))
-            
+
             output = buf.getvalue()
-            
+
         self.assertIn("This should appear in stdout", output)
         self.assertIn("Another stdout message", output)
-        
+
         self.loop.run_until_complete(self.logger.shutdown())
 
     def test_no_stdout(self):
@@ -368,58 +361,53 @@ class TestLogger(unittest.TestCase):
         # Create a new logger with stdout disabled
         no_stdout_config = LoggerConfig(do_stout=False)
         no_stdout_logger = Logger(config=no_stdout_config, handlers=[self.file_config])
-        
+
         with StringIO() as buf, redirect_stdout(buf):
             no_stdout_logger.info("This should not appear in stdout")
-            
+
             # Allow time for async operations
             self.loop.run_until_complete(asyncio.sleep(0.1))
-            
+
             output = buf.getvalue()
-            
+
         self.assertEqual("", output)
-        
+
         self.loop.run_until_complete(no_stdout_logger.shutdown())
 
     def test_set_format(self):
         """Test changing format string at runtime."""
-        original_format = self.logger._config.str_format
         new_format = "%(asctime)s | %(levelname)s | %(message)s"
-        
+
         self.logger.set_format(new_format)
         self.assertEqual(self.logger._config.str_format, new_format)
-        
+
         self.logger.info("Message with new format")
         self.loop.run_until_complete(self.logger.shutdown())
-        
+
         log_content = self.read_log_file()
         # Check that the message is logged with the new format
         self.assertIn(" | INFO | Message with new format", log_content)
 
     def test_multiple_handlers(self):
         """Test logger with multiple handlers."""
-        second_file_handler = FileLogHandler(
-            filepath="test_logs_2.txt",
-            create=True
-        )
-        
+        second_file_handler = FileLogHandler(filepath="test_logs_2.txt", create=True)
+
         multi_handler_logger = Logger(
-            config=self.logger_config,
-            handlers=[self.file_config, second_file_handler]
+            config=self.logger_config, handlers=[self.file_config, second_file_handler]
         )
-        
+
         multi_handler_logger.info("Message for multiple handlers")
         self.loop.run_until_complete(multi_handler_logger.shutdown())
-        
+
         # Check first log file
         log_content = self.read_log_file()
         self.assertIn("Message for multiple handlers", log_content)
-        
+
         # Check second log file
         with open(second_file_handler.filepath, "r") as file:
             second_log_content = file.read()
         self.assertIn("Message for multiple handlers", second_log_content)
-        
+
         # Clean up
         if os.path.exists(second_file_handler.filepath):
             os.remove(second_file_handler.filepath)
@@ -427,14 +415,12 @@ class TestLogger(unittest.TestCase):
     def test_logger_with_name(self):
         """Test logger with a specific name."""
         named_logger = Logger(
-            config=self.logger_config,
-            name="SpecialLogger",
-            handlers=[self.file_config]
+            config=self.logger_config, name="SpecialLogger", handlers=[self.file_config]
         )
-        
+
         named_logger.info("Message from named logger")
         self.loop.run_until_complete(named_logger.shutdown())
-        
+
         log_content = self.read_log_file()
         self.assertIn("SpecialLogger", log_content)
         self.assertIn("Message from named logger", log_content)
@@ -448,43 +434,46 @@ class TestLogger(unittest.TestCase):
             buffer_capacity=100,  # Larger buffer
             buffer_timeout=1.0,
         )
-        
+
         stress_file_handler = FileLogHandler(
-            filepath="stress_test_logs.txt",
-            create=True
+            filepath="stress_test_logs.txt", create=True
         )
-        
+
         stress_logger = Logger(
             config=stress_config,
             name="StressTestLogger",
             handlers=[stress_file_handler],
         )
-        
+
         # Send a large burst of messages
         num_messages = 10_000
         for i in range(num_messages):
             stress_logger.info(f"Stress test message {i}")
-        
+
         # Ensure all messages are flushed
         self.loop.run_until_complete(stress_logger.shutdown())
-        
+
         # Read the log file and count messages
         with open(stress_file_handler.filepath, "r") as file:
             log_content = file.read()
-        
+
         # Count the number of logged messages
         message_count = 0
         for i in range(num_messages):
             if f"Stress test message {i}" in log_content:
                 message_count += 1
-        
+
         # Check that all messages were logged
-        self.assertEqual(message_count, num_messages, 
-                         f"Expected {num_messages} messages, but found {message_count}")
-        
+        self.assertEqual(
+            message_count,
+            num_messages,
+            f"Expected {num_messages} messages, but found {message_count}",
+        )
+
         # Clean up
         if os.path.exists(stress_file_handler.filepath):
             os.remove(stress_file_handler.filepath)
+
 
 if __name__ == "__main__":
     unittest.main()

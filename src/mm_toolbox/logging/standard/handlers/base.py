@@ -5,11 +5,13 @@ from abc import ABC, abstractmethod
 
 from mm_toolbox.logging.standard.config import LoggerConfig
 
+
 class BaseLogHandler(ABC):
     """
-    Abstract base class for log handlers, defining how log messages 
+    Abstract base class for log handlers, defining how log messages
     should be pushed to their respective destinations.
     """
+
     def __init__(self):
         self._json_encode = None
         self._http_session = None
@@ -46,7 +48,7 @@ class BaseLogHandler(ABC):
     def primary_config(self):
         """Get the primary config."""
         return self._primary_config
-    
+
     def add_primary_config(self, config: LoggerConfig):
         """
         Add the primary configuration to the handler.

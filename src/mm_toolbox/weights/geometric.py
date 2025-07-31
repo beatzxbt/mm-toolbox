@@ -1,7 +1,10 @@
 import numpy as np
 from typing import Optional
 
-def geometric_weights(num: int, r: Optional[float] = None, normalized: bool=True) -> np.ndarray:
+
+def geometric_weights(
+    num: int, r: Optional[float] = None, normalized: bool = True
+) -> np.ndarray:
     """
     Generates a list of `num` weights that follow a geometric distribution and sum to 1.
 
