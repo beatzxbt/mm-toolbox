@@ -1,4 +1,5 @@
 import os
+import platform
 import sys
 
 import numpy as np
@@ -46,6 +47,17 @@ def get_extension(name, sources, include_dirs=None):
         extra_compile_args=EXTRA_COMPILE_ARGS,
         extra_link_args=EXTRA_LINK_ARGS,
     )
+
+
+def get_build_dir():
+    # Example: build/cython.linux-x86_64-cpython-313
+    plat = platform.system().lower()
+    machine = platform.machine().lower()
+    py_version = f"{sys.version_info.major}{sys.version_info.minor}"
+    impl = platform.python_implementation().lower()
+    # e.g. cpython-313
+    py_tag = f"{impl}-{sys.version_info.major}{sys.version_info.minor}{sys.version_info.micro}"
+    return f"build/cython.{plat}-{machine}-{py_tag}"
 
 
 #   * Hierarchy of build dependencies *
@@ -263,5 +275,6 @@ setup(
     ext_modules=cythonize(
         module_list=module_list,
         compiler_directives=COMPILER_DIRECTIVES,
+        build_dir=get_build_dir(),
     ),
 )
