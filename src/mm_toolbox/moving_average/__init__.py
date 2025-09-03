@@ -1,11 +1,6 @@
-from .sma import SimpleMovingAverage as SimpleMovingAverage
-from .ema import ExponentialMovingAverage as ExponentialMovingAverage
-from .wma import WeightedMovingAverage as WeightedMovingAverage
-from .tema import TimeExponentialMovingAverage as TimeExponentialMovingAverage
+"""Moving average calculation algorithms."""
 
-__all__ = [
-    "SimpleMovingAverage",
-    "ExponentialMovingAverage",
-    "WeightedMovingAverage",
-    "TimeExponentialMovingAverage",
-]
+from .ema import ExponentialMovingAverage as ExponentialMovingAverage
+from .sma import SimpleMovingAverage as SimpleMovingAverage
+from .tema import TimeExponentialMovingAverage as TimeExponentialMovingAverage
+from .wma import WeightedMovingAverage as WeightedMovingAverage

@@ -1,30 +1,17 @@
+"""Exponential moving average weight calculations."""
+
 import numpy as np
-from typing import Optional
+from numpy.typing import NDArray
 
 
 def ema_weights(
-    window: int, alpha: Optional[float] = None, normalized: bool = True
-) -> np.ndarray:
-    """
-    Calculate EMA (Exponential Moving Average)-like weights for a given window size.
-
-    Parameters
-    ----------
-    window : int
-        The number of periods to use for the EMA calculation.
-
-    alpha : float, optional
-        The decay factor for the EMA calculation. If not provided, it is calculated as 3 / (window + 1).
-
-    Returns
-    -------
-    np.ndarray
-        An array of normalized EMA-like weights from lowest -> highest.
-    """
+    window: int, alpha: float | None = None, normalized: bool = True
+) -> NDArray[np.float64]:
+    """Return EMA-like weights of length ``window`` using ``alpha`` or default 3/(window+1)."""
     if window <= 1:
         raise ValueError(f"Invalid window size; expected > 1 but got {window}.")
 
-    alpha = alpha if alpha else 3.0 / float(window + 1)
+    alpha = alpha if alpha is not None else 3.0 / float(window + 1)
 
     weights = np.array(
         [alpha * (1.0 - alpha) ** i for i in range(window - 1, -1, -1)],

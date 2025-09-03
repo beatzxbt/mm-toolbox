@@ -1,11 +1,11 @@
 cimport numpy as cnp
 
-from mm_toolbox.ringbuffer.onedim cimport RingBufferOneDim
+from mm_toolbox.ringbuffer.numeric cimport NumericRingBuffer
 from mm_toolbox.moving_average.base cimport MovingAverage
 
 cdef class SimpleMovingAverage(MovingAverage):
     cdef:
-        RingBufferOneDim    _raw_values
+        NumericRingBuffer   _raw_values
         double              _rolling_sum
 
     cpdef double            initialize(self, cnp.ndarray values)

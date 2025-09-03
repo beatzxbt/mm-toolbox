@@ -1,82 +1,134 @@
 # Contributing to MM Toolbox
-First off, thank you for considering contributing to MM Toolbox! Your help is essential to maintaining and improving this project. I appreciate your interest and efforts.
 
-## How to Contribute
+Welcome! MM Toolbox focuses on high-performance market making tools. Whether you're fixing bugs, adding features, or improving performance, this guide will get you started.
 
-### 1. Reporting Issues
-If you encounter any bugs, issues, or have feature requests, please open an issue on GitHub. Provide as much detail as possible, including:
+## 🚀 Quick Start
 
-- A clear and descriptive title
-- A detailed description of the problem or feature request
-- Steps to reproduce the issue (if applicable)
-- Code snippets or screenshots (if helpful)
-- The environment you’re using (e.g., Python version, OS, etc.)
+**Prerequisites**: Python 3.12+ and [uv](https://docs.astral.sh/uv/) installed.
 
-### 2. Fork and Clone the Repository
-To start contributing:
-
-1. Fork the repository to your GitHub account.
-2. Clone your forked repository to your local machine:
-   ```bash
-   git clone https://github.com/beatzxbt/mm-toolbox.git
-   cd mm-toolbox
-   ```
-
-### 3. Create a Branch
-Create a new branch for your contribution:
 ```bash
-git checkout -b feature-or-bugfix-name
+# 1. Fork on GitHub, then clone
+git clone https://github.com/YOUR_USERNAME/mm-toolbox.git
+cd mm-toolbox
+
+# 2. Setup development environment
+uv sync --all-groups  # Installs all deps including dev tools
+make build           # Compile Cython extensions
+
+# 3. Verify everything works
+make test           # Run test suite
+make check         # Format, lint, typecheck
 ```
 
-Make sure to choose a descriptive name for your branch that reflects the changes you intend to make.
+## 💡 Making Changes
 
-### 4. Install Dependencies
-Install these by doing:
+### Development Workflow
 ```bash
-poetry install --all
+# Create feature branch
+git checkout -b feature/your-feature-name
+
+# Make your changes, then verify quality
+make check    # Runs: format, lint, typecheck
+make test     # Run all tests
+make build    # Ensure Cython compiles
+
+# Commit and push
+git commit -m "feat: add awesome feature"
+git push origin feature/your-feature-name
 ```
 
-### 5. Make Your Changes
-Implement your changes in the appropriate module(s). Be sure to format your code with black and add numpy style docstrings where neccesary. If possible, avoid introducing new dependencies.
+### Code Standards
 
-### 6. Write Tests
-Ensure that your changes are well-tested. If you add new functionality, write corresponding unit tests. Tests are located in [`tests/`](tests/).
+**Performance First**: This is a high-frequency trading library. Optimize for speed and memory efficiency.
 
-Run the tests to ensure everything is working correctly:
-```bash
-python -m unittest discover tests
+**Code Style**:
+- **Ruff formatting**: `make format` (automatic)
+- **Type hints required**: Use strict typing for Pyright compliance
+- **Docstrings**: Compact Google style, one-liner for simple functions
+- **Dependencies**: Avoid adding new ones unless absolutely necessary
+
+**Testing**:
+- **Comprehensive coverage**: Add tests for all new functionality
+- **Performance tests**: Include benchmarks for performance-critical code
+- **Edge cases**: Test boundary conditions and error handling
+
+### File Structure
+```
+src/mm_toolbox/
+├── module_name/         # New modules here
+│   ├── __init__.py     # Public API exports
+│   ├── fast.pyx        # Cython implementation (performance-critical)
+│   ├── fast.pxd        # Cython headers
+│   ├── fast.pyi        # Type stubs (manual, not auto-generated)
+│   └── wrapper.py      # Python wrapper (if needed)
+tests/module_name/       # Comprehensive test coverage
 ```
 
-### 7. Commit Your Changes
-Before committing, please make sure your code follows the project's coding standards. Use descriptive commit messages:
+## 🛠️ Development Tips
+
+### Cython Development
 ```bash
-git add .
-git commit -m "Descriptive message about your changes"
+# Fast iteration during development
+make build  # Rebuilds only changed files
+
+# For profiling/debugging, enable line tracing:
+# Edit setup.py: compiler_directives = {"profile": True, "linetrace": True}
 ```
 
-### 8. Push to Your Fork
-Push your changes to your forked repository:
+### Running Tests
 ```bash
-git push origin feature-or-bugfix-name
+make test                    # All tests
+uv run pytest tests/candles/ -xvv  # Specific module
+uv run pytest -k "test_name" -s    # Specific test with output
 ```
 
-### 9. Create a Pull Request
-Go to the original repository on GitHub and create a Pull Request (PR) from your forked repository.
+### Performance Guidelines
+- **Cython first** for computational code (see existing `.pyx` files)
+- **Memory efficiency**: Use ringbuffers, avoid unnecessary allocations
+- **Type everything**: Helps both performance and maintainability
+- **Profile before optimizing**: Use `cProfile` and line profiler
 
-In your PR:
-* Provide a clear and descriptive title.
-* Explain the purpose and details of your changes.
-* Mention any related issues or PRs.
-* Highlight any particular areas you'd like reviewers to focus on.
+## 📋 Contribution Types
 
-### 10. Address Feedback
-Your PR will be reviewed by the maintainers (me). You may be asked to make additional changes based on feedback. Please address these promptly to move the process forward.
+**🐛 Bug Fixes**: Include reproduction steps and tests that fail before your fix.
 
-## Code Style
-* Follow PEP 8 for Python code style ([black](https://github.com/psf/black) makes this very simple).
-* Keep functions and classes well-documented with clear and concise comments.
-* Use descriptive variable and function names.
-* Write unit tests for all new features and ensure existing tests pass.
+**✨ New Features**: 
+- Open an issue first to discuss the approach
+- Include comprehensive tests and benchmarks
+- Update type stubs (`.pyi` files) manually
+- Add examples in docstrings
 
-## License
-By contributing to MM Toolbox, you agree that your contributions will be licensed under the MIT License.
+**⚡ Performance Improvements**: 
+- Include benchmarks showing improvement
+- Maintain backward compatibility
+- Consider memory usage, not just speed
+
+**📚 Documentation**: Keep it concise but complete.
+
+## 🔍 Review Process
+
+1. **CI must pass**: All tests, linting, and type checking
+2. **Performance regression**: Benchmarks should not degrade
+3. **Code review**: Maintainer will review for style and correctness
+4. **Testing**: New code needs test coverage
+
+## 📝 Commit Guidelines
+
+Use conventional commits:
+```bash
+feat: add exponential moving average implementation
+fix: resolve memory leak in ringbuffer
+perf: optimize candle aggregation by 25%
+test: add edge cases for price rounding
+docs: update API examples
+```
+
+## 🆘 Getting Help
+
+- **Questions**: Open a GitHub discussion
+- **Bugs**: Use GitHub issues with minimal reproduction
+- **Features**: Discuss in issues before implementing
+
+## 📄 License
+
+By contributing, you agree your code will be licensed under MIT.

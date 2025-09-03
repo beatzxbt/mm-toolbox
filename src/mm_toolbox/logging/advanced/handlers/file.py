@@ -1,16 +1,15 @@
+"""File log handler for advanced logging."""
+
 import os
 
 from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
 
 
 class FileLogHandler(BaseLogHandler):
-    """
-    A log handler that appends log messages to a text file.
-    """
+    """A log handler that appends log messages to a text file."""
 
     def __init__(self, filepath: str, create: bool = False):
-        """
-        Initialize the FileLogHandler with a target file path.
+        """Initialize the FileLogHandler with a target file path.
 
         Args:
             filepath (str): Path to the text file for appending logs. Must end with ".txt".
@@ -18,6 +17,7 @@ class FileLogHandler(BaseLogHandler):
 
         Raises:
             ValueError: If the provided filepath does not end with ".txt".
+
         """
         super().__init__()
         if not filepath.endswith(".txt"):
@@ -25,8 +25,8 @@ class FileLogHandler(BaseLogHandler):
                 f"Invalid filepath; expected string ending with '.txt' but got '{filepath}'"
             )
         self.filepath = filepath
-
         self.create = create
+
         if self.create:
             # Create the file if it doesn't exist, or truncate it if it does
             try:

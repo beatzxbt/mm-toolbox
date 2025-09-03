@@ -1,0 +1,45 @@
+name: Quick Check
+
+on:
+  push:
+    branches-ignore: [ main ]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  quick-check:
+    name: Quick validation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.12"
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+    
+    - name: Install dependencies
+      run: |
+        uv sync --all-groups
+    
+    - name: Run quick checks
+      run: |
+        # Format check (but don't fix)
+        uv run ruff format --check .
+        
+        # Lint check (but don't fix)
+        make lint-check
+        
+        # Type check
+        uv run pyright
+    
+    - name: Test build
+      run: |
+        make build

@@ -1,5 +1,11 @@
-from .onedim import RingBufferOneDim as RingBufferOneDim
-from .twodim import RingBufferTwoDim as RingBufferTwoDim
-from .multi import RingBufferMulti as RingBufferMulti
+"""High-performance ring buffer implementations."""
 
-__all__ = ["RingBufferOneDim", "RingBufferTwoDim", "RingBufferMulti"]
+from .bytes import BytesRingBuffer as BytesRingBuffer
+from .generic import GenericRingBuffer as GenericRingBuffer
+from .ipc import (
+    IPCRingBufferConsumer as IPCRingBufferConsumer,
+)
+from .ipc import (
+    IPCRingBufferProducer as IPCRingBufferProducer,
+)
+from .numeric import NumericRingBuffer as NumericRingBuffer

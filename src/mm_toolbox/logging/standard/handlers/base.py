@@ -1,14 +1,17 @@
+"""Base class for standard logging handlers."""
+
 import asyncio
-import msgspec
-import aiohttp
 from abc import ABC, abstractmethod
+
+import aiohttp
+import msgspec
 
 from mm_toolbox.logging.standard.config import LoggerConfig
 
 
 class BaseLogHandler(ABC):
-    """
-    Abstract base class for log handlers, defining how log messages
+    """Abstract base class for log handlers, defining how log messages.
+
     should be pushed to their respective destinations.
     """
 
@@ -50,9 +53,7 @@ class BaseLogHandler(ABC):
         return self._primary_config
 
     def add_primary_config(self, config: LoggerConfig):
-        """
-        Add the primary configuration to the handler.
-        """
+        """Add the primary configuration to the handler."""
         self._primary_config = config
 
     def __del__(self):
@@ -74,10 +75,10 @@ class BaseLogHandler(ABC):
 
     @abstractmethod
     async def push(self, buffer: list[str]) -> None:
-        """
-        Flushes the given buffer of log entries in some way.
+        """Flushes the given buffer of log entries in some way.
 
         Args:
             buffer (list[str]): The list of log messages to push.
+
         """
         pass

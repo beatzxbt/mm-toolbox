@@ -7,35 +7,34 @@ from mm_toolbox.moving_average.base cimport MovingAverage
 
 cdef class TimeExponentialMovingAverage(MovingAverage):
     """
-    The TEMA uses variable weights based on the time of entry, 
-    with a half-life of `half_life_s`.
-
-    Implementation
-    --------------
-    - We compute `alpha = 1.0 - exp(self.lam * (self.time - t))`
-      whenever we do an update.
-    - Then `self.value = alpha * input + (1 - alpha) * self.value`.
-    - We store `self.time = t`.
-    - If not ready, we simply set `self.value = input; self.time = t; ready = True`.
+    Uses time elapsed since last update to calculate weight of the new value.
     """
 
-    def __init__(self, int window, bint fast=False, double half_life_s=10.0):
-        super().__init__(window, fast)
+    def __init__(self, int window=2, bint is_fast=False, double half_life_s=1.0):
+        """
+        Window is not a required parameter if is_fast=True, its default is only 
+        used to fulfil base class requirements. Though if is_fast=False, it will
+        set the length of the ringbuffer. Be weary!
+        """
+        super().__init__(
+            window=window, 
+            is_fast=is_fast,
+        )
 
         if half_life_s <= 0.0:
             raise ValueError("Half life must be positive.")
 
-        self._time = time_s()
-        self._lam = log(3.0) / half_life_s
+        self._time_s = time_s()
+        self._lam = log(2.0) / half_life_s
 
     cpdef double initialize(self, cnp.ndarray values):
         cdef:
             int i, n = values.shape[0]
             double _temp_var
 
-        if n < self._window:
+        if n <= 1:
             raise ValueError(
-                f"Input array must same length as window; expected {self._window} but got {n}"
+                f"Input array too short; expected >1 but got {n}"
             )
 
         self._values.fast_reset()
@@ -49,24 +48,32 @@ cdef class TimeExponentialMovingAverage(MovingAverage):
         return self._value
 
     cpdef double next(self, double new_val):
-        self.ensure_warm()
+        if not self._is_warm:
+            self._time_s = time_s()
+            self._value = new_val
+            self._is_warm = True
+            return self._value
 
         cdef:
             double time_now = time_s()
-            double minus_dt = self._time - time_now
+            double minus_dt = self._time_s - time_now
             double alpha = 1.0 - exp(self._lam * minus_dt)
 
         return alpha * new_val + (1.0 - alpha) * self._value
 
     cpdef double update(self, double new_val):
-        self.ensure_warm()
+        if not self._is_warm:
+            self._time_s = time_s()
+            self._value = new_val
+            self._is_warm = True
+            return self._value
 
         cdef:
             double time_now = time_s()
-            double minus_dt = self._time - time_now
+            double minus_dt = self._time_s - time_now
             double alpha = 1.0 - exp(self._lam * minus_dt)
 
-        self._time = time_now
+        self._time_s = time_now
         self._value = alpha * new_val + (1.0 - alpha) * self._value
         self.push_to_ringbuffer()
 

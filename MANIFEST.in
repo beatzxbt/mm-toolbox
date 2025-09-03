@@ -1,0 +1,44 @@
+# Include the README and license files
+include README.md
+include LICENSE
+include CONTRIBUTING.md
+
+# Include the pyproject.toml and setup files
+include pyproject.toml
+include setup.py
+include uv.lock
+
+# Include all Cython files (.pyx, .pxd, .pyi)
+recursive-include src *.pyx
+recursive-include src *.pxd
+recursive-include src *.pyi
+
+# Include C source files needed for compilation
+recursive-include src *.c
+recursive-include src *.h
+
+# Include all Python files
+recursive-include src *.py
+
+# Include examples
+recursive-include examples *.py
+
+# Include scripts
+recursive-include scripts *.py
+
+# Include tests
+recursive-include tests *.py
+
+# Exclude compiled bytecode and cache files
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude __pycache__/*
+global-exclude .pytest_cache/*
+global-exclude *.so
+global-exclude *.dylib
+global-exclude *.dll
+
+# Exclude build artifacts
+global-exclude build/*
+global-exclude dist/*
+global-exclude *.egg-info/*

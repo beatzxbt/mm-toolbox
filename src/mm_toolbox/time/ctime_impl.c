@@ -13,7 +13,7 @@
 int64_t c_time_s(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_REALTIME, &ts) == -1) {
-        return -1.0; /* Error indicator */
+        return -1; /* Error indicator */
     }
     return (int64_t)ts.tv_sec;
 }
@@ -21,17 +21,17 @@ int64_t c_time_s(void) {
 int64_t c_time_ms(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_REALTIME, &ts) == -1) {
-        return -1.0; /* Error indicator */
+        return -1; /* Error indicator */
     }
-    return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec / 1000000LL;
+    return (int64_t)ts.tv_sec * 1000LL + (int64_t)ts.tv_nsec / 1000000LL;
 }
 
 int64_t c_time_us(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_REALTIME, &ts) == -1) {
-        return -1.0; /* Error indicator */
+        return -1; /* Error indicator */
     }
-    return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec / 1000LL;
+    return (int64_t)ts.tv_sec * 1000000LL + (int64_t)ts.tv_nsec / 1000LL;
 }
 
 int64_t c_time_ns(void) {
@@ -56,7 +56,7 @@ char* c_time_iso8601(double timestamp) {
         const int64_t NS_IN_SEC = 1000000000LL;
         
         /* Fast path: get current time and format directly using manual arithmetic */
-        int64_t nanoseconds = time_ns();
+        int64_t nanoseconds = c_time_ns();
         if (nanoseconds == -1) {
             free(buf);
             return NULL;
