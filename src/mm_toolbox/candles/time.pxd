@@ -5,4 +5,4 @@ cdef class TimeCandles(BaseCandles):
         double millis_per_bucket
         double next_candle_close_time
 
-    cpdef void process_trade(self, double time_ms, bint is_buy, double px, double sz)
+    cpdef void process_trade(self, object trade)

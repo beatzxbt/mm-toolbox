@@ -1,4 +1,6 @@
+from mm_toolbox.candles.base import Trade
 from mm_toolbox.candles.base cimport BaseCandles
+from libc.math cimport fmax, fmin
 
 cdef class MultiCandles(BaseCandles):
     """
@@ -9,80 +11,69 @@ cdef class MultiCandles(BaseCandles):
     - Maximum number of ticks (trades) is reached
     - Maximum volume is reached
     """
-    def __init__(self, double max_duration_secs, int max_ticks, double max_sz, int num_candles):
-        """
-        Initialize the multi-trigger candle aggregator.
-        
-        Args:
-            max_duration_secs (double): Maximum duration of a candle in seconds.
-            max_ticks (int): Maximum number of trades in a candle.
-            max_sz (double): Maximum size in a candle.
-            num_candles (int): Maximum number of candles to store.
-        """
-        super().__init__(num_candles)
-        
+    def __init__(self, double max_duration_secs, int max_ticks, double max_size, int num_candles=1000):
+        """Initialize the multi-trigger candle aggregator."""
         self.max_duration_millis = max_duration_secs * 1000.0
         self.max_ticks = max_ticks
-        self.max_sz = max_sz
+        self.max_size = max_size
 
-    cpdef void process_trade(self, double time_ms, bint is_buy, double px, double sz):
-        """
-        Process a single trade tick, updating the current candle.
-        
-        Creates a new candle if any trigger condition is met.
-        
-        Args:
-            time_ms (double): The timestamp of the trade in milliseconds.
-            is_buy (bint): True if it's a buy trade, False if it's a sell trade.
-            px (double): The trade price.
-            sz (double): The trade size (volume).
-        """ 
+    cpdef void process_trade(self, object trade):
+        """Process a single trade tick, updating the current candle.""" 
+        cdef:
+            double time_ms = trade.time_ms
+            bint is_buy = trade.is_buy
+            double price = trade.price
+            double size = trade.size
+            double volume = price * size
+
         if self.is_stale_trade(time_ms):
             return
 
         # Initialize a new candle if this is the first trade
-        if self.num_trades == 0.0:
-            self.open_time_ms = time_ms
-            self.open_px = px
+        if self.latest_candle.num_trades == 0:
+            self.latest_candle.open_time_ms = time_ms
+            self.latest_candle.open_price = price
 
         # Check if max duration has been exceeded
-        if self.open_time_ms + self.max_duration_millis <= time_ms:
-            self.insert_candle()
-            self.process_trade(time_ms, is_buy, px, sz)
+        if self.latest_candle.open_time_ms + self.max_duration_millis <= time_ms:
+            self.insert_and_reset_candle()
+            self.process_trade(trade)
             return
 
-        # Update candle statistics
-        self.high_px = max(self.high_px, px)
-        self.low_px = min(self.low_px, px)
-        self.close_px = px
+        # Update HLC statistics
+        self.latest_candle.high_price = fmax(self.latest_candle.high_price, price)
+        self.latest_candle.low_price = fmin(self.latest_candle.low_price, price)
+        self.latest_candle.close_price = price
 
-        # Update volume based on trade direction
         if is_buy:
-            self.buy_sz += sz
+            self.latest_candle.buy_size += size
+            self.latest_candle.buy_volume += volume
         else:
-            self.sell_sz += sz
+            self.latest_candle.sell_size += size
+            self.latest_candle.sell_volume += volume
 
-        self.vwap_px = self.calculate_vwap(px, sz)
-        self.num_trades += 1.0
-        self.close_time_ms = time_ms
+        self.latest_candle.vwap_price = self.calculate_vwap(volume, size)
+        self.latest_candle.trades.append(trade)
+        self.latest_candle.num_trades += 1
+        self.latest_candle.close_time_ms = time_ms
 
         # Check if max ticks has been exceeded
-        if self.num_trades >= self.max_ticks:
-            self.insert_candle()
+        if self.latest_candle.num_trades >= self.max_ticks:
+            self.insert_and_reset_candle()
             return
 
         cdef:
-            double remaining_sz
-            double total_sz = self.buy_sz + self.sell_sz
-
-        if total_sz > self.max_sz:
-            remaining_sz = total_sz - self.max_sz
+            double remaining_size
+            double total_size = self.latest_candle.buy_size + self.latest_candle.sell_size
+    
+        if total_size > self.max_size:
+            remaining_size = total_size - self.max_size + size
 
             if is_buy:
-                self.buy_sz -= remaining_sz
+                self.latest_candle.buy_size -= remaining_size
             else:
-                self.sell_sz -= remaining_sz
+                self.latest_candle.sell_size -= remaining_size
 
-            self.insert_candle()
-            self.process_trade(time_ms, is_buy, px, remaining_sz)
+            self.insert_and_reset_candle()
+            self.process_trade(trade)
             return

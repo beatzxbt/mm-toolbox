@@ -1,20 +1,20 @@
+"""Discord webhook log handler for advanced logging."""
+
 from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
 
 
 class DiscordLogHandler(BaseLogHandler):
-    """
-    A log handler that sends messages to a Discord webhook.
-    """
+    """A log handler that sends messages to a Discord webhook."""
 
     def __init__(self, webhook: str):
-        """
-        Initializes the DiscordLogHandler.
+        """Initializes the DiscordLogHandler.
 
         Args:
             webhook (str): The Discord webhook URL.
 
         Raises:
             ValueError: If webhook is invalid.
+
         """
         super().__init__()
         if not webhook.startswith("https://discord.com/api/webhooks/"):

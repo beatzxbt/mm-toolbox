@@ -1,20 +1,11 @@
+"""Logarithmic weight calculations."""
+
 import numpy as np
+from numpy.typing import NDArray
 
 
-def logarithmic_weights(num: int, normalized: bool = True) -> np.ndarray:
-    """
-    Generates a list of `num` weights that follow a logarithmic distribution and sum to 1.
-
-    Parameters
-    ----------
-    num : int
-        The number of weights to generate.
-
-    Returns
-    -------
-    np.ndarray
-        An array of normalized logarithmic weights from lowest -> highest.
-    """
+def logarithmic_weights(num: int, normalized: bool = True) -> NDArray[np.float64]:
+    """Return logarithmic weights of length ``num`` (start from log(1))."""
     if num <= 1:
         raise ValueError(f"Invalid number of weights; expected > 1 but got {num}.")
 

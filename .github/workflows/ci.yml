@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    name: Test on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+    
+    - name: Install dependencies
+      run: |
+        uv sync --all-groups
+    
+    - name: Run tests
+      run: |
+        make test
+    
+    - name: Run code quality checks
+      run: |
+        # Format check (but don't fix)
+        uv run ruff format --check .
+        
+        # Lint check (but don't fix)
+        make lint-check
+        
+        # Type check
+        uv run pyright
+    
+    - name: Build Cython extensions
+      run: |
+        make build
+
+  build-wheel:
+    name: Build wheel
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.12"
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+    
+    - name: Install build dependencies
+      run: |
+        uv sync --group build
+    
+    - name: Build wheel
+      run: |
+        make wheel
+    
+    - name: Check distribution
+      run: |
+        make check-dist
+    
+    - name: Upload wheel as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: wheel-python-3.12
+        path: dist/*.whl
+    
+    - name: Upload sdist as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: sdist
+        path: dist/*.tar.gz
+
+  build-multiplatform:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    needs: test
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.12"
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+    
+    - name: Install cibuildwheel
+      run: |
+        uv tool install cibuildwheel
+    
+    - name: Build wheels
+      run: |
+        uv tool run cibuildwheel --output-dir wheelhouse
+    
+    - name: Upload wheels as artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: wheels-${{ matrix.os }}
+        path: ./wheelhouse/*.whl

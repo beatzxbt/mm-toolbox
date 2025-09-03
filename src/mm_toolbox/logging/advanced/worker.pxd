@@ -23,7 +23,6 @@ cdef class WorkerLogger:
     cpdef void          info(self, str msg_str=*, bytes msg_bytes=*)
     cpdef void          warning(self, str msg_str=*, bytes msg_bytes=*)
     cpdef void          error(self, str msg_str=*, bytes msg_bytes=*)
-    cpdef void          critical(self, str msg_str=*, bytes msg_bytes=*)
     cpdef void          shutdown(self)
 
     cpdef bint          is_running(self)

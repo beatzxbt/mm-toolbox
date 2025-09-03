@@ -1,5 +1,6 @@
 cimport numpy as cnp
-from mm_toolbox.ringbuffer.onedim cimport RingBufferOneDim
+
+from mm_toolbox.ringbuffer.numeric cimport NumericRingBuffer
 
 cdef class MovingAverage:
     cdef:
@@ -7,12 +8,9 @@ cdef class MovingAverage:
         bint                _is_fast
         bint                _is_warm
         double              _value
-        RingBufferOneDim    _values
+        NumericRingBuffer   _values
 
-    # def void              __init__(self, int window, bint is_fast)
-    cdef inline void        ensure_warm(self)
-    cdef inline void        ensure_not_fast(self)
-    cdef inline void        push_to_ringbuffer(self)
+    # def                   __init__(self, int window, bint is_fast=False)
 
     cpdef double            initialize(self, cnp.ndarray values)
     cpdef double            next(self, double value) 
@@ -20,7 +18,8 @@ cdef class MovingAverage:
     cpdef double            get_value(self)
     cpdef cnp.ndarray       get_values(self)
 
-    # def int               __len__(self)
-    # def bool              __contains__(self, double value)
-    # def generator         __iter__(self)
-    # def double            __getitem__(self, int idx)
+    # def __len__(self)
+    # def __iter__(self)
+    # def __getitem__(self, int idx)
+    cdef inline void        __enforce_moving_average_initialized(self)
+    cdef inline void        __enforce_not_fast(self)

@@ -1,6 +1,6 @@
 cimport numpy as cnp
 
-from mm_toolbox.ringbuffer.onedim cimport RingBufferOneDim
+from mm_toolbox.ringbuffer.numeric cimport NumericRingBuffer
 from mm_toolbox.moving_average.base cimport MovingAverage
 
 cdef class WeightedMovingAverage(MovingAverage):
@@ -15,7 +15,7 @@ cdef class WeightedMovingAverage(MovingAverage):
         # so below. Messy, but speeds things up considerably.
         self._window_double = <double>self._window
 
-        self._raw_values = RingBufferOneDim(window)
+        self._raw_values = NumericRingBuffer(window, dtype='float64')
         self._rolling_sum = 0.0    
         self._rolling_wsum = 0.0   
 

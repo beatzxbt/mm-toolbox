@@ -1,67 +1,56 @@
+from libc.math cimport fmax, fmin
 from mm_toolbox.time.time cimport time_ms
 from mm_toolbox.candles.base cimport BaseCandles
 
 cdef class TimeCandles(BaseCandles):
-    """
-    Candle aggregator that creates new candles based on a fixed time interval.
+    """Candle aggregator that creates new candles based on a fixed time interval."""
     
-    A new candle is created when the specified time interval has elapsed.
-    """
-    
-    def __init__(self, double secs_per_bucket, int num_candles):
-        """
-        Initialize the time-based candle aggregator.
-        
-        Args:
-            secs_per_bucket (double): Time interval per candle in seconds.
-            num_candles (int): Maximum number of candles to store.
-        """
-        super().__init__(num_candles)
+    def __init__(self, double secs_per_bucket, int num_candles=1000):
+        """Initialize the time-based candle aggregator."""
         self.millis_per_bucket = secs_per_bucket * 1000.0
         self.next_candle_close_time = time_ms() + self.millis_per_bucket
 
-    cpdef void process_trade(self, double time_ms, bint is_buy, double px, double sz):
-        """
-        Process a single trade tick, updating the current candle.
-        
-        Creates a new candle when the time interval has elapsed.
-        
-        Args:
-            time_ms (double): The timestamp of the trade in milliseconds.
-            is_buy (bint): True if it's a buy trade, False if it's a sell trade.
-            px (double): The trade price.
-            sz (double): The trade size (volume).
-        """
+    cpdef void process_trade(self, object trade):
+        """Process a single trade tick, updating the current candle."""
+        cdef:
+            double time_ms = trade.time_ms
+            bint is_buy = trade.is_buy
+            double price = trade.price
+            double size = trade.size
+            double volume = price * size
+
         if self.is_stale_trade(time_ms):
             return
 
         # Initialize a new candle if this is the first trade
-        if self.num_trades == 0.0:
-            self.open_time_ms = time_ms
-            self.open_px = px
-            self.high_px = px
-            self.low_px = px
+        if self.latest_candle.num_trades == 0:
+            self.latest_candle.open_time_ms = time_ms
+            self.latest_candle.open_price = price
+            self.latest_candle.high_price = price
+            self.latest_candle.low_price = price
 
         # Check if time interval has elapsed
         if self.next_candle_close_time <= time_ms:
-            self.insert_candle()
+            self.insert_and_reset_candle()
             # Calculate the next candle close time as a multiple of millis_per_bucket
             self.next_candle_close_time = (
                 (time_ms // self.millis_per_bucket) + 1
             ) * self.millis_per_bucket
-            self.process_trade(time_ms, is_buy, px, sz)
+            self.process_trade(trade)
             return
 
-        self.high_px = max(self.high_px, px)
-        self.low_px = min(self.low_px, px)
-        self.close_px = px
+        self.latest_candle.high_price = fmax(self.latest_candle.high_price, price)
+        self.latest_candle.low_price = fmin(self.latest_candle.low_price, price)
+        self.latest_candle.close_price = price
 
-        # Update volume based on trade direction
         if is_buy:
-            self.buy_sz += sz
+            self.latest_candle.buy_size += size
+            self.latest_candle.buy_volume += volume
         else:
-            self.sell_sz += sz
+            self.latest_candle.sell_size += size
+            self.latest_candle.sell_volume += volume
 
-        self.vwap_px = self.calculate_vwap(px, sz)
-        self.num_trades += 1.0
-        self.close_time_ms = time_ms
+        self.latest_candle.vwap_price = self.calculate_vwap(volume, size)
+        self.latest_candle.trades.append(trade)
+        self.latest_candle.num_trades += 1
+        self.latest_candle.close_time_ms = time_ms

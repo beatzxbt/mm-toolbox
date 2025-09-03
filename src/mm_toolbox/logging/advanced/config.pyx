@@ -1,4 +1,5 @@
-from mm_toolbox.logging.advanced.structs cimport LogLevel, CLogLevel
+from mm_toolbox.logging.advanced.structs import LogLevel
+from mm_toolbox.logging.advanced.structs cimport CLogLevel
 
 cdef class LoggerConfig:
     def __init__(
@@ -46,12 +47,12 @@ cdef class LoggerConfig:
             level (LogLevel): The log level to map.
         """
         if level == LogLevel.TRACE:
-            self.base_level = CLogLevel.TRACE
+            self.base_level = CLogLevel.CTRACE
         elif level == LogLevel.DEBUG:
-            self.base_level = CLogLevel.DEBUG
+            self.base_level = CLogLevel.CDEBUG
         elif level == LogLevel.INFO:
-            self.base_level = CLogLevel.INFO
+            self.base_level = CLogLevel.CINFO
         elif level == LogLevel.WARNING:
-            self.base_level = CLogLevel.WARNING
+            self.base_level = CLogLevel.CWARNING
         elif level == LogLevel.ERROR:
-            self.base_level = CLogLevel.ERROR
+            self.base_level = CLogLevel.CERROR

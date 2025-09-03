@@ -1,16 +1,18 @@
+"""Base class for advanced logging handlers."""
+
 import asyncio
-import msgspec
-import aiohttp
 from abc import ABC, abstractmethod
 
-from mm_toolbox.time import time_iso8601
+import aiohttp
+import msgspec
+
 from mm_toolbox.logging.advanced.config import LoggerConfig
 from mm_toolbox.logging.advanced.structs import LogLevel
+from mm_toolbox.time import time_iso8601
 
 
 class BaseLogHandler(ABC):
-    """
-    Abstract base class for log handlers.
+    """Abstract base class for log handlers.
 
     All handlers must implement `.push(buffer)`, called from the
     main logger whenever the buffer fills up.
@@ -86,6 +88,7 @@ class BaseLogHandler(ABC):
         Args:
             name: The name of the log batch.
             logs: A batch of log messages in the format: [(time_ns: int, level: LogLevel, msg: bytes)]
+
         """
         pass
 

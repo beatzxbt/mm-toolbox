@@ -1,3 +1,8 @@
-from .orderbook import Orderbook as Orderbook
+"""Orderbook data structures and operations."""
 
-__all__ = ["Orderbook"]
+from .orderbook import (
+    Orderbook as Orderbook,
+)
+from .orderbook import (
+    OrderbookLevel as OrderbookLevel,
+)

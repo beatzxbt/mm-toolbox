@@ -1,48 +1,89 @@
-[tool.poetry]
-package-mode = true
+[project]
 name = "mm-toolbox"
 version = "1.0.0"
-description = "high-performance python tools for market making systems."
-license = "MIT"
-authors = [
-    "beatzxbt <121855680+beatzxbt@users.noreply.github.com>"
-]
+description = "High-performance Python tools for market making systems"
 readme = "README.md"
-repository = "https://github.com/beatzxbt/mm-toolbox"
-keywords = ["market making", "hft", "high performance python"]
-
+authors = [
+    { name = "beatzxbt", email = "121855680+beatzxbt@users.noreply.github.com" }
+]
+requires-python = ">=3.12,<3.14"
+license = "MIT"
+keywords = ["market making", "hft", "high-frequency trading", "trading", "cython", "performance"]
 classifiers = [
-    "Development Status :: 5 - Stable",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Financial and Insurance Industry",
     "Natural Language :: English",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Topic :: Software Development :: Libraries :: Python Modules"
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering",
+    "Typing :: Typed"
+]
+urls = { homepage = "https://github.com/beatzxbt/mm-toolbox", repository = "https://github.com/beatzxbt/mm-toolbox" }
+dependencies = [
+    "numpy",
+    "picows",
+    "ciso8601",
+    "msgspec",
+    "zmq",
+    "aiohttp",
 ]
 
-[tool.poetry.dependencies]
-python = ">=3.11.0,<3.14.0"
-numpy = "^2.0.0"
-numba = "^0.60.0"
-picows = "*"
-ciso8601 = "*"
-msgspec = "*"
-zmq = "^0.0.0"
-aiohttp = "^3.11.11"
-setuptools = "^78.1.0"
-
-[tool.poetry.group.dev.dependencies]
-poetry = "*"
-pytest = "*"
-ruff = "*"
-cython = "^3.0.11"
-
 [build-system]
-requires = ["setuptools>=61.0", "wheel", "cython"]
-build-backend = "setuptools.build_meta"
+requires = [
+    "uv_build>=0.8.0,<0.9",
+    "setuptools>=75",
+    "wheel",
+    "Cython>=3.0.11",
+    "numpy>=1.26",
+]
+build-backend = "uv_build"
+
+[tool.setuptools]
+zip-safe = false
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.cibuildwheel]
+build = "cp312-* cp313-*"
+skip = "*-win32 *-manylinux_i686 *-musllinux_*"
+test-command = "pytest {project}/tests"
+test-requires = ["pytest", "pytest-asyncio"]
+
+[tool.cibuildwheel.linux]
+before-all = "yum install -y gcc-c++ || apt-get update && apt-get install -y g++"
+
+[tool.cibuildwheel.macos]
+environment = { MACOSX_DEPLOYMENT_TARGET = "10.14" }
+
+[tool.cibuildwheel.windows]
+before-build = "pip install delvewheel"
+repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+    "cython>=3.0.11",
+    "pyright>=1.1.403",
+    "uv>=0.8.8",
+    "setuptools>=80.9.0",
+    "watchfiles>=0.21.0",
+    "pytest-asyncio>=1.1.0",
+]
+build = [
+    "build>=1.0.0",
+    "twine>=5.0.0",
+    "cibuildwheel>=2.16.0",
+]
+
+[tool.pyright]
+include = ["src"]
+extraPaths = ["src"]

@@ -1,4 +1,4 @@
-
+from enum import IntEnum
 from libc.stdint cimport (
     uint8_t as u8,
     uint32_t as u32,
@@ -10,17 +10,42 @@ from mm_toolbox.time.time cimport time_ns
 from mm_toolbox.logging.advanced.structs cimport (
     BufMsgType,
     CLogLevel,
-    LogLevel,
 )
+
+cdef int clog_level_to_int(CLogLevel clog_level):
+    """Maps a CLogLevel to an int."""
+    if clog_level == CLogLevel.TRACE:
+        return 0
+    elif clog_level == CLogLevel.DEBUG:
+        return 1
+    elif clog_level == CLogLevel.INFO:
+        return 2
+    elif clog_level == CLogLevel.WARNING:
+        return 3
+    elif clog_level == CLogLevel.ERROR:
+        return 4
+
+cdef bytes int_to_log_name(int log_level):
+    """Maps an int (derived from CLogLevel) to its corresponding log name"""
+    if log_level == 0:
+        return b"TRACE"
+    elif log_level == 1:
+        return b"DEBUG"
+    elif log_level == 2:
+        return b"INFO"
+    elif log_level == 3:
+        return b"WARNING"
+    elif log_level == 4:
+        return b"ERROR"
 
 cdef class LogBatch:
     def __cinit__(self, bytes name):
-        self.name_len = len(name)
         self.name = name
+        self.name_len = len(name)
 
-        # If you somehow hit the 1024 * 1024 log limit in 1s, god help you
+        # If you somehow hit the 1024 ** 2 log limit in 1s, god help you
         self.num_logs_in_batch = 0
-        self.log_batch = [b""] * 1024 * 1024
+        self.log_batch = [b""] * 1024 ** 2
 
     cdef void add_log(self, CLogLevel level, bytes msg):
         """
@@ -31,10 +56,10 @@ cdef class LogBatch:
         9:12 = Message length
         13:(Message length) = Message
         """ 
-        cdef u64 time = time_ns()
-        cdef u32 msg_len = len(msg)
-        
-        cdef bytes buffer = bytes(sizeof(u64) + sizeof(u8) + sizeof(u32) + msg_len)
+        cdef: 
+            u64 time = time_ns()
+            u32 msg_len = len(msg)
+            bytes buffer = bytes(sizeof(u64) + sizeof(u8) + sizeof(u32) + msg_len)
 
         memcpy(buffer, &time, sizeof(u64))
         memcpy(buffer + sizeof(u64), &level, sizeof(u8))
@@ -49,15 +74,14 @@ cdef class LogBatch:
         Format: {headers: {buf_msg_type: u8, len_name: u8, name: bytes, num_logs: u32}, logs: bytes[]}
 
         Args:
-            name (bytes): The name of the log batch.
-            logs (list[bytes]): The list of Log structs to include in the batch.
+            reset (bool): Whether to reset the number of logs in the batch.
         """
-        cdef BufMsgType buf_msg_type = BufMsgType.LOG
-        cdef u32        num_logs = self.num_logs_in_batch
+        cdef:
+            BufMsgType buf_msg_type = BufMsgType.LOG
+            u32        num_logs = self.num_logs_in_batch
         
         # Calculate total size of all logs
-        cdef u32 total_logs_size = 0
-        cdef u32 i
+        cdef u32 i, total_logs_size = 0
         for i in range(num_logs):
             total_logs_size += len(self.log_batch[i])
         
@@ -88,15 +112,19 @@ cdef class LogBatch:
         For use in the MasterLogger's own generated logs.
 
         Logs returned in the format: [(time_ns: int, level: LogLevel, msg: bytes)]
+
+        Args:
+            reset (bool): Whether to reset the number of logs in the batch.
         """
         cdef list[tuple] logs = []
 
         # Individual log components
-        cdef bytes log_data
-        cdef u64 time
-        cdef u8 level
-        cdef u32 msg_len
-        cdef bytes msg
+        cdef:
+            bytes log_data
+            u64 time
+            u8 level
+            u32 msg_len
+            bytes msg
 
         cdef u32 i, pos
         for i in range(self.num_logs_in_batch):
@@ -119,75 +147,76 @@ cdef class LogBatch:
             msg = log_data[pos:pos + msg_len]
             pos += msg_len
 
-            logs.append((time, clog_level_to_log_level(level), msg))
+            logs.append((time, int_to_log_name(level), msg))
 
         if reset:
             self.num_logs_in_batch = 0
 
         return logs
 
-    @staticmethod
-    cdef tuple from_bytes(bytes buffer):
-        """
-        Buffer must be the exact output given by .to_bytes()
+cdef tuple[bytes, list[tuple]] log_batch_from_bytes(bytes buffer):
+    """
+    Buffer must be the exact output given by .to_bytes()
 
-        Logs returned in the format: (name: bytes, [(time_ns: int, level: LogLevel, msg: bytes)])
+    Logs returned in the format: (name: bytes, [(time_ns: int, level: LogLevel, msg: bytes)])
 
-        This is only ever called within the MasterLogger, so speed is not a priority.
-        """
-        # Name 
-        cdef u8 len_name = buffer[1]
-        cdef bytes name = buffer[2:2 + len_name]
+    This is only ever called within the MasterLogger, so speed is not a priority.
+    """
+    # Name 
+    cdef u8 len_name = buffer[1]
+    cdef bytes name = buffer[2:2 + len_name]
 
-        # Batch of logs
-        cdef list[tuple] logs = []
-        cdef u32 num_logs
-        memcpy(&num_logs, buffer + 2 + len_name, sizeof(u32))
+    # Batch of logs
+    cdef list[tuple] logs = []
+    cdef u32 num_logs
+    memcpy(&num_logs, buffer + 2 + len_name, sizeof(u32))
 
-        # Individual log components
-        cdef u64 time
-        cdef u8 level
-        cdef u32 msg_len
-        cdef bytes msg
+    # Individual log components
+    cdef:
+        u64 time
+        u8  level
+        u32 msg_len
+        bytes msg
 
-        cdef u32 pos = 2 + len_name + sizeof(u32)
-        cdef u32 buffer_len = len(buffer)
+    cdef u32 pos = 2 + len_name + sizeof(u32)
+    cdef u32 buffer_len = len(buffer)
+    
+    for i in range(num_logs):
+        # Check bounds before reading
+        if pos + sizeof(u64) + sizeof(u8) + sizeof(u32) > buffer_len:
+            break
+            
+        # Extract time (u64)
+        memcpy(&time, buffer + pos, sizeof(u64))
+        pos += sizeof(u64)
         
-        for i in range(num_logs):
-            # Check bounds before reading
-            if pos + sizeof(u64) + sizeof(u8) + sizeof(u32) > buffer_len:
-                break
-                
-            # Extract time (u64)
-            memcpy(&time, buffer + pos, sizeof(u64))
-            pos += sizeof(u64)
+        # Extract level (u8)
+        memcpy(&level, buffer + pos, sizeof(u8))
+        pos += sizeof(u8)
+        
+        # Extract message length (u32)
+        memcpy(&msg_len, buffer + pos, sizeof(u32))
+        pos += sizeof(u32)
+        
+        # Check bounds for message
+        if pos + msg_len > buffer_len:
+            break  # Avoid buffer overrun
             
-            # Extract level (u8)
-            memcpy(&level, buffer + pos, sizeof(u8))
-            pos += sizeof(u8)
-            
-            # Extract message length (u32)
-            memcpy(&msg_len, buffer + pos, sizeof(u32))
-            pos += sizeof(u32)
-            
-            # Check bounds for message
-            if pos + msg_len > buffer_len:
-                break  # Avoid buffer overrun
-                
-            # Extract message (bytes)
-            msg = buffer[pos:pos + msg_len]
-            pos += msg_len
+        # Extract message (bytes)
+        msg = buffer[pos:pos + msg_len]
+        pos += msg_len
 
-            logs.append((time, clog_level_to_log_level(level), msg))
+        logs.append((time, int_to_log_name(level), msg))
 
-        return (name, logs)
+    return (name, logs)
 
 cdef bytes heartbeat_to_bytes(bytes name, u64 time, u64 next_checkin_time):
     """
     {buf_msg_type: u8, len_name: u8, name: bytes, time: u64, next_checkin_time: u64}
     """
-    cdef const u8 buf_msg_type = BufMsgType.HEARTBEAT
-    cdef u8 len_name = len(name)
+    cdef:
+        const u8 buf_msg_type = BufMsgType.HEARTBEAT
+        u8 len_name = len(name)
 
     cdef bytes buffer = bytes(sizeof(u8) + sizeof(u8) + len_name + sizeof(u64) + sizeof(u64))
 
@@ -205,29 +234,10 @@ cdef tuple[bytes, u64, u64] heartbeat_from_bytes(bytes buffer):
     Returns:
         tuple[bytes, u64, u64]: A tuple of (name, time, next_checkin_time)
     """
-    cdef u8 len_name = buffer[1]
-    cdef bytes name = buffer[2:2 + len_name]
+    cdef:
+        u8 len_name = buffer[1]
+        bytes name = buffer[2:2 + len_name]
 
     cdef u64 time = buffer[2 + len_name:2 + len_name + sizeof(u64)]
     cdef u64 next_checkin_time = buffer[2 + len_name + sizeof(u64):2 + len_name + sizeof(u64) + sizeof(u64)]
     return name, time, next_checkin_time
-
-cdef LogLevel clog_level_to_log_level(CLogLevel clog_level):
-    """
-    Maps a LogLevel to a CLogLevel.
-    
-    Args:
-        level (LogLevel): The log level to map.
-    """
-    if clog_level == CLogLevel.TRACE:
-        return LogLevel.TRACE
-    elif clog_level == CLogLevel.DEBUG:
-        return LogLevel.DEBUG
-    elif clog_level == CLogLevel.INFO:
-        return LogLevel.INFO
-    elif clog_level == CLogLevel.WARNING:
-        return LogLevel.WARNING
-    elif clog_level == CLogLevel.ERROR:
-        return LogLevel.ERROR
-    elif clog_level == CLogLevel.CRITICAL:
-        return LogLevel.CRITICAL
