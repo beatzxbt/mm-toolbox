@@ -102,7 +102,6 @@ class IPCRingBufferProducer:
         """Stop the producer and close the socket."""
         if self._socket is not None:
             self._socket.close()
-            self._socket = None
         self._context.term()
         self._is_started = False
 
@@ -195,10 +194,8 @@ class IPCRingBufferConsumer:
         """Stop the consumer and close the socket."""
         if self._socket is not None:
             self._socket.close()
-            self._socket = None
         if self._asocket is not None:
             self._asocket.close()
-            self._asocket = None
         self._context.term()
         self._is_started = False
 
