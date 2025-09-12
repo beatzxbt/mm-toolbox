@@ -162,7 +162,7 @@ class IPCRingBufferConsumer:
             offset += 4
             if offset + length > buf_len:
                 raise ValueError("Corrupted packed message: length exceeds buffer")
-            item = buf_mv[offset : offset + length]
+            item = bytes(buf_mv[offset : offset + length])
             items.append(item)
             offset += length
         return items
@@ -185,7 +185,7 @@ class IPCRingBufferConsumer:
             offset += 4
             if offset + length > buf_len:
                 raise ValueError("Corrupted packed message: length exceeds buffer")
-            item = buf_mv[offset : offset + length]
+            item = bytes(buf_mv[offset : offset + length])
             items.append(item)
             offset += length
         return items
