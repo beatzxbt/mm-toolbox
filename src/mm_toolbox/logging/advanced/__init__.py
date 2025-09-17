@@ -11,7 +11,7 @@ from .handlers.discord import (
 )
 from .handlers.file import FileLogHandler as FileLogHandler
 from .master import MasterLogger as MasterLogger
-from .structs import LogLevel as LogLevel
+from .pylog import PyLogLevel as LogLevel
 from .worker import WorkerLogger as WorkerLogger
 
 __all__ = [
