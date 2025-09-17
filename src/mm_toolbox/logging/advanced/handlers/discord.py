@@ -26,13 +26,11 @@ class DiscordLogHandler(BaseLogHandler):
         self.url = webhook
         self.headers = {"Content-Type": "application/json"}
 
-    def push(self, name, logs):
+    def push(self, logs):
         try:
             formatted_logs = "\n".join(
                 [
-                    self.format_log(
-                        name=name, time_ns=log[0], level=log[1], msg=log[2]
-                    ).decode()
+                    self.format_log(log)
                     for log in logs
                 ]
             )

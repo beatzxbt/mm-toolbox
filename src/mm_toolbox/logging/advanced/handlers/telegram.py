@@ -24,14 +24,12 @@ class TelegramLogHandler(BaseLogHandler):
             "disable_web_page_preview": True,
         }
 
-    def push(self, name, logs):
+    def push(self, logs):
         try:
             for log in logs:
                 self.partial_payload.update(
                     {
-                        "text": self.format_log(
-                            name=name, time_ns=log[0], level=log[1], msg=log[2]
-                        )
+                        "text": self.format_log(log)
                     }
                 )
                 self.ev_loop.create_task(

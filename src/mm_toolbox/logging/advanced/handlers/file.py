@@ -43,17 +43,15 @@ class FileLogHandler(BaseLogHandler):
             except Exception as e:
                 print(f"Failed to create or truncate file; {e}")
 
-    def push(self, name, logs):
+    def push(self, logs):
         try:
             with open(self.filepath, "a") as file:
                 msgs = "\n".join(
                     [
-                        self.format_log(
-                            name=name, time_ns=log[0], level=log[1], msg=log[2]
-                        ).decode()
+                        self.format_log(log)
                         for log in logs
                     ]
-                )
+                ) + "\n"
                 file.write(msgs)
                 file.flush()
 
