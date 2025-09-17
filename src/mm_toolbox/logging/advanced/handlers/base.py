@@ -7,7 +7,7 @@ import aiohttp
 import msgspec
 
 from mm_toolbox.logging.advanced.config import LoggerConfig
-from mm_toolbox.logging.advanced.pylog import PyLogLevel
+from mm_toolbox.logging.advanced.pylog import PyLog, PyLogLevel
 from mm_toolbox.time import time_iso8601
 
 
@@ -65,32 +65,27 @@ class BaseLogHandler(ABC):
         """Add the primary config to the handler."""
         self._primary_config = config
 
-    def format_log(
-        self, time_ns: int, name: bytes, level: PyLogLevel, msg: bytes
-    ) -> bytes:
+    def format_log(self, log: PyLog) -> str:
         """Format a log message to a string."""
         if self._primary_config:
             formatted_str = self._primary_config.str_format % {
-                "asctime": time_iso8601(float(time_ns)),
-                "levelname": level.decode() if isinstance(level, bytes) else str(level),
-                "name": name.decode(),
-                "message": msg.decode(),
+                "asctime": time_iso8601(float(log.timestamp_ns)),
+                "levelname": log.level.name,
+                "name": log.name.decode(),
+                "message": log.message.decode(),
             }
-            return formatted_str.encode()
+            return formatted_str
         else:
             raise RuntimeError(
                 f"No primary config found for handler {self.__class__.__name__}"
             )
 
     @abstractmethod
-    def push(self, name: bytes, logs: list[tuple[int, PyLogLevel, bytes]]):
-        """Push a batch of log messages to the external system.
+    def push(self, logs: list[PyLog]):
+        """Push a batch of PyLog messages to the external system.
 
         Args:
-            name: The name of the log batch.
-            logs: A batch of log messages in the format:
-                [(time_ns: int, level: PyLogLevel, msg: bytes)]
-
+            logs: A batch of PyLog objects.
         """
         pass
 
