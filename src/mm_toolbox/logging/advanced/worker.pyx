@@ -1,24 +1,27 @@
+# worker_logger.pyx
 import os
-import zmq
 import time
 import threading
 
 from libc.stdint cimport (
-    uint8_t as u8,
+    uint8_t as u8, 
+    uint32_t as u32, 
     uint64_t as u64,
 )
 
-from mm_toolbox.logging.advanced.structs cimport (
-    LogLevel,
-    CLogLevel,
-    LogBatch,
-    heartbeat_to_bytes,
+from mm_toolbox.time.time cimport time_ns
+from mm_toolbox.ringbuffer.ipc import IPCRingBufferProducer, IPCRingBufferConfig
+
+from mm_toolbox.logging.advanced.log cimport CLogLevel
+from mm_toolbox.logging.advanced.protocol cimport (
+    BinaryWriter, 
+    MessageType, 
+    InternalMessage, 
+    create_internal_message, 
+    internal_message_to_bytes
 )
 
-from mm_toolbox.logging.utils.zmq_connection import ZmqConnection
 from mm_toolbox.logging.advanced.config cimport LoggerConfig
-
-from mm_toolbox.time.time cimport time_ns
 
 
 cdef class WorkerLogger:
@@ -29,28 +32,24 @@ cdef class WorkerLogger:
         LoggerConfig config=None, 
         str name=None,
     ):
-        """
-        Initialize the WorkerLogger.
+        self._config = config if config else LoggerConfig() 
 
-        Args:
-            config (LoggerConfig): Configuration details for connecting to the master logger.
-            name (str, optional): The name of the worker to attach to log messages. 
-                Defaults to an empty string.
-        """
-        self._config = config
-        if self._config is None:
-            self._config = LoggerConfig()
-
-        self._name = name.encode() if name else f"WORKER{os.getpid()}".encode()
+        self._name = name if name else f"WORKER{os.getpid()}"
+        self._name = self._name.encode('utf-8')
+        self._len_name = len(self._name)
+        self._name_as_chars = <unsigned char*>self._name
         
-        self._log_batch = LogBatch(name=self._name)
+        self._num_pending_logs = 0
+        self._batch_writer = BinaryWriter(initial_capacity=1*1024*1024)  # 1MB baseline
 
-        self._conn = ZmqConnection(
-            socket_type=zmq.PUSH,
-            path=config.path,
-            bind=False
+        self._transport = IPCRingBufferProducer(
+            IPCRingBufferConfig(
+                path=self._config.path,
+                backlog=10000,  
+                num_producers=2,  # >1 workers to indicate MPSC
+                num_consumers=1   # Single master
+            )
         )
-        self._conn.start()
         
         self._is_running = True
         
@@ -63,154 +62,98 @@ cdef class WorkerLogger:
         self.info(f"WorkerLogger started; name: {self._name.decode()}")
 
     cpdef void _timed_operations(self):
-        """
-        Background thread that periodically sends heartbeat messages to the master logger.
-        """
-        cdef u8     CHECKIN_INTERVAL_S = 60 
-        cdef u64    ONE_SECOND_IN_NS = 1000000000
-
-        cdef u64    current_time_ns = time_ns()
-        cdef double current_time_s = current_time_ns / ONE_SECOND_IN_NS
-        cdef double last_flush_time = current_time_s
-        cdef double last_heartbeat_time = current_time_s
-
+        """Background processing loop."""
         while self._is_running:
-            time.sleep(0.1)
+            time.sleep(self._config.flush_interval_s)
+            if self._num_pending_logs > 0:
+                self._flush_logs()
             
-            current_time_ns = time_ns()
-            current_time_s = current_time_ns / ONE_SECOND_IN_NS
+    cdef void _flush_logs(self):
+        """Flush pending logs."""
+        if self._num_pending_logs == 0:
+            return
+        
+        cdef BinaryWriter data_writer = BinaryWriter(8 + self._len_name + self._batch_writer.length())
+        data_writer.write_u32(self._len_name)
+        data_writer.write_chars(self._name_as_chars, self._len_name)
+        data_writer.write_u32(self._num_pending_logs)
+        data_writer.write_chars(self._batch_writer._buffer, self._batch_writer.length())
+        
+        cdef unsigned char* data_ptr
+        cdef u32 data_len
+        data_ptr, data_len = data_writer.finalize_to_chars()
 
-            # Check if it's time to flush the log buffer
-            if (current_time_s - last_flush_time) >= self._config.flush_interval_s:
-                if self._log_batch.num_logs_in_batch > 0:
-                    log_batch_bytes = self._log_batch.to_bytes(reset=True)
-                    self._conn.send(log_batch_bytes)
-                last_flush_time = current_time_s
-            
-            # Check if it's time to send heartbeat
-            if (current_time_s - last_heartbeat_time) >= CHECKIN_INTERVAL_S:
-                heartbeat_bytes = heartbeat_to_bytes(
-                    name=self._name, 
-                    time=current_time_ns, 
-                    next_checkin_time=current_time_ns + CHECKIN_INTERVAL_S * ONE_SECOND_IN_NS
-                )
-                self._conn.send(heartbeat_bytes)
-                last_heartbeat_time = current_time_s
+        cdef InternalMessage internal_message = create_internal_message(
+            MessageType.LOG, 
+            time_ns(),
+            data_len, 
+            data_ptr
+        )
+        self._transport.insert(internal_message_to_bytes(internal_message))
 
-    cpdef void set_log_level(self, LogLevel level):
-        """
-        Modify the logger's base log level at runtime.
-
-        Args:
-            level (LogLevel): The new base log level.
-        """
-        self.debug(f"Changing base log level to '{level.value}'")
-        self._config.set_base_level(level)  
+        self._batch_writer.reset()
+        self._num_pending_logs = 0
+    
+    cdef void _add_log_to_batch(self, CLogLevel clevel, u32 message_len, unsigned char* message):
+        """Add a log to the batch."""
+        cdef u64 time_now_ns = time_ns()
+        self._batch_writer.write_u64(time_now_ns)
+        
+        self._batch_writer.write_u32(self._len_name)
+        self._batch_writer.write_chars(self._name_as_chars, self._len_name)
+        
+        self._batch_writer.write_u8(<u8>clevel)
+        
+        self._batch_writer.write_u32(message_len)
+        self._batch_writer.write_chars(message, message_len)
+        
+        self._num_pending_logs += 1
 
     cpdef void trace(self, str msg_str=None, bytes msg_bytes=b""):
-        """
-        Send a trace-level log message.
-
-        Args:
-            msg_str (str, optional): The log message text as a string.
-            msg_bytes (bytes, optional): The log message text as bytes.
-        """
-        cdef bytes msg
-        cdef bint valid_level = self._config.base_level == CLogLevel.CTRACE
-        if self._is_running and valid_level:
-            msg = msg_str.encode() if msg_str is not None else msg_bytes
-            self._log_batch.add_log(CLogLevel.CTRACE, msg)
+        """Send a trace-level log message."""
+        if self._is_running and self._config.base_level <= CLogLevel.TRACE:
+            message = msg_str.encode('utf-8') if msg_str else msg_bytes
+            self._add_log_to_batch(CLogLevel.TRACE, len(message), <unsigned char*>message)
 
     cpdef void debug(self, str msg_str=None, bytes msg_bytes=b""):
-        """
-        Send a debug-level log message.
-
-        Args:
-            msg_str (str, optional): The log message text as a string.
-            msg_bytes (bytes, optional): The log message text as bytes.
-        """
-        cdef bytes msg
-        cdef bint valid_level = self._config.base_level <= CLogLevel.CDEBUG
-        if self._is_running and valid_level:
-            msg = msg_str.encode() if msg_str is not None else msg_bytes
-            self._log_batch.add_log(CLogLevel.CDEBUG, msg)
-
+        """Send a debug-level log message."""
+        if self._is_running and self._config.base_level <= CLogLevel.DEBUG:
+            message = msg_str.encode('utf-8') if msg_str else msg_bytes
+            self._add_log_to_batch(CLogLevel.DEBUG, len(message), <unsigned char*>message)
+    
     cpdef void info(self, str msg_str=None, bytes msg_bytes=b""):
-        """
-        Send an info-level log message.
-
-        Args:
-            msg_str (str, optional): The log message text as a string.
-            msg_bytes (bytes, optional): The log message text as bytes.
-        """
-        cdef bytes msg
-        cdef bint valid_level = self._config.base_level <= CLogLevel.CINFO
-        if self._is_running and valid_level:
-            msg = msg_str.encode() if msg_str is not None else msg_bytes
-            self._log_batch.add_log(CLogLevel.CINFO, msg)
-
+        """Send an info-level log message."""
+        if self._is_running and self._config.base_level <= CLogLevel.INFO:
+            message = msg_str.encode('utf-8') if msg_str else msg_bytes
+            self._add_log_to_batch(CLogLevel.INFO, len(message), <unsigned char*>message)
+    
     cpdef void warning(self, str msg_str=None, bytes msg_bytes=b""):
-        """
-        Send a warning-level log message.
-
-        Args:
-            msg_str (str, optional): The log message text as a string.
-            msg_bytes (bytes, optional): The log message text as bytes.
-        """
-        cdef bytes msg
-        cdef bint valid_level = self._config.base_level <= CLogLevel.CWARNING
-        if self._is_running and valid_level:
-            msg = msg_str.encode() if msg_str is not None else msg_bytes
-            self._log_batch.add_log(CLogLevel.CWARNING, msg)
-
+        """Send a warning-level log message."""
+        if self._is_running and self._config.base_level <= CLogLevel.WARNING:
+            message = msg_str.encode('utf-8') if msg_str else msg_bytes
+            self._add_log_to_batch(CLogLevel.WARNING, len(message), <unsigned char*>message)
+    
     cpdef void error(self, str msg_str=None, bytes msg_bytes=b""):
-        """
-        Send an error-level log message.
-
-        Args:
-            msg_str (str, optional): The log message text as a string.
-            msg_bytes (bytes, optional): The log message text as bytes.
-        """
-        cdef bytes msg
-        cdef bint valid_level = self._config.base_level <= CLogLevel.CERROR
-        if self._is_running and valid_level:
-            msg = msg_str.encode() if msg_str is not None else msg_bytes
-            self._log_batch.add_log(CLogLevel.CERROR, msg)
+        """Send an error-level log message."""
+        if self._is_running and self._config.base_level <= CLogLevel.ERROR:
+            message = msg_str.encode('utf-8') if msg_str else msg_bytes
+            self._add_log_to_batch(CLogLevel.ERROR, len(message), <unsigned char*>message)
 
     cpdef void shutdown(self):
-        """
-        Flush any remaining messages and shuts down the worker logger.
-
-        This method drains the log buffer, sending any remaining items to the master logger, 
-        and then stops the connection.
-
-        Warning:
-            After calling `shutdown()`, this logger should not be used again.
-        """
+        """Shutdownwith proper cleanup."""
         if not self._is_running:
             return
         
-        self.warning("Shutting down worker logger; flushing buffers and stopping connection")
-
-        # No new logs can enter the buffers after this point
+        self.warning(f"Shutting down worker logger; name: {self._name.decode()}")
         self._is_running = False
-
-        if self._log_batch.num_logs_in_batch > 0:
-            self._conn.send(self._log_batch.to_bytes(reset=True))
         
+        # Final flush, having kept self._is_running = True until this 
+        # point ensures that no more logs will be added into the batch.
+        self._flush_logs()
+        
+        # Wait for thread and cleanup
         self._timed_operations_thread.join()
-
-        # Send a veeery long heartbeat time to ensure the MasterLogger doesnt
-        # follow up on this worker. This is simpler than having a dedicated
-        # shutdown message.
-        heartbeat_bytes = heartbeat_to_bytes(
-            name=self._name, 
-            time=time_ns(), 
-            next_checkin_time=time_ns() + 1000000000000000000
-        )
-        self._conn.send(heartbeat_bytes)
-
-        self._conn.stop()
+        self._transport.stop()
 
     cpdef bint is_running(self):
         """
@@ -224,7 +167,7 @@ cdef class WorkerLogger:
         """
         return self._name.decode()
 
-    cpdef LoggerConfig get_config(self):
+    cpdef object get_config(self):
         """
         Get the configuration of the logger.
         """
