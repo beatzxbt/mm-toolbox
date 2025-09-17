@@ -1,4 +1,4 @@
-from mm_toolbox.logging.advanced.structs cimport LogLevel, CLogLevel
+from mm_toolbox.logging.advanced.log cimport CLogLevel
 
 cdef class LoggerConfig:
     cdef:
@@ -8,4 +8,4 @@ cdef class LoggerConfig:
         public str          path
         public double       flush_interval_s
 
-    cdef inline void set_base_level(self, LogLevel level)
+    cdef inline CLogLevel set_base_level_to_clog_level(self, object level)
