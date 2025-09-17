@@ -19,7 +19,8 @@ class DiscordLogHandler(BaseLogHandler):
         super().__init__()
         if not webhook.startswith("https://discord.com/api/webhooks/"):
             raise ValueError(
-                f"Invalid webhook format; expected 'https://discord.com/api/webhooks/*' but got {webhook}"
+                f"Invalid webhook format; expected "
+                f"'https://discord.com/api/webhooks/*' but got {webhook}"
             )
 
         self.url = webhook
@@ -29,7 +30,9 @@ class DiscordLogHandler(BaseLogHandler):
         try:
             formatted_logs = "\n".join(
                 [
-                    self.format_log(name=name, time_ns=log[0], level=log[1], msg=log[2])
+                    self.format_log(
+                        name=name, time_ns=log[0], level=log[1], msg=log[2]
+                    ).decode()
                     for log in logs
                 ]
             )
