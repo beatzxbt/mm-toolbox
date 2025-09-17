@@ -1,90 +1,45 @@
-"""Type stubs for advanced logging worker logger."""
-
-from typing import Any
+"""Type stubs for worker module."""
 
 from mm_toolbox.logging.advanced.config import LoggerConfig
-from mm_toolbox.logging.advanced.structs import LogLevel
 
 class WorkerLogger:
-    """A lightweight worker logger that sends log messages and data to the master logger.
+    """Lightweight worker logger that sends log messages to the master logger."""
 
-    This class manages two internal buffers—one for log messages and one for data messages—
-    and pushes them to the master logger when full or upon request.
-    """
-
-    def _timed_operations(self) -> Any:
-        """Background thread that periodically sends heartbeat messages to the master logger."""
-        ...
-
-    def set_log_level(self, level: LogLevel) -> Any:
-        """Modify the logger's base log level at runtime.
+    def __init__(
+        self,
+        config: LoggerConfig | None = None,
+        name: str | None = None,
+    ) -> None:
+        """Initialize a WorkerLogger.
 
         Args:
-            level (LogLevel): The new base log level.
-
+            config: Configuration for the logger. If None, uses default LoggerConfig.
+            name: Name for the logger. If None, uses f"WORKER{os.getpid()}".
         """
         ...
 
-    def trace(self, msg_str: str = ..., msg_bytes: bytes = ...) -> Any:
-        """Send a trace-level log message.
-
-        Args:
-            msg_str (str, optional): The log message text as a string.
-            msg_bytes (bytes, optional): The log message text as bytes.
-
-        """
+    def trace(self, msg_str: str | None = None, msg_bytes: bytes = b"") -> None:
+        """Send a trace-level log message."""
         ...
 
-    def debug(self, msg_str: str = ..., msg_bytes: bytes = ...) -> Any:
-        """Send a debug-level log message.
-
-        Args:
-            msg_str (str, optional): The log message text as a string.
-            msg_bytes (bytes, optional): The log message text as bytes.
-
-        """
+    def debug(self, msg_str: str | None = None, msg_bytes: bytes = b"") -> None:
+        """Send a debug-level log message."""
         ...
 
-    def info(self, msg_str: str = ..., msg_bytes: bytes = ...) -> Any:
-        """Send an info-level log message.
-
-        Args:
-            msg_str (str, optional): The log message text as a string.
-            msg_bytes (bytes, optional): The log message text as bytes.
-
-        """
+    def info(self, msg_str: str | None = None, msg_bytes: bytes = b"") -> None:
+        """Send an info-level log message."""
         ...
 
-    def warning(self, msg_str: str = ..., msg_bytes: bytes = ...) -> Any:
-        """Send a warning-level log message.
-
-        Args:
-            msg_str (str, optional): The log message text as a string.
-            msg_bytes (bytes, optional): The log message text as bytes.
-
-        """
+    def warning(self, msg_str: str | None = None, msg_bytes: bytes = b"") -> None:
+        """Send a warning-level log message."""
         ...
 
-    def error(self, msg_str: str = ..., msg_bytes: bytes = ...) -> Any:
-        """Send an error-level log message.
-
-        Args:
-            msg_str (str, optional): The log message text as a string.
-            msg_bytes (bytes, optional): The log message text as bytes.
-
-        """
+    def error(self, msg_str: str | None = None, msg_bytes: bytes = b"") -> None:
+        """Send an error-level log message."""
         ...
 
-    def shutdown(self) -> Any:
-        """Flush any remaining messages and shuts down the worker logger.
-
-        This method drains the log buffer, sending any remaining items to the master logger,
-        and then stops the connection.
-
-        Warning:
-            After calling `shutdown()`, this logger should not be used again.
-
-        """
+    def shutdown(self) -> None:
+        """Shutdown with proper cleanup."""
         ...
 
     def is_running(self) -> bool:

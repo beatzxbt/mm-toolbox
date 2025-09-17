@@ -1,26 +1,24 @@
+from libc.stdint cimport uint32_t as u32
+
 from mm_toolbox.logging.advanced.config cimport LoggerConfig
-from mm_toolbox.logging.advanced.structs cimport CLogLevel, LogLevel, LogBatch
 
 cdef class MasterLogger:
-    """
-    Cython interface for the MasterLogger class, exposing the constructor
-    and methods for use in other Cython modules.
-    """
     cdef:
         LoggerConfig    _config
         bytes           _name
         list            _log_handlers
-        LogBatch        _log_batch
-        dict            _heartbeats
-        object          _conn
+        u32             _num_pending_logs
+        list            _pending_logs
+        object          _transport
         object          _timed_operations_thread
         bint            _is_running
 
     # def __cinit__(self, LoggerConfig config=None, list log_handlers=None)
-    cpdef void          _process_worker_msg(self, bytes msg)
+    cdef list           _decode_worker_message(self, bytes internal_message)
     cpdef void          _timed_operations(self)
+    cdef inline object  _make_pylog(self, object level, bytes message)
+    cdef void           _add_pylog_to_batch(self, object pylog)
 
-    cpdef void          set_log_level(self, LogLevel level)
     cpdef void          trace(self, str msg_str=*, bytes msg_bytes=*)
     cpdef void          debug(self, str msg_str=*, bytes msg_bytes=*)
     cpdef void          info(self, str msg_str=*, bytes msg_bytes=*)
