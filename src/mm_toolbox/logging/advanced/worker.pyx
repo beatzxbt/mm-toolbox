@@ -1,6 +1,4 @@
-# worker_logger.pyx
 import os
-import time
 import threading
 
 from libc.stdint cimport (
@@ -34,8 +32,7 @@ cdef class WorkerLogger:
     ):
         self._config = config if config else LoggerConfig() 
 
-        self._name = name if name else f"WORKER{os.getpid()}"
-        self._name = self._name.encode('utf-8')
+        self._name = (name if name else f"WORKER{os.getpid()}").encode('utf-8')
         self._len_name = len(self._name)
         self._name_as_chars = <unsigned char*>self._name
         
@@ -47,7 +44,8 @@ cdef class WorkerLogger:
                 path=self._config.path,
                 backlog=10000,  
                 num_producers=2,  # >1 workers to indicate MPSC
-                num_consumers=1   # Single master
+                num_consumers=1,   # Single master
+                linger_ms=self._config.ipc_linger_ms,
             )
         )
         
@@ -57,14 +55,17 @@ cdef class WorkerLogger:
             target=self._timed_operations,
             daemon=True
         )
+        self._stop_event = threading.Event()
         self._timed_operations_thread.start()
 
-        self.info(f"WorkerLogger started; name: {self._name.decode()}")
+        if self._config.emit_internal:
+            self.debug(f"WorkerLogger started; name: {self._name.decode()}")
 
     cpdef void _timed_operations(self):
         """Background processing loop."""
         while self._is_running:
-            time.sleep(self._config.flush_interval_s)
+            if self._stop_event.wait(self._config.flush_interval_s):
+                break
             if self._num_pending_logs > 0:
                 self._flush_logs()
             
@@ -84,10 +85,10 @@ cdef class WorkerLogger:
         data_ptr, data_len = data_writer.finalize_to_chars()
 
         cdef InternalMessage internal_message = create_internal_message(
-            MessageType.LOG, 
-            time_ns(),
-            data_len, 
-            data_ptr
+            type=MessageType.LOG, 
+            timestamp_ns=time_ns(),
+            len=data_len, 
+            data=data_ptr
         )
         self._transport.insert(internal_message_to_bytes(internal_message))
 
@@ -111,31 +112,41 @@ cdef class WorkerLogger:
 
     cpdef void trace(self, str msg_str=None, bytes msg_bytes=b""):
         """Send a trace-level log message."""
-        if self._is_running and self._config.base_level <= CLogLevel.TRACE:
+        if msg_str is not None and msg_bytes:
+            raise TypeError("Provide only one of msg_str or msg_bytes")
+        if self._is_running:
             message = msg_str.encode('utf-8') if msg_str else msg_bytes
             self._add_log_to_batch(CLogLevel.TRACE, len(message), <unsigned char*>message)
 
     cpdef void debug(self, str msg_str=None, bytes msg_bytes=b""):
         """Send a debug-level log message."""
-        if self._is_running and self._config.base_level <= CLogLevel.DEBUG:
+        if msg_str is not None and msg_bytes:
+            raise TypeError("Provide only one of msg_str or msg_bytes")
+        if self._is_running:
             message = msg_str.encode('utf-8') if msg_str else msg_bytes
             self._add_log_to_batch(CLogLevel.DEBUG, len(message), <unsigned char*>message)
     
     cpdef void info(self, str msg_str=None, bytes msg_bytes=b""):
         """Send an info-level log message."""
-        if self._is_running and self._config.base_level <= CLogLevel.INFO:
+        if msg_str is not None and msg_bytes:
+            raise TypeError("Provide only one of msg_str or msg_bytes")
+        if self._is_running:
             message = msg_str.encode('utf-8') if msg_str else msg_bytes
             self._add_log_to_batch(CLogLevel.INFO, len(message), <unsigned char*>message)
     
     cpdef void warning(self, str msg_str=None, bytes msg_bytes=b""):
         """Send a warning-level log message."""
-        if self._is_running and self._config.base_level <= CLogLevel.WARNING:
+        if msg_str is not None and msg_bytes:
+            raise TypeError("Provide only one of msg_str or msg_bytes")
+        if self._is_running:
             message = msg_str.encode('utf-8') if msg_str else msg_bytes
             self._add_log_to_batch(CLogLevel.WARNING, len(message), <unsigned char*>message)
     
     cpdef void error(self, str msg_str=None, bytes msg_bytes=b""):
         """Send an error-level log message."""
-        if self._is_running and self._config.base_level <= CLogLevel.ERROR:
+        if msg_str is not None and msg_bytes:
+            raise TypeError("Provide only one of msg_str or msg_bytes")
+        if self._is_running:
             message = msg_str.encode('utf-8') if msg_str else msg_bytes
             self._add_log_to_batch(CLogLevel.ERROR, len(message), <unsigned char*>message)
 
@@ -144,8 +155,11 @@ cdef class WorkerLogger:
         if not self._is_running:
             return
         
-        self.warning(f"Shutting down worker logger; name: {self._name.decode()}")
+        if self._config.emit_internal:
+            self.debug(f"Shutting down worker logger; name: {self._name.decode()}")
         self._is_running = False
+        if self._stop_event is not None:
+            self._stop_event.set()
         
         # Final flush, having kept self._is_running = True until this 
         # point ensures that no more logs will be added into the batch.

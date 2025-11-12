@@ -10,7 +10,7 @@ cdef enum CLogLevel:
 cdef struct CLog:
     u64 timestamp_ns
     u32 name_len
-    char* name
+    unsigned char* name
     CLogLevel clevel
     u32 message_len
-    char* message
+    unsigned char* message

@@ -4,7 +4,7 @@ A high-performance, distributed logging system designed for multi-process applic
 
 ## Architecture Overview
 
-The system uses a **master-worker pattern** with ZeroMQ-based IPC for communication:
+The system uses a **master-worker pattern** with IPCRingBuffer-based IPC for communication:
 
 ```
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
@@ -70,9 +70,9 @@ memcpy(buffer + 9, &msg_len, sizeof(u32)) # Message length
 - **Memory**: Dynamic buffer growth prevents pre-allocation waste
 
 ### Zero-Copy Messaging
-- Uses existing `IPCRingBuffer` system for proven reliability
+- Uses the project's `IPCRingBuffer` transport for reliability and throughput
 - MPSC pattern: Multiple producers → Single consumer
-- Automatic socket bind/connect logic based on topology
+- Bounded backlog with backpressure semantics
 
 ## Configuration
 

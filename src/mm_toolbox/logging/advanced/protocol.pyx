@@ -31,12 +31,13 @@ cdef bytes internal_message_to_bytes(InternalMessage message):
     return writer.finalize()
 
 cdef InternalMessage bytes_to_internal_message(bytes message):
-    cdef BinaryReader reader = BinaryReader(message)
-    cdef MessageType type = <MessageType>reader.read_u8()
-    cdef u64 timestamp_ns = reader.read_u64()
-    cdef u32 len = reader.read_u32()
-    cdef unsigned char* data = reader.read_chars(len)
-    return create_internal_message(type, timestamp_ns, len, data)
+    cdef:
+        BinaryReader    reader = BinaryReader(message)
+        MessageType     msg_type = <MessageType>reader.read_u8()
+        u64             timestamp_ns = reader.read_u64()
+        u32             data_len = reader.read_u32()
+        unsigned char*  data = reader.read_chars(data_len)
+    return create_internal_message(msg_type, timestamp_ns, data_len, data)
 
 cdef class BinaryWriter:
     """Fast, type-safe binary serializer."""
@@ -66,7 +67,7 @@ cdef class BinaryWriter:
     
     cdef void write_u8(self, u8 value):
         self._ensure_capacity(1)
-        self._buffer[self._pos] = value
+        (<u8*>&self._buffer[self._pos])[0] = value 
         self._pos += 1
     
     cdef void write_u16(self, u16 value):
@@ -87,8 +88,8 @@ cdef class BinaryWriter:
     cdef void write_bytes(self, bytes data):
         cdef u32 length = len(data)
         self._ensure_capacity(length)
-        cdef const unsigned char[:] data_view = data
-        memcpy(&self._buffer[self._pos], &data_view[0], length)
+        cdef const unsigned char[:] data_view = data    # type: ignore
+        memcpy(&self._buffer[self._pos], &data_view[0], length) 
         self._pos += length
 
     cdef void write_chars(self, unsigned char* data, u32 length):
@@ -127,7 +128,7 @@ cdef class BinaryReader:
         cdef u8 value 
         if self._pos + 1 > self._len:
             raise ValueError("Buffer underrun reading u8")
-        value = self._buf_view[self._pos]
+        value = <u8>self._buf_view[self._pos]
         self._pos += 1
         return value
 
@@ -135,7 +136,7 @@ cdef class BinaryReader:
         cdef u16 value
         if self._pos + 2 > self._len:
             raise ValueError("Buffer underrun reading u16")
-        value = (<u16*>&self._buf_view[self._pos])[0]
+        memcpy(&value, &self._buf_view[self._pos], sizeof(u16))
         self._pos += 2
         return value
     
@@ -143,7 +144,7 @@ cdef class BinaryReader:
         cdef u32 value
         if self._pos + 4 > self._len:
             raise ValueError("Buffer underrun reading u32")
-        value = (<u32*>&self._buf_view[self._pos])[0]
+        memcpy(&value, &self._buf_view[self._pos], sizeof(u32))
         self._pos += 4
         return value
     
@@ -151,7 +152,7 @@ cdef class BinaryReader:
         cdef u64 value
         if self._pos + 8 > self._len:
             raise ValueError("Buffer underrun reading u64")
-        value = (<u64*>&self._buf_view[self._pos])[0]
+        memcpy(&value, &self._buf_view[self._pos], sizeof(u64))
         self._pos += 8
         return value
     
@@ -159,7 +160,7 @@ cdef class BinaryReader:
         cdef bytes result
         if self._pos + length > self._len:
             raise ValueError("Buffer underrun reading bytes")
-        result = self._buf_view[self._pos:self._pos + length]
+        result = self._buffer[self._pos:self._pos + length]
         self._pos += length
         return result
 
