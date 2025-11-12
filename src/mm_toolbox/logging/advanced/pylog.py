@@ -31,3 +31,20 @@ class PyLog(Struct):
     name: bytes
     level: PyLogLevel
     message: bytes
+
+    def __iter__(self):
+        yield self.timestamp_ns
+        yield self.name
+        yield self.level
+        yield self.message
+
+    def __getitem__(self, index: int):
+        if index == 0:
+            return self.timestamp_ns
+        if index == 1:
+            return self.name
+        if index == 2:
+            return self.level
+        if index == 3:
+            return self.message
+        raise IndexError("PyLog index out of range")

@@ -1,4 +1,5 @@
 import threading
+import time
 
 from libc.stdint cimport (
     uint8_t as u8,
@@ -38,11 +39,10 @@ cdef class MasterLogger:
 
         self._name = b"MASTER"
 
-        # Verify that all handlers are valid 
+        # Verify that all handlers are valid
         for handler in self._log_handlers:
-            handler_base_class = handler.__class__.__base__
-            if not handler_base_class == BaseLogHandler:
-                raise TypeError(f"Invalid handler base class; expected BaseLogHandler but got {handler_base_class}")
+            if not isinstance(handler, BaseLogHandler):
+                raise TypeError(f"Invalid handler type; expected BaseLogHandler but got {handler.__class__}")
 
             # Mainly for forwarding the str_format to the handler for formatting log messages
             # where the final point is not a code environment (eg Discord, Telegram, etc).
@@ -51,15 +51,8 @@ cdef class MasterLogger:
         self._num_pending_logs = 0
         self._pending_logs: list[PyLog] = []
 
-        # Create IPC configuration for sending messages to master, multiple producers (workers), single consumer (master)
-        self._transport = IPCRingBufferConsumer(
-            IPCRingBufferConfig(
-                path=self._config.path,
-                backlog=10000,  
-                num_producers=2,  # >1 workers to indicate MPSC
-                num_consumers=1   # Single master
-            )
-        )
+        # Transport is created and owned by the background thread to avoid cross-thread ZMQ usage
+        self._transport = None
 
         self._is_running = True
 
@@ -68,32 +61,34 @@ cdef class MasterLogger:
             daemon=True
         )
         self._timed_operations_thread.start()
-
-        self.info("Master logger started")
+        if self._config.emit_internal:
+            self.debug("Master logger started")
 
     cdef list _decode_worker_message(self, bytes serialized_message):
         """Decode binary CLog messages from workers into PyLog objects."""
-        cdef BinaryReader reader = BinaryReader(serialized_message)
-        cdef u8 msg_type = reader.read_u8()  # Ignore if not needed
-        cdef u64 batch_ts = reader.read_u64()  # Ignore if not needed
-        cdef u32 data_len = reader.read_u32()
-        cdef bytes data = reader.read_bytes(data_len)
+        cdef:
+            BinaryReader reader = BinaryReader(serialized_message)
+            u8 msg_type = reader.read_u8()  # Ignore if not needed
+            u64 batch_ts = reader.read_u64()  # Ignore if not needed
+            u32 data_len = reader.read_u32()
+            bytes data = reader.read_bytes(data_len)
 
-        cdef BinaryReader data_reader = BinaryReader(data)
-        cdef u32 worker_name_len = data_reader.read_u32()
-        cdef bytes worker_name = data_reader.read_bytes(worker_name_len)  # Batch-level name; can use or ignore
-        cdef u32 num_logs = data_reader.read_u32()
+            BinaryReader data_reader = BinaryReader(data)
+            u32 worker_name_len = data_reader.read_u32()
+            bytes worker_name = data_reader.read_bytes(worker_name_len)  # Batch-level name; can use or ignore
+            u32 num_logs = data_reader.read_u32()
 
-        cdef list decoded_logs = []
-        cdef u64 timestamp_ns
-        cdef u32 name_len
-        cdef bytes name
-        cdef u8 level_int
-        cdef object pylevel
-        cdef u32 message_len
-        cdef bytes message
+            list decoded_logs = []
+            u64 timestamp_ns
+            u32 name_len
+            bytes name
+            u8 level_int
+            object pylevel
+            u32 message_len
+            bytes message
 
-        cdef int i
+            u32 i
+
         for i in range(num_logs):
             timestamp_ns = data_reader.read_u64()
             name_len = data_reader.read_u32()
@@ -114,7 +109,7 @@ cdef class MasterLogger:
             elif level_int == 4:  # ERROR
                 pylevel = PyLogLevel.ERROR
             else:
-                pylevel = PyLogLevel.INFO  # Default fallback
+                pylevel = PyLogLevel.INFO  # Default fallback, should never happen though
             
             decoded_logs.append(PyLog(
                 timestamp_ns=timestamp_ns,
@@ -126,22 +121,46 @@ cdef class MasterLogger:
         return decoded_logs
 
     cpdef void _timed_operations(self):
-        """Background thread that periodically flushes the local log buffer."""
-        while self._is_running:
-            try:
-                if message := self._transport.consume():
-                    decoded_logs = self._decode_worker_message(message)
-                    for handler in self._log_handlers:
-                        handler.push(decoded_logs)
+        """Background thread that periodically receives and flushes logs."""
+        # Create IPC transport in this thread and own its lifetime here
+        self._transport = IPCRingBufferConsumer(
+            IPCRingBufferConfig(
+                path=self._config.path,
+                backlog=10000,
+                num_producers=2,  # >1 workers to indicate MPSC
+                num_consumers=1,  # Single master
+                linger_ms=self._config.ipc_linger_ms,
+            )
+        )
 
-                if self._num_pending_logs > 0:
-                    for handler in self._log_handlers:
-                        handler.push(self._pending_logs[:self._num_pending_logs])
-                    self._num_pending_logs = 0  # Reset counter; avoid clear() for minor perf
+        try:
+            while self._is_running:
+                try:
+                    # Non-blocking drain to avoid cross-thread close on a blocking recv
+                    for message in self._transport.consume_all():
+                        decoded_logs = self._decode_worker_message(message)
+                        for handler in self._log_handlers:
+                            handler.push(decoded_logs)
 
-            except Exception as e:
-                if self._is_running:
-                    self.error(f"Error consuming messages: {e}")
+                    if self._num_pending_logs > 0:
+                        for handler in self._log_handlers:
+                            handler.push(self._pending_logs[:self._num_pending_logs])
+                        self._num_pending_logs = 0  # Reset counter
+                except Exception as e:
+                    if self._is_running:
+                        self.error(f"Error consuming messages: {e}")
+
+                # Pace the loop using the configured flush interval
+                time.sleep(self._config.flush_interval_s)
+
+            # Final best-effort drain after stop signal
+            for message in self._transport.consume_all():
+                decoded_logs = self._decode_worker_message(message)
+                for handler in self._log_handlers:
+                    handler.push(decoded_logs)
+        finally:
+            if self._transport is not None:
+                self._transport.stop()
 
     cdef inline object _make_pylog(self, object level, bytes message):
         """Make a PyLog object."""
@@ -159,30 +178,40 @@ cdef class MasterLogger:
 
     cpdef void trace(self, str msg_str=None, bytes msg_bytes=b""):
         """Send a trace-level log message."""
+        if msg_str is not None and msg_bytes:
+            raise TypeError("Provide only one of msg_str or msg_bytes")
         if self._is_running and self._config.base_level <= CLogLevel.TRACE:
             message = msg_str.encode('utf-8') if msg_str else msg_bytes
             self._add_pylog_to_batch(self._make_pylog(PyLogLevel.TRACE, message))
     
     cpdef void debug(self, str msg_str=None, bytes msg_bytes=b""):
         """Send a debug-level log message."""
+        if msg_str is not None and msg_bytes:
+            raise TypeError("Provide only one of msg_str or msg_bytes")
         if self._is_running and self._config.base_level <= CLogLevel.DEBUG:
             message = msg_str.encode('utf-8') if msg_str else msg_bytes
             self._add_pylog_to_batch(self._make_pylog(PyLogLevel.DEBUG, message))
     
     cpdef void info(self, str msg_str=None, bytes msg_bytes=b""):
         """Send an info-level log message."""
+        if msg_str is not None and msg_bytes:
+            raise TypeError("Provide only one of msg_str or msg_bytes")
         if self._is_running and self._config.base_level <= CLogLevel.INFO:
             message = msg_str.encode('utf-8') if msg_str else msg_bytes
             self._add_pylog_to_batch(self._make_pylog(PyLogLevel.INFO, message))
     
     cpdef void warning(self, str msg_str=None, bytes msg_bytes=b""):
         """Send a warning-level log message."""
+        if msg_str is not None and msg_bytes:
+            raise TypeError("Provide only one of msg_str or msg_bytes")
         if self._is_running and self._config.base_level <= CLogLevel.WARNING:
             message = msg_str.encode('utf-8') if msg_str else msg_bytes
             self._add_pylog_to_batch(self._make_pylog(PyLogLevel.WARNING, message))
     
     cpdef void error(self, str msg_str=None, bytes msg_bytes=b""):
         """Send an error-level log message.""" 
+        if msg_str is not None and msg_bytes:
+            raise TypeError("Provide only one of msg_str or msg_bytes")
         if self._is_running and self._config.base_level <= CLogLevel.ERROR:
             message = msg_str.encode('utf-8') if msg_str else msg_bytes
             self._add_pylog_to_batch(self._make_pylog(PyLogLevel.ERROR, message))
@@ -203,20 +232,15 @@ cdef class MasterLogger:
         # Prevents any more logs from being added to the batch
         self._is_running = False
 
-        # Final consume and flush
-        while message := self._transport.consume():
-            decoded_logs = self._decode_worker_message(message)
-            for handler in self._log_handlers:
-                handler.push(decoded_logs)
-
-        if self._num_pending_logs > 0:
-            for handler in self._log_handlers:
-                handler.push(self._pending_logs[:self._num_pending_logs])
-            self._num_pending_logs = 0
-
+        # Join background thread which owns the transport; it will perform final drain and stop
         self._timed_operations_thread.join()
 
-        self._transport.stop()
+        # Close handlers (best-effort)
+        try:
+            for handler in self._log_handlers:
+                handler.close()
+        except Exception:
+            pass
     
     cpdef bint is_running(self):
         """Check if the master logger is running."""

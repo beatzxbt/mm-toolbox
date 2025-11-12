@@ -18,7 +18,7 @@ cdef struct InternalMessage:
     u32         len
     unsigned char* data
 
-cdef InternalMessage create_internal_message(MessageType type, u64 timestamp_ns, u32 len, unsigned char* data) nogil
+cdef InternalMessage create_internal_message(MessageType type, u64 timestamp_ns, u32 len, unsigned char* data) noexcept nogil
 cdef bytes internal_message_to_bytes(InternalMessage message)
 cdef InternalMessage bytes_to_internal_message(bytes message)
 

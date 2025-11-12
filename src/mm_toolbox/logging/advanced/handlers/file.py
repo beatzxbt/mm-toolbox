@@ -45,13 +45,20 @@ class FileLogHandler(BaseLogHandler):
 
     def push(self, logs):
         try:
+            if not os.path.exists(self.filepath):
+                if not self.create:
+                    print(
+                        "Failed to write logs to file; target file does not exist and create=False"
+                    )
+                    return
+                # If create=True and file missing, create parent dirs and file
+                directory = os.path.dirname(self.filepath)
+                if directory:
+                    os.makedirs(directory, exist_ok=True)
+                with open(self.filepath, "w"):
+                    pass
             with open(self.filepath, "a") as file:
-                msgs = "\n".join(
-                    [
-                        self.format_log(log)
-                        for log in logs
-                    ]
-                ) + "\n"
+                msgs = "\n".join([self.format_log(log) for log in logs]) + "\n"
                 file.write(msgs)
                 file.flush()
 
