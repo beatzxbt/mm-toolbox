@@ -15,5 +15,6 @@
     "files.associations": {
         "sstream": "cpp"
     },
-    "makefile.configureOnOpen": false
+    "makefile.configureOnOpen": false,
+    "cursorpyright.analysis.autoImportCompletions": false
 }
