@@ -1,3 +1,4 @@
+import contextlib
 import os
 import platform
 import sys
@@ -9,11 +10,11 @@ from setuptools.command.build_ext import build_ext as _build_ext
 
 """
 # Usage instructions
-# 
+#
 # To build
 #   'python setup.py build_ext --inplace'
 #   'python setup.py build_ext --inplace --parallel 4'
-# 
+#
 # To install the package
 #   'pip install .'
 """
@@ -27,15 +28,24 @@ COMPILER_DIRECTIVES = {
     "cdivision": True,
     "cpow": True,
 }
+USE_OFAST = os.environ.get("MM_TOOLBOX_OFAST", "0").lower() in {"1", "true", "yes"}
+USE_LTO = os.environ.get("MM_TOOLBOX_LTO", "0").lower() in {"1", "true", "yes"}
+USE_FAST_MATH = os.environ.get("MM_TOOLBOX_FAST_MATH", "0").lower() in {"1", "true", "yes"}
+
 EXTRA_COMPILE_ARGS = [
     "-march=native",
-    "-O3",
+    "-Ofast" if USE_OFAST else "-O3",
+    "-ffast-math" if USE_FAST_MATH else "",
     "-Wno-sign-compare",
     "-Wno-unused-function",
     "-Wno-unreachable-code",
 ]
+EXTRA_COMPILE_ARGS = [arg for arg in EXTRA_COMPILE_ARGS if arg]
 
 EXTRA_LINK_ARGS = ["-Wl,-w"] if sys.platform == "darwin" else []
+if USE_LTO:
+    EXTRA_COMPILE_ARGS.append("-flto")
+    EXTRA_LINK_ARGS.append("-flto")
 
 
 def get_extension(name, sources, include_dirs=None):
@@ -43,7 +53,7 @@ def get_extension(name, sources, include_dirs=None):
     return Extension(
         name=name,
         sources=sources,
-        include_dirs=["src"] if not include_dirs else include_dirs,
+        include_dirs=include_dirs if include_dirs else ["src"],
         extra_compile_args=EXTRA_COMPILE_ARGS,
         extra_link_args=EXTRA_LINK_ARGS,
     )
@@ -53,24 +63,24 @@ def get_build_dir():
     # Example: build/cython.linux-x86_64-cpython-313
     plat = platform.system().lower()
     machine = platform.machine().lower()
-    py_version = f"{sys.version_info.major}{sys.version_info.minor}"
     impl = platform.python_implementation().lower()
     # e.g. cpython-313
-    py_tag = f"{impl}-{sys.version_info.major}{sys.version_info.minor}{sys.version_info.micro}"
+    py_tag = (
+        f"{impl}-"
+        f"{sys.version_info.major}"
+        f"{sys.version_info.minor}"
+        f"{sys.version_info.micro}"
+    )
     return f"build/cython.{plat}-{machine}-{py_tag}"
 
 
 #   * Hierarchy of build dependencies *
 #
-#   - Rounding (depends on -)
-#   - Time (depends on -)
-#   - Ringbuffer (depends on -)
-#   - Orderbook (depends on -)
+#   - Rounding, Time, Ringbuffer, Orderbook (depends on -)
 #
-#   - Logger (depends on Time)
+#   - Logger, Websocket (depends on Time)
 #   - Candles (depends on Ringbuffer)
 #   - Moving Average (depends on Ringbuffer & Time)
-#   - Websocket (depends on Logger & Time)
 def get_rounding_extensions():
     """Get list of rounding extensions for compilation."""
     return [
@@ -121,9 +131,31 @@ def get_orderbook_extensions():
     """Get list of orderbook extensions for compilation."""
     return [
         get_extension(
-            name="mm_toolbox.orderbook.fast",
-            sources=["src/mm_toolbox/orderbook/fast.pyx"],
-            include_dirs=[np.get_include(), "src/mm_toolbox/orderbook", "src"],
+            name="mm_toolbox.orderbook.corderbook.level",
+            sources=["src/mm_toolbox/orderbook/corderbook/level.pyx"],
+            include_dirs=[
+                np.get_include(),
+                "src/mm_toolbox/orderbook/corderbook",
+                "src",
+            ],
+        ),
+        get_extension(
+            name="mm_toolbox.orderbook.corderbook.side",
+            sources=["src/mm_toolbox/orderbook/corderbook/side.pyx"],
+            include_dirs=[
+                np.get_include(),
+                "src/mm_toolbox/orderbook/corderbook",
+                "src",
+            ],
+        ),
+        get_extension(
+            name="mm_toolbox.orderbook.corderbook.corderbook",
+            sources=["src/mm_toolbox/orderbook/corderbook/corderbook.pyx"],
+            include_dirs=[
+                np.get_include(),
+                "src/mm_toolbox/orderbook/corderbook",
+                "src",
+            ],
         ),
     ]
 
@@ -132,13 +164,13 @@ def get_logging_extensions():
     """Get list of logging extensions for compilation."""
     return [
         get_extension(
-            name="mm_toolbox.logging.advanced.structs",
-            sources=["src/mm_toolbox/logging/advanced/structs.pyx"],
+            name="mm_toolbox.logging.advanced.config",
+            sources=["src/mm_toolbox/logging/advanced/config.pyx"],
             include_dirs=["src/mm_toolbox/logging/advanced", "src"],
         ),
         get_extension(
-            name="mm_toolbox.logging.advanced.config",
-            sources=["src/mm_toolbox/logging/advanced/config.pyx"],
+            name="mm_toolbox.logging.advanced.protocol",
+            sources=["src/mm_toolbox/logging/advanced/protocol.pyx"],
             include_dirs=["src/mm_toolbox/logging/advanced", "src"],
         ),
         get_extension(
@@ -232,18 +264,52 @@ def get_websocket_extensions():
     ]
 
 
+# def get_misc_extensions():
+#     """Get list of misc extensions for compilation."""
+#     return [
+#         get_extension(
+#             name="mm_toolbox.misc.limiter.core",
+#             sources=["src/mm_toolbox/misc/limiter/core.pyx"],
+#             include_dirs=["src/mm_toolbox/misc/limiter", "src"],
+#         ),
+#     ]
+
+
+# def get_parsers_extensions():
+#     """Get list of parsers extensions for compilation."""
+#     return [
+#         get_extension(
+#             name="mm_toolbox.misc.parsers.json.fastjson",
+#             sources=["src/mm_toolbox/misc/parsers/json/fastjson.pyx"],
+#             include_dirs=["src"],
+#         ),
+#         get_extension(
+#             name="mm_toolbox.misc.parsers.crypto.binance._bbo_cache",
+#             sources=["src/mm_toolbox/misc/parsers/crypto/binance/_bbo_cache.pyx"],
+#             include_dirs=["src"],
+#         ),
+#         get_extension(
+#             name="mm_toolbox.misc.parsers.crypto.binance.binance_tob_parser",
+#             sources=["src/mm_toolbox/misc/parsers/crypto/binance/binance_tob_parser.pyx"],
+#             include_dirs=["src"],
+#         ),
+#     ]
+
+
 module_list: list[Extension] = []
 module_list.extend(get_rounding_extensions())
 module_list.extend(get_time_extensions())
 module_list.extend(get_ringbuffer_extensions())
-module_list.extend(get_orderbook_extensions())
+# module_list.extend(get_orderbook_extensions())
 module_list.extend(get_moving_average_extensions())
 module_list.extend(get_candles_extensions())
-# module_list.extend(get_logging_extensions())
+module_list.extend(get_logging_extensions())
 module_list.extend(get_websocket_extensions())
+# # module_list.extend(get_misc_extensions())
+# module_list.extend(get_parsers_extensions())
 
 
-class build_ext(_build_ext):
+class BuildExt(_build_ext):
     """Custom build_ext to remove generated .c files after build."""
 
     def run(self):
@@ -255,14 +321,12 @@ class build_ext(_build_ext):
                 if src.endswith(".pyx"):
                     c_file = src.replace(".pyx", ".c")
                     if os.path.exists(c_file):
-                        try:
+                        with contextlib.suppress(Exception):
                             os.remove(c_file)
-                        except Exception:
-                            pass
 
 
 setup(
-    cmdclass={"build_ext": build_ext},
+    cmdclass={"build_ext": BuildExt},
     name="mm_toolbox",
     packages=find_packages(where="src"),
     package_dir={"": "src"},

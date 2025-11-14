@@ -1,4 +1,8 @@
-from mm_toolbox.logging.advanced.structs cimport LogLevel, LogBatch
+# worker_logger.pxd
+from libc.stdint cimport uint32_t as u32
+
+from mm_toolbox.logging.advanced.protocol cimport BinaryWriter
+from mm_toolbox.logging.advanced.log cimport CLogLevel
 from mm_toolbox.logging.advanced.config cimport LoggerConfig
 
 cdef class WorkerLogger:
@@ -7,17 +11,22 @@ cdef class WorkerLogger:
     its constructor and methods to other Cython modules.
     """
     cdef:
-        LoggerConfig    _config
+        object          _config
         bytes           _name
-        object          _conn
-        LogBatch        _log_batch
+        u32             _len_name
+        unsigned char*  _name_as_chars
+        u32             _num_pending_logs
+        BinaryWriter    _batch_writer
+        object          _transport
         bint            _is_running
         object          _timed_operations_thread
+        object          _stop_event
 
-    # def               __cinit__(self, LoggerConfig config=None, str name="")
+    # cdef                __cinit__(self, object config=None, str name=None)
     cpdef void          _timed_operations(self)
+    cdef void           _flush_logs(self)
+    cdef void           _add_log_to_batch(self, CLogLevel clevel, u32 message_len, unsigned char* message)
     
-    cpdef void          set_log_level(self, LogLevel level)
     cpdef void          trace(self, str msg_str=*, bytes msg_bytes=*)
     cpdef void          debug(self, str msg_str=*, bytes msg_bytes=*)
     cpdef void          info(self, str msg_str=*, bytes msg_bytes=*)
@@ -27,4 +36,4 @@ cdef class WorkerLogger:
 
     cpdef bint          is_running(self)
     cpdef str           get_name(self)
-    cpdef LoggerConfig  get_config(self)
+    cpdef object        get_config(self)

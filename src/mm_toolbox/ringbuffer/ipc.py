@@ -17,6 +17,7 @@ class IPCRingBufferConfig(Struct):
     backlog: int
     num_producers: int
     num_consumers: int
+    linger_ms: int = 0
 
     def __post_init__(self) -> None:
         """Validate IPC configuration parameters."""
@@ -28,6 +29,8 @@ class IPCRingBufferConfig(Struct):
             raise ValueError("num_producers and num_consumers must be > 0")
         if self.num_producers > 1 and self.num_consumers > 1:
             raise ValueError("MPMC is not supported; set one side to 1 or use a proxy")
+        if self.linger_ms < 0:
+            raise ValueError("linger_ms must be >= 0")
 
     @classmethod
     def default(cls) -> "IPCRingBufferConfig":
@@ -37,15 +40,18 @@ class IPCRingBufferConfig(Struct):
             backlog=2**16,
             num_producers=1,
             num_consumers=1,
+            linger_ms=0,
         )
 
     def should_producer_bind(self) -> bool:
-        """Determine if producer should bind to socket based on topology."""
-        if self.num_producers == 1 and self.num_consumers > 1:
-            return True  # SPMC
-        if self.num_consumers == 1 and self.num_producers > 1:
-            return False  # MPSC
-        return True  # SPSC
+        """Determine if producer should bind to socket based on topology.
+
+        Rule:
+        - Producers bind only when there is exactly one producer (SPSC or SPMC).
+        - When there are multiple producers (MPSC), the consumer must bind and
+          producers must connect to avoid multiple binders to the same endpoint.
+        """
+        return self.num_producers == 1
 
 
 class IPCRingBufferProducer:
@@ -59,6 +65,7 @@ class IPCRingBufferProducer:
         self._backlog = config.backlog
         self._context = zmq.Context()
         self._socket = self._context.socket(ZmqSocketType.PUSH)
+        self._socket.setsockopt(zmq.LINGER, config.linger_ms)
         if config.should_producer_bind():
             self._socket.bind(self._path)
         else:
@@ -78,7 +85,8 @@ class IPCRingBufferProducer:
             self.insert(item, copy=copy)
 
     def insert_packed(self, batch: Iterable[Item], copy: bool = True) -> None:
-        """Insert a batch of items into the ring buffer, packed into a single message."""
+        """Insert a batch of items into the ring buffer, packed into a
+        single message."""
         self.__enforce_producer_started()
         parts: list[memoryview] = []
         total_size = 0
@@ -102,7 +110,6 @@ class IPCRingBufferProducer:
         """Stop the producer and close the socket."""
         if self._socket is not None:
             self._socket.close()
-            self._socket = None
         self._context.term()
         self._is_started = False
 
@@ -123,6 +130,7 @@ class IPCRingBufferConsumer:
         self._backlog = config.backlog
         self._context = zmq.Context()
         self._socket = self._context.socket(ZmqSocketType.PULL)
+        self._socket.setsockopt(zmq.LINGER, config.linger_ms)
         self._socket.setsockopt(zmq.RCVHWM, self._backlog)
         self._asocket = azmq.Socket.shadow(self._socket)
         if config.should_producer_bind():
@@ -151,7 +159,8 @@ class IPCRingBufferConsumer:
         return items
 
     def consume_packed(self) -> list[Item]:
-        """Consume a packed batch of items from the ring buffer, blocking until one is available."""
+        """Consume a packed batch of items from the ring buffer, blocking
+        until one is available."""
         self.__enforce_consumer_started()
         items: list[Item] = []
         buf = self._socket.recv()
@@ -163,7 +172,7 @@ class IPCRingBufferConsumer:
             offset += 4
             if offset + length > buf_len:
                 raise ValueError("Corrupted packed message: length exceeds buffer")
-            item = buf_mv[offset : offset + length]
+            item = bytes(buf_mv[offset : offset + length])
             items.append(item)
             offset += length
         return items
@@ -186,7 +195,7 @@ class IPCRingBufferConsumer:
             offset += 4
             if offset + length > buf_len:
                 raise ValueError("Corrupted packed message: length exceeds buffer")
-            item = buf_mv[offset : offset + length]
+            item = bytes(buf_mv[offset : offset + length])
             items.append(item)
             offset += length
         return items
@@ -195,10 +204,8 @@ class IPCRingBufferConsumer:
         """Stop the consumer and close the socket."""
         if self._socket is not None:
             self._socket.close()
-            self._socket = None
         if self._asocket is not None:
             self._asocket.close()
-            self._asocket = None
         self._context.term()
         self._is_started = False
 
