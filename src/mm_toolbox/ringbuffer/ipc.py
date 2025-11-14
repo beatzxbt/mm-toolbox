@@ -7,8 +7,6 @@ import zmq.asyncio as azmq
 from msgspec import Struct
 from zmq.constants import SocketType as ZmqSocketType
 
-type Item = bytes | memoryview | bytearray
-
 
 class IPCRingBufferConfig(Struct):
     """Configuration for IPC ringbuffer."""
@@ -73,18 +71,18 @@ class IPCRingBufferProducer:
         self._socket.setsockopt(zmq.SNDHWM, self._backlog)
         self._is_started = True
 
-    def insert(self, item: Item, copy: bool = True) -> None:
+    def insert(self, item: bytes, copy: bool = True) -> None:
         """Insert an item into the ring buffer."""
         self.__enforce_producer_started()
         self._socket.send(item, copy=copy)
 
-    def insert_batch(self, items: Iterable[Item], copy: bool = True) -> None:
+    def insert_batch(self, items: Iterable[bytes], copy: bool = True) -> None:
         """Insert a batch of items into the ring buffer."""
         self.__enforce_producer_started()
         for item in items:
             self.insert(item, copy=copy)
 
-    def insert_packed(self, batch: Iterable[Item], copy: bool = True) -> None:
+    def insert_packed(self, batch: Iterable[bytes], copy: bool = True) -> None:
         """Insert a batch of items into the ring buffer, packed into a
         single message."""
         self.__enforce_producer_started()
@@ -139,17 +137,17 @@ class IPCRingBufferConsumer:
             self._socket.bind(self._path)
         self._is_started = True
 
-    def consume(self) -> Item:
+    def consume(self) -> bytes:
         """Consume an item from the ring buffer, blocking until one is available."""
         if not self._is_started:
             raise RuntimeError("Consumer not started")
         return self._socket.recv()
 
-    def consume_all(self) -> list[Item]:
+    def consume_all(self) -> list[bytes]:
         """Drain the ring buffer, non-blocking."""
         self.__enforce_consumer_started()
 
-        items: list[Item] = []
+        items: list[bytes] = []
         while True:
             try:
                 msg = self._socket.recv(flags=zmq.DONTWAIT)
@@ -158,11 +156,11 @@ class IPCRingBufferConsumer:
                 break
         return items
 
-    def consume_packed(self) -> list[Item]:
+    def consume_packed(self) -> list[bytes]:
         """Consume a packed batch of items from the ring buffer, blocking
         until one is available."""
         self.__enforce_consumer_started()
-        items: list[Item] = []
+        items: list[bytes] = []
         buf = self._socket.recv()
         buf_len = len(buf)
         buf_mv = memoryview(buf)
@@ -177,19 +175,19 @@ class IPCRingBufferConsumer:
             offset += length
         return items
 
-    async def aconsume(self) -> Item:
+    async def aconsume(self) -> bytes:
         """Mirror of consume, but non-blocking."""
         self.__enforce_consumer_started()
         return await self._asocket.recv()
 
-    async def aconsume_packed(self) -> list[Item]:
+    async def aconsume_packed(self) -> list[bytes]:
         """Mirror of consume_packed, but non-blocking."""
         self.__enforce_consumer_started()
         buf = await self._asocket.recv()
         buf_len = len(buf)
         buf_mv = memoryview(buf)
         offset = 0
-        items: list[Item] = []
+        items: list[bytes] = []
         while offset + 4 <= buf_len:
             length = int.from_bytes(buf_mv[offset : offset + 4], "little")
             offset += 4
@@ -209,11 +207,11 @@ class IPCRingBufferConsumer:
         self._context.term()
         self._is_started = False
 
-    def __aiter__(self) -> AsyncIterator[Item]:
+    def __aiter__(self) -> AsyncIterator[bytes]:
         """Async iterator for the consumer."""
         return self
 
-    async def __anext__(self) -> Item:
+    async def __anext__(self) -> bytes:
         """Async next for the consumer."""
         return await self.aconsume()
 
