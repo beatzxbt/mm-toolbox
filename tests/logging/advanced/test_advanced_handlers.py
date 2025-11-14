@@ -145,7 +145,7 @@ class TestDiscordLogHandler:
 
     @pytest.mark.asyncio
     @patch("aiohttp.ClientSession.post", new_callable=AsyncMock)
-    async def test_push_multiple(self, mock_post, event_loop):
+    async def test_push_multiple(self, mock_post):
         url = "https://discord.com/api/webhooks/123/abc"
         handler = DiscordLogHandler(url)
         config = LoggerConfig(str_format="%(message)s")
