@@ -1,93 +1,49 @@
-"""Type stubs for advanced logging master logger."""
+"""Type stubs for master module."""
 
 from mm_toolbox.logging.advanced.config import LoggerConfig
-from mm_toolbox.logging.advanced.structs import LogLevel
+from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
 
 class MasterLogger:
-    """The MasterLogger acts as a central aggregator for log messages sent by worker loggers.
+    """Central aggregator for log messages sent by worker loggers.
 
-    It receives binary, multipart messages, decodes them, and stores them in a buffer until full.
-    Once the buffer is full, it flushes them to external handlers.
+    It receives binary messages from workers, decodes them, and forwards
+    them to handlers.
+
+    Also can act as a logger itself, but it is not recommended to use it
+    for this purpose.
     """
 
     def __init__(
         self,
-        config: LoggerConfig = ...,
-        log_handlers: list = ...,
-    ) -> None: ...
-    def _process_worker_msg(self, msg: bytes) -> None:
-        """Process received multipart messages and decode them into appropriate message structs.
+        config: LoggerConfig | None = None,
+        log_handlers: list[BaseLogHandler] | None = None,
+    ) -> None:
+        """Initialize a MasterLogger.
 
         Args:
-            msg (bytes): The raw message bytes to process.
-
+            config: Configuration for the logger. If None, uses default LoggerConfig.
+            log_handlers: List of handlers to forward logs to. If None, uses empty list.
         """
         ...
 
-    def _timed_operations(self) -> None:
-        """Background thread that periodically flushes the local log buffer and.
-
-        checks worker heartbeats for being late.
-        """
+    def trace(self, msg_str: str | None = None, msg_bytes: bytes = b"") -> None:
+        """Send a trace-level log message."""
         ...
 
-    def set_log_level(self, level: LogLevel) -> None:
-        """Modify the logger's base log level at runtime.
-
-        Args:
-            level (LogLevel): The new base log level.
-
-        """
+    def debug(self, msg_str: str | None = None, msg_bytes: bytes = b"") -> None:
+        """Send a debug-level log message."""
         ...
 
-    def trace(self, msg_str: str = ..., msg_bytes: bytes = ...) -> None:
-        """Send a trace-level log message.
-
-        Args:
-            msg_str (str, optional): The log message text as a string.
-            msg_bytes (bytes, optional): The log message text as bytes.
-
-        """
+    def info(self, msg_str: str | None = None, msg_bytes: bytes = b"") -> None:
+        """Send an info-level log message."""
         ...
 
-    def debug(self, msg_str: str = ..., msg_bytes: bytes = ...) -> None:
-        """Send a debug-level log message.
-
-        Args:
-            msg_str (str, optional): The log message text as a string.
-            msg_bytes (bytes, optional): The log message text as bytes.
-
-        """
+    def warning(self, msg_str: str | None = None, msg_bytes: bytes = b"") -> None:
+        """Send a warning-level log message."""
         ...
 
-    def info(self, msg_str: str = ..., msg_bytes: bytes = ...) -> None:
-        """Send an info-level log message.
-
-        Args:
-            msg_str (str, optional): The log message text as a string.
-            msg_bytes (bytes, optional): The log message text as bytes.
-
-        """
-        ...
-
-    def warning(self, msg_str: str = ..., msg_bytes: bytes = ...) -> None:
-        """Send a warning-level log message.
-
-        Args:
-            msg_str (str, optional): The log message text as a string.
-            msg_bytes (bytes, optional): The log message text as bytes.
-
-        """
-        ...
-
-    def error(self, msg_str: str = ..., msg_bytes: bytes = ...) -> None:
-        """Send an error-level log message.
-
-        Args:
-            msg_str (str, optional): The log message text as a string.
-            msg_bytes (bytes, optional): The log message text as bytes.
-
-        """
+    def error(self, msg_str: str | None = None, msg_bytes: bytes = b"") -> None:
+        """Send an error-level log message."""
         ...
 
     def shutdown(self) -> None:
@@ -97,8 +53,7 @@ class MasterLogger:
         then stops the connection.
 
         Warning:
-            After calling `shutdown()`, this logger cannot be used again.
-
+            After calling shutdown(), this logger cannot be used again.
         """
         ...
 

@@ -1,3 +1,0 @@
-"""Type stubs for advanced logging data structures."""
-
-class LogBatch: ...

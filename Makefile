@@ -31,7 +31,7 @@ style-fix: ## Fix code style (without docstrings)
 	uv run ruff check --fix --unsafe-fixes . --select E,W,F,I,N,UP,B,C4,SIM,TCH
 
 fix: ## Run all formatters and fixers
-	$(MAKE) format lint-fix docstring-fix style-fix 
+	$(MAKE) format lint-fix style-fix 
 
 check: ## Run all formatters, fixers, and typecheck
 	$(MAKE) fix typecheck 
@@ -40,12 +40,8 @@ sync: ## Re‑lock and install latest versions
 	uv lock --upgrade       # rebuild uv.lock with newer pins
 	uv sync --all-groups    # install everything into .venv
 
-clean: ## Remove build artefacts and caches
-	rm -rf .ruff_cache/ .mypy_cache/ .pytest_cache/ dist/ build/
-	find . -type d -name __pycache__ -exec rm -rf {} +
-
 test: ## Run tests
-	uv run pytest $(TEST_FLAGS)
+	PYTHONPATH=src uv run pytest $(TEST_FLAGS)
 
 build: ## Build Cython extensions in-place
 	uv run python setup.py build_ext --inplace --parallel $$(uv run python -c 'import os;print(max(1,(os.cpu_count() or 2)-1))')
@@ -53,7 +49,6 @@ build: ## Build Cython extensions in-place
 remove-build: ## Remove build artifacts and compiled extensions
 	rm -rf build/ *.egg-info/
 	find ./src -name "*.so" -delete
-	find . -name "*.html" -path "*/src/*" -delete
 
 stats: ## Show code quality statistics
 	@echo "=== Docstring Coverage ==="
@@ -69,21 +64,21 @@ stats: ## Show code quality statistics
 #   make watch path/to/file   → watch single test file
 watch:
 	@if [ -z "$(filter-out $@,$(MAKECMDGOALS))" ]; then \
-		uv run pytest-watcher . --runner "pytest tests $(TEST_FLAGS) -W ignore::DeprecationWarning"; \
+		PYTHONPATH=src uv run pytest-watcher . --runner "pytest tests $(TEST_FLAGS) -W ignore::DeprecationWarning"; \
 	else \
 		path_arg="$(filter-out $@,$(MAKECMDGOALS))"; \
-		uv run pytest-watcher . --runner "pytest src/tests/$$path_arg $(TEST_FLAGS) -W ignore::DeprecationWarning"; \
+		PYTHONPATH=src uv run pytest-watcher . --runner "pytest src/tests/$$path_arg $(TEST_FLAGS) -W ignore::DeprecationWarning"; \
 	fi
 
 watch-build: ## Rebuild Cython extensions on source changes
 	uv run python scripts/watch_build.py --parallel $$(uv run python -c 'import os;print(max(1,(os.cpu_count() or 2)-1))')
 
 wheel: ## Build wheel distribution
-	$(MAKE) clean
+	$(MAKE) remove-build
 	uv run python -m build --wheel
 
 sdist: ## Build source distribution
-	$(MAKE) clean
+	$(MAKE) remove-build
 	uv run python -m build --sdist
 
 wheel-clean: ## Clean wheel build artifacts

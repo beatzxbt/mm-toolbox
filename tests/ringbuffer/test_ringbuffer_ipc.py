@@ -13,6 +13,9 @@ from mm_toolbox.ringbuffer.ipc import (
     IPCRingBufferProducer,
 )
 
+import threading
+import time
+
 
 def _random_ipc_path() -> str:
     """Generate unique IPC path to avoid test collisions."""
@@ -32,6 +35,7 @@ class TestIPCRingBufferConfig:
         assert cfg.num_producers == 1
         assert cfg.num_consumers == 1
         assert cfg.path.startswith("ipc:///tmp/mmtoolbox_ipc_")
+        assert cfg.linger_ms == 0
 
     def test_path_validation(self):
         """Test path validation."""
@@ -101,6 +105,46 @@ class TestIPCRingBufferConfig:
             IPCRingBufferConfig(
                 path=valid_path, backlog=1024, num_producers=2, num_consumers=2
             )
+
+    def test_linger_validation_and_default(self):
+        """Test linger_ms validation and default."""
+        valid_path = _random_ipc_path()
+        # Default() should set 0
+        cfg_default = IPCRingBufferConfig.default()
+        assert cfg_default.linger_ms == 0
+
+        # Valid values
+        for lm in [0, 1, 10, 1000]:
+            cfg = IPCRingBufferConfig(
+                path=valid_path, backlog=128, num_producers=1, num_consumers=1, linger_ms=lm
+            )
+            assert cfg.linger_ms == lm
+
+        # Invalid: negative
+        with pytest.raises(ValueError):
+            IPCRingBufferConfig(
+                path=valid_path, backlog=128, num_producers=1, num_consumers=1, linger_ms=-1
+            )
+
+    def test_should_producer_bind_rules(self):
+        """Verify binding direction based on topology."""
+        # SPSC
+        cfg = IPCRingBufferConfig(
+            path=_random_ipc_path(), backlog=128, num_producers=1, num_consumers=1
+        )
+        assert cfg.should_producer_bind() is True
+
+        # MPSC (consumer binds)
+        cfg = IPCRingBufferConfig(
+            path=_random_ipc_path(), backlog=128, num_producers=3, num_consumers=1
+        )
+        assert cfg.should_producer_bind() is False
+
+        # SPMC (producer binds)
+        cfg = IPCRingBufferConfig(
+            path=_random_ipc_path(), backlog=128, num_producers=1, num_consumers=2
+        )
+        assert cfg.should_producer_bind() is True
 
 
 class TestIPCRingBufferBasicOperations:
@@ -333,6 +377,136 @@ class TestIPCRingBufferErrorHandling:
         consumer.stop()
         consumer.stop()  # Should be safe
 
+
+class TestIPCRingBufferTopologies:
+    """Integrated tests for common topologies and start-order robustness."""
+
+    def test_mpsc_multiple_producers_single_consumer_roundtrip(self):
+        """Multiple producers, single consumer should deliver all messages."""
+        path = _random_ipc_path()
+        num_producers = 5
+        msgs_per_producer = 50
+        total_expected = num_producers * msgs_per_producer
+
+        cfg = IPCRingBufferConfig(
+            path=path, backlog=4096, num_producers=num_producers, num_consumers=1
+        )
+        consumer = IPCRingBufferConsumer(cfg)
+
+        producers: list[IPCRingBufferProducer] = []
+        threads: list[threading.Thread] = []
+
+        start_evt = threading.Event()
+
+        def _produce(idx: int):
+            prod = IPCRingBufferProducer(cfg)
+            producers.append(prod)
+            # Wait for start to try to align bursts from all producers
+            start_evt.wait(1.0)
+            for j in range(msgs_per_producer):
+                prod.insert(f"p{idx}-m{j}".encode("utf-8"))
+            prod.stop()
+
+        try:
+            for i in range(num_producers):
+                t = threading.Thread(target=_produce, args=(i,), daemon=True)
+                t.start()
+                threads.append(t)
+
+            # Allow producers to initialize sockets before sending
+            time.sleep(0.05)
+            start_evt.set()
+
+            deadline = time.monotonic() + 3.0
+            received: list[bytes] = []
+            while len(received) < total_expected and time.monotonic() < deadline:
+                received.extend(consumer.consume_all())
+                if len(received) < total_expected:
+                    time.sleep(0.01)
+
+            for t in threads:
+                t.join(timeout=1.0)
+
+            assert len(received) == total_expected
+        finally:
+            consumer.stop()
+            # Ensure any producer not stopped due to thread exit is stopped
+            for p in producers:
+                try:
+                    p.stop()
+                except Exception:
+                    pass
+
+    def test_mpsc_producers_can_start_before_consumer(self):
+        """Starting producers before consumer should not deadlock."""
+        path = _random_ipc_path()
+        num_producers = 3
+        msgs_per_producer = 10
+        total_expected = num_producers * msgs_per_producer
+
+        cfg = IPCRingBufferConfig(
+            path=path, backlog=1024, num_producers=num_producers, num_consumers=1
+        )
+
+        producers = [IPCRingBufferProducer(cfg) for _ in range(num_producers)]
+        # Stagger start so producers connect first
+        time.sleep(0.05)
+        consumer = IPCRingBufferConsumer(cfg)
+
+        try:
+            for i, p in enumerate(producers):
+                for j in range(msgs_per_producer):
+                    p.insert(f"prebind-p{i}-m{j}".encode("utf-8"))
+
+            # Drain with timeout to avoid flakes
+            deadline = time.monotonic() + 2.0
+            received: list[bytes] = []
+            while len(received) < total_expected and time.monotonic() < deadline:
+                received.extend(consumer.consume_all())
+                if len(received) < total_expected:
+                    time.sleep(0.01)
+
+            assert len(received) == total_expected
+        finally:
+            consumer.stop()
+            for p in producers:
+                p.stop()
+
+    def test_spmc_single_producer_multiple_consumers(self):
+        """Single producer, multiple consumers share messages without loss."""
+        path = _random_ipc_path()
+        num_consumers = 2
+        total_msgs = 200
+
+        cfg = IPCRingBufferConfig(
+            path=path, backlog=4096, num_producers=1, num_consumers=num_consumers
+        )
+        producer = IPCRingBufferProducer(cfg)
+        consumers = [IPCRingBufferConsumer(cfg) for _ in range(num_consumers)]
+
+        try:
+            for i in range(total_msgs):
+                producer.insert(f"spmc-{i}".encode("utf-8"))
+
+            # Drain from both consumers; ZMQ will load-balance
+            deadline = time.monotonic() + 2.5
+            received_counts = [0] * num_consumers
+            while sum(received_counts) < total_msgs and time.monotonic() < deadline:
+                for idx, c in enumerate(consumers):
+                    batch = c.consume_all()
+                    if batch:
+                        received_counts[idx] += len(batch)
+                if sum(received_counts) < total_msgs:
+                    time.sleep(0.01)
+
+            # Combined messages should equal total
+            assert sum(received_counts) == total_msgs
+            # Optional: ensure at least one consumer received something
+            assert any(count > 0 for count in received_counts)
+        finally:
+            producer.stop()
+            for c in consumers:
+                c.stop()
 
 class TestIPCRingBufferAsyncOperations:
     """Test async operations (simplified for speed)."""
