@@ -69,13 +69,12 @@ repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
 
 [dependency-groups]
 dev = [
-    "pytest",
-    "ruff",
+    "ty>=0.0.7",
+    "pytest>=9.0.2",
+    "ruff>=0.14.9",
     "cython>=3.0.11",
-    "pyright>=1.1.403",
     "uv>=0.8.8",
     "setuptools>=80.9.0",
-    "watchfiles>=0.21.0",
     "pytest-asyncio>=1.1.0",
 ]
 build = [
@@ -84,6 +83,11 @@ build = [
     "cibuildwheel>=2.16.0",
 ]
 
-[tool.pyright]
-include = ["src"]
-extraPaths = ["src"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "boundary: marks boundary condition tests",
+    "property: marks property/invariant tests",
+]

@@ -3,20 +3,27 @@
 # cython: wraparound=False
 
 import copy
-import msgspec
 import asyncio
 from abc import ABC, abstractmethod
-from typing import final, AsyncIterator
+from typing import final, AsyncIterator, Self
+from msgspec import Struct
+
+from libc.stdint cimport uint64_t as u64
 
 from mm_toolbox.ringbuffer.generic cimport GenericRingBuffer
 
-class Trade(msgspec.Struct):
+class Trade(Struct):
     time_ms: int
     is_buy: bool
     price: float
     size: float
 
-class Candle(msgspec.Struct):
+    @property
+    def value(self) -> float:
+        """The value of the trade."""
+        return self.price * self.size
+
+class Candle(Struct):
     open_time_ms: int
     close_time_ms: int
     open_price: float
@@ -47,12 +54,12 @@ class Candle(msgspec.Struct):
         self.num_trades = 0
         self.trades.clear()
 
-    def copy(self) -> "Candle":
+    def copy(self) -> Self:
         """Create a copy of the candle."""
         return copy.deepcopy(self)
 
     @classmethod
-    def empty(cls) -> "Candle":
+    def empty(cls) -> Self:
         """Create an empty candle."""
         return cls(
             open_time_ms=0,
@@ -74,22 +81,8 @@ class Candle(msgspec.Struct):
 cdef class BaseCandles:
     """Summarize individual trades into buckets of information."""
 
-    def __cinit__(self, *args, **kwargs):
-        """Initialize the candle aggregator."""
-        # Extract num_candles from various possible argument patterns
-        if len(args) == 1:
-            num_candles = 1000  # Default when only one specific parameter given
-        elif len(args) >= 2:
-            num_candles = args[-1]  # Last argument is usually num_candles
-        else:
-            num_candles = kwargs.get('num_candles', 1000)
-            
-        if num_candles <= 0:
-            raise ValueError(
-                f"Invalid number of candles; expected >1 but got {num_candles}"
-            )
-        
-        self.ringbuffer = GenericRingBuffer(max_capacity=num_candles)
+    def __cinit__(self):
+        """Lightweight construction; full init happens in __init__."""
         self.latest_candle = Candle.empty()
         self.candle_push_event = asyncio.Future[Candle]()
 
@@ -97,7 +90,13 @@ cdef class BaseCandles:
         self.__cum_volume = 0.0
         self.__total_size = 0.0
 
-    cdef inline double calculate_vwap(self, double price, double size):
+    def __init__(self, u64 num_candles=1000):
+        """Initialize ring buffer capacity and validate settings."""
+        if num_candles <= 0:
+            raise ValueError(f"Invalid number of candles; expected >1 but got {num_candles}")
+        self.ringbuffer = GenericRingBuffer(max_capacity=num_candles)
+
+    cdef inline double calculate_vwap(self, double price, double size) noexcept nogil:
         """Calculate the current VWAP (Volume-Weighted Average Price)."""
         self.__cum_volume += price * size
         self.__total_size += size
@@ -117,28 +116,31 @@ cdef class BaseCandles:
         if not self.candle_push_event.done():
             self.candle_push_event.set_result(self.latest_candle.copy())
         
-        # Create new Future for next candle
         self.candle_push_event = asyncio.Future[Candle]()
         
         self.latest_candle.reset()
 
         # This ensures the newest candle is always the latest one incase the 
-        # ringbuffer is accessed. If the ringbuffer is accessed, the latest candle
-        # is the one that is being accessed.
+        # ringbuffer is accessed whilst there is an open candle.
         self.ringbuffer.overwrite_latest(self.latest_candle, increment_count=False)
 
-    cpdef void initialize(self, list trades):
+    cpdef void initialize(self, list[object] trades):
         """Initialize candle data from a batch of existing trades."""
+        # The type must strictly be list[Trade], however Cython doesn't support
+        # typed lists containing specific Python objects. Check that first and/or
+        # last values are of the Trade type, and call it a day. 
+        if not isinstance(trades[0], Trade) or not isinstance(trades[-1], Trade):
+            raise ValueError(f"Invalid object typing in list; expected list[Trade] but got {type(trades)}")
+
         self.latest_candle.reset()
         self.ringbuffer.clear()
 
         for trade in trades:
             self.process_trade(trade)
 
-    @abstractmethod
-    def process_trade(self, trade: Trade):
+    cpdef void process_trade(self, object trade):
         """Process a single trade tick, updating the current candle."""
-        pass
+        raise NotImplementedError("Subclasses must implement this method;")
 
     def __len__(self):
         """Number of candles currently stored."""
@@ -158,52 +160,3 @@ cdef class BaseCandles:
         new_candle = self.candle_push_event.result()
         self.candle_push_event.set_result(None)
         return new_candle
-
-
-def _example() -> None:
-    """Example usage of BaseCandles and Candle."""
-    class SimpleCandles(BaseCandles):
-        def process_trade(self, trade: Trade):
-            self.latest_candle.trades.append(trade)
-            self.latest_candle.num_trades += 1
-            self.latest_candle.close_time_ms = trade.time_ms
-
-    trades = [
-        Trade(time_ms=1, is_buy=True, price=100.0, size=1.0),
-        Trade(time_ms=2, is_buy=False, price=101.0, size=2.0),
-    ]
-    candles = SimpleCandles(num_candles=10)
-    candles.initialize(trades)
-    print(f"Number of candles: {len(candles)}")
-    print(f"First trade in latest candle: {candles.latest_candle.trades[0]}")
-
-async def _example_async() -> None:
-    """Example showing concurrent trade insertion and candle consumption."""
-    class SimpleCandles(BaseCandles):
-        def process_trade(self, trade: Trade):
-            self.latest_candle.trades.append(trade)
-            self.latest_candle.num_trades += 1
-            self.latest_candle.close_time_ms = trade.time_ms
-            self.insert_and_reset_candle()
-
-    trades = [
-        Trade(time_ms=10, is_buy=True, price=100.0, size=1.0),
-        Trade(time_ms=20, is_buy=False, price=101.0, size=2.0),
-        Trade(time_ms=30, is_buy=True, price=102.0, size=1.5),
-    ]
-    candles = SimpleCandles(num_candles=5)
-
-    async def producer():
-        for trade in trades:
-            candles.process_trade(trade)
-            await asyncio.sleep(0.01)
-
-    async def consumer():
-        async for candle in candles:
-            if candle is None:
-                break
-            print(f"Consumed candle with {candle.num_trades} trades, close_time_ms={candle.close_time_ms}")
-            if candle.close_time_ms == trades[-1].time_ms:
-                break
-
-    await asyncio.gather(producer(), consumer())

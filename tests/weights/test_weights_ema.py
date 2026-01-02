@@ -144,7 +144,8 @@ class TestEmaWeightsEdgeCases:
         assert result_one[-1] == pytest.approx(1.0, abs=1e-12)
         assert np.all(result_one[:-1] == pytest.approx(0.0, abs=1e-12))
 
-        # Note: Alpha = 0 creates division by zero, so we test a very small alpha instead
+        # Note: Alpha = 0 creates division by zero, so we test a very small
+        # alpha instead
         result_small = ema_weights(5, alpha=0.001)
         assert pytest.approx(result_small.sum(), abs=1e-12) == 1.0
 

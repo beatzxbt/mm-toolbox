@@ -208,6 +208,7 @@ cdef class NumericRingBuffer:
         while True:
             if self._size > 0:
                 yield self.consume()
+                continue
             await self._buffer_not_empty_event.wait()
 
     cpdef object peekright(self):

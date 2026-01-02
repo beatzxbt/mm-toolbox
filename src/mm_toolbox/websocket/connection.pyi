@@ -3,9 +3,9 @@ from enum import IntEnum
 from typing import Any, Self
 
 import msgspec
-from picows.picows import WSListener
+from picows.picows import WSFrame, WSListener, WSTransport
 
-from mm_toolbox.moving_average.tema import TimeExponentialMovingAverage as Tema
+from mm_toolbox.moving_average.ema import ExponentialMovingAverage as Ema
 from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
 
 class ConnectionState(IntEnum):
@@ -22,13 +22,13 @@ class WsConnectionConfig(msgspec.Struct):
     def default(
         cls,
         wss_url: str,
-        conn_id: int = None,
-        on_connect: list[bytes] = None,
-        auto_reconnect: bool = True,
+        conn_id: int | None = None,
+        on_connect: list[bytes] | None = None,
+        auto_reconnect: bool | None = None,
     ) -> WsConnectionConfig: ...
 
 class LatencyTrackerState(msgspec.Struct):
-    latency_ema: Tema
+    latency_ema: Ema
     latency_ms: float
     @classmethod
     def default(cls) -> LatencyTrackerState: ...
@@ -51,8 +51,38 @@ class WsConnection(WSListener):
     def __init__(self, ringbuffer: BytesRingBuffer, config: WsConnectionConfig) -> None:
         """Initializes a new Websocket connection."""
         ...
-    def _timed_operations(self) -> Any:
+    def _timed_operations(self) -> None:
         """Performs timed operations for the connection."""
+        ...
+    def set_on_connect(self, on_connect: list[bytes]) -> None:
+        """Sets the on_connect list."""
+        ...
+    def send_ping(self, msg: bytes = b"") -> None:
+        """Sends a PING frame to the remote endpoint."""
+        ...
+    def send_pong(self, msg: bytes = b"") -> None:
+        """Sends a PONG frame to the remote endpoint."""
+        ...
+    def send_data(self, msg: bytes) -> None:
+        """Sends data as a TEXT frame over the Websocket connection."""
+        ...
+    def close(self) -> None:
+        """Closes the Websocket connection."""
+        ...
+    def get_config(self) -> WsConnectionConfig:
+        """Returns the current connection config."""
+        ...
+    def get_state(self) -> WsConnectionState:
+        """Returns the current connection state."""
+        ...
+    def on_ws_connected(self, transport: WSTransport) -> Any:
+        """Called when the handshake completes successfully."""
+        ...
+    def on_ws_frame(self, transport: WSTransport, frame: WSFrame) -> Any:
+        """Called upon receiving a new frame."""
+        ...
+    def on_ws_disconnected(self, transport: WSTransport) -> Any:
+        """Called when the Websocket connection is closed."""
         ...
     @classmethod
     async def new(cls, ringbuffer: BytesRingBuffer, config: WsConnectionConfig) -> Self:

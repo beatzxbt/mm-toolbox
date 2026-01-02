@@ -7,6 +7,7 @@ cdef class TimeCandles(BaseCandles):
     
     def __init__(self, double secs_per_bucket, int num_candles=1000):
         """Initialize the time-based candle aggregator."""
+        BaseCandles.__init__(self, num_candles)
         self.millis_per_bucket = secs_per_bucket * 1000.0
         self.next_candle_close_time = time_ms() + self.millis_per_bucket
 

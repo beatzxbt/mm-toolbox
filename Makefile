@@ -1,91 +1,79 @@
-.PHONY: help install format lint lint-fix lint-check typecheck docstring style fix \
-        check sync clean test stats watch live-stream run-client reclaim \
-        monitor monitor-charts build watch-build wheel wheel-clean sdist \
-        upload-test upload-prod check-dist
+.PHONY: help format typecheck fix test-py test-c test-all sync build-lib build-tests build-test build-all \
+        remove-build-lib remove-build-tests clean-test rebuild-test remove-build-all rebuild-all wheel remove-wheel sdist remove-sdist \
+        check-dist upload-test upload-prod %
+
 .DEFAULT_GOAL := help
 
 TEST_FLAGS := -xvv -s -p no:anchorpy
 
 format: ## Format code using ruff
 	uv run ruff format .
-
-lint: ## Run linting using ruff
-	uv run ruff check --fix .
 	uv run ruff check --fix --unsafe-fixes .
 
 typecheck: ## Run static type checking
-	uv run pyright
+	uv run ty check src/
 
-docstring: ## Check docstring style and completeness
-	uv run ruff check . --select D,PD
+fix: ## Run all formatters and typecheck
+	$(MAKE) format typecheck
 
-docstring-fix: ## Fix docstring style and completeness
-	uv run ruff check --fix . --select D,PD
-	uv run ruff check --fix --unsafe-fixes . --select D,PD
+test-py: ## Run tests
+	PYTHONPATH=src uv run pytest $(TEST_FLAGS)
 
-style: ## Check code style (without docstrings)
-	uv run ruff check . --select E,W,F,I,N,UP,B,C4,SIM,TCH
+test-c: ## Run C unit tests
+	$(MAKE) -C tests/ test
 
-style-fix: ## Fix code style (without docstrings)
-	uv run ruff check --fix . --select E,W,F,I,N,UP,B,C4,SIM,TCH
-	uv run ruff check --fix --unsafe-fixes . --select E,W,F,I,N,UP,B,C4,SIM,TCH
-
-fix: ## Run all formatters and fixers
-	$(MAKE) format lint-fix style-fix 
-
-check: ## Run all formatters, fixers, and typecheck
-	$(MAKE) fix typecheck 
+test-all: ## Run all tests (C + Python)
+	$(MAKE) test-c test-py 
 
 sync: ## Re‑lock and install latest versions
 	uv lock --upgrade       # rebuild uv.lock with newer pins
 	uv sync --all-groups    # install everything into .venv
 
-test: ## Run tests
-	PYTHONPATH=src uv run pytest $(TEST_FLAGS)
-
-build: ## Build Cython extensions in-place
+build-lib: ## Build Cython extensions in-place
 	uv run python setup.py build_ext --inplace --parallel $$(uv run python -c 'import os;print(max(1,(os.cpu_count() or 2)-1))')
 
-remove-build: ## Remove build artifacts and compiled extensions
+build-tests: ## Build C unit tests only
+	$(MAKE) -C tests/orderbook/advanced/c test
+
+build-test: ## Build all Cython test extensions
+	cd tests && uv run python setup.py build_ext --inplace --parallel $$(uv run python -c 'import os;print(max(1,(os.cpu_count() or 2)-1))')
+
+build-all: ## Build all Cython extensions
+	$(MAKE) build-lib build-tests
+
+remove-build-lib: ## Remove build artifacts and compiled extensions
 	rm -rf build/ *.egg-info/
 	find ./src -name "*.so" -delete
 
-stats: ## Show code quality statistics
-	@echo "=== Docstring Coverage ==="
-	@uv run ruff check . --select D --statistics
-	@echo "\n=== Missing Type Hints ==="
-	@uv run  ruff check . --select ANN --statistics
-	@echo "\n=== Style Issues ==="
-	@uv run  ruff check . --select E,W,F,I,N --statistics
+remove-build-tests: ## Remove C test build artifacts
+	rm -rf build/ *.egg-info/
+	find ./tests/orderbook/advanced/c -name "*.so" -delete
 
+clean-test: ## Clean Cython test extensions
+	cd tests && uv run python setup.py clean --all || true
+	find ./tests/orderbook/advanced -path "*/cython/*.so" -delete
+	find ./tests/orderbook/advanced -path "*/cython/*.c" -type f -delete
 
-# Watch tests, optionally limited to a path:
-#   make watch                → watch entire suite
-#   make watch path/to/file   → watch single test file
-watch:
-	@if [ -z "$(filter-out $@,$(MAKECMDGOALS))" ]; then \
-		PYTHONPATH=src uv run pytest-watcher . --runner "pytest tests $(TEST_FLAGS) -W ignore::DeprecationWarning"; \
-	else \
-		path_arg="$(filter-out $@,$(MAKECMDGOALS))"; \
-		PYTHONPATH=src uv run pytest-watcher . --runner "pytest src/tests/$$path_arg $(TEST_FLAGS) -W ignore::DeprecationWarning"; \
-	fi
+rebuild-test: clean-test build-test ## Clean and rebuild Cython test extensions
 
-watch-build: ## Rebuild Cython extensions on source changes
-	uv run python scripts/watch_build.py --parallel $$(uv run python -c 'import os;print(max(1,(os.cpu_count() or 2)-1))')
+remove-build-all: ## Remove build artifacts and compiled extensions
+	$(MAKE) remove-build-lib remove-build-tests
+
+rebuild-all: remove-build-all build-all ## Clean and rebuild all Cython extensions
 
 wheel: ## Build wheel distribution
-	$(MAKE) remove-build
+	$(MAKE) remove-build-lib
 	uv run python -m build --wheel
 
+remove-wheel: ## Clean wheel build artifacts
+	$(MAKE) remove-build-lib
+
 sdist: ## Build source distribution
-	$(MAKE) remove-build
+	$(MAKE) remove-build-lib
 	uv run python -m build --sdist
 
-wheel-clean: ## Clean wheel build artifacts
-	rm -rf build/ dist/ *.egg-info/
-	find . -name "*.pyc" -delete
-	find . -name "*.pyo" -delete
-	find . -name "__pycache__" -type d -exec rm -rf {} + || true
+remove-sdist: ## Clean sdist build artifacts
+	$(MAKE) remove-build-lib
 
 check-dist: ## Check distribution files for PyPI upload
 	uv run python -m twine check dist/*
@@ -113,5 +101,20 @@ help: ## Display this help message
 	@echo 'Usage:'
 	@echo '  make <target>'
 	@echo ''
-	@echo 'Targets:'
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo 'Code Quality:'
+	@grep -E '^(format|typecheck|fix):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo ''
+	@echo 'Testing:'
+	@grep -E '^(test-py|test-c|test-all):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo ''
+	@echo 'Build:'
+	@grep -E '^(build-lib|build-tests|build-test|build-all|remove-build-lib|remove-build-tests|clean-test|rebuild-test|remove-build-all|rebuild-all):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo ''
+	@echo 'Distribution:'
+	@grep -E '^(wheel|remove-wheel|sdist|remove-sdist|check-dist):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo ''
+	@echo 'Deployment:'
+	@grep -E '^(upload-test|upload-prod):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo ''
+	@echo 'Other:'
+	@grep -E '^(sync|help):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'

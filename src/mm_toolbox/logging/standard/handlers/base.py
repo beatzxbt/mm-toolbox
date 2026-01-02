@@ -73,6 +73,15 @@ class BaseLogHandler(ABC):
                 # Suppress exceptions during cleanup
                 pass
 
+    async def aclose(self) -> None:
+        """Close any async resources owned by the handler."""
+        try:
+            if self._http_session is not None and not self._http_session.closed:
+                await self._http_session.close()
+        except Exception:
+            # Never raise from a logger handler close
+            pass
+
     @abstractmethod
     async def push(self, buffer: list[str]) -> None:
         """Flushes the given buffer of log entries in some way.

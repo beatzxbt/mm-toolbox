@@ -17,7 +17,7 @@ from mm_toolbox.logging.advanced.pylog import PyLog
 from mm_toolbox.time import time_iso8601
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Coroutine
 
 
 class _RateLimiter:
@@ -107,9 +107,7 @@ class BaseLogHandler(ABC):
             self._loop_thread.start()
         return self._ev_loop
 
-    def _run_coro(
-        self, coro: "asyncio.Future[object] | asyncio.coroutines.Coroutine"
-    ) -> Future:
+    def _run_coro(self, coro: "Coroutine[object, None, object]") -> Future:
         loop = self.ev_loop
         return asyncio.run_coroutine_threadsafe(coro, loop)
 

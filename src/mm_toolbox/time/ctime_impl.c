@@ -10,6 +10,10 @@
 #define CLOCK_REALTIME 0
 #endif
 
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 1
+#endif
+
 int64_t c_time_s(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_REALTIME, &ts) == -1) {
@@ -42,6 +46,58 @@ int64_t c_time_ns(void) {
     return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
 }
 
+/**
+ * Get monotonic time in seconds.
+ * Monotonic time never decreases and is unaffected by system clock changes.
+ * @return Time in seconds, or -1 on error.
+ */
+int64_t c_time_monotonic_s(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == -1) {
+        return -1;
+    }
+    return (int64_t)ts.tv_sec;
+}
+
+/**
+ * Get monotonic time in milliseconds.
+ * Monotonic time never decreases and is unaffected by system clock changes.
+ * @return Time in milliseconds, or -1 on error.
+ */
+int64_t c_time_monotonic_ms(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == -1) {
+        return -1;
+    }
+    return (int64_t)ts.tv_sec * 1000LL + (int64_t)ts.tv_nsec / 1000000LL;
+}
+
+/**
+ * Get monotonic time in microseconds.
+ * Monotonic time never decreases and is unaffected by system clock changes.
+ * @return Time in microseconds, or -1 on error.
+ */
+int64_t c_time_monotonic_us(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == -1) {
+        return -1;
+    }
+    return (int64_t)ts.tv_sec * 1000000LL + (int64_t)ts.tv_nsec / 1000LL;
+}
+
+/**
+ * Get monotonic time in nanoseconds.
+ * Monotonic time never decreases and is unaffected by system clock changes.
+ * @return Time in nanoseconds, or -1 on error.
+ */
+int64_t c_time_monotonic_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == -1) {
+        return -1;
+    }
+    return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+}
+
 char* c_time_iso8601(double timestamp) {
     char* buf = malloc(32);
     if (buf == NULL) {
@@ -67,19 +123,18 @@ char* c_time_iso8601(double timestamp) {
         int64_t remainder_ns = nanoseconds % NS_IN_DAY;
         
         /* Manual date arithmetic (Fliegel–Van Flandern algorithm) */
-        int64_t z = days_since_epoch + 720198;
+        int64_t z = days_since_epoch + 719468;
         int64_t era = (z >= 0) ? z / 146097 : (z - 146096) / 146097;
         int64_t doe = z - era * 146097;
         int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-        int64_t year = yoe + era * 400 - 2; /* Adjusted for epoch */
-        int64_t t1 = 365 * yoe + yoe / 4 - yoe / 100 + yoe / 400;
-        int64_t doy = doe - t1;
+        int64_t year = yoe + era * 400;
+        int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
         int64_t mp = (5 * doy + 2) / 153;
         int64_t day = doy - (153 * mp + 2) / 5 + 1;
         int64_t month = (mp < 10) ? mp + 3 : mp - 9;
         
         if (month <= 2) {
-            year -= 1;
+            year += 1;
         }
         
         /* Convert remainder to time components */

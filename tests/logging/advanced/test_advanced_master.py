@@ -1,10 +1,11 @@
 import pytest
-pytestmark = pytest.mark.timeout(10, method="thread")
 
 from mm_toolbox.logging.advanced.config import LoggerConfig
 from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
 from mm_toolbox.logging.advanced.handlers.file import FileLogHandler
 from mm_toolbox.logging.advanced.master import MasterLogger
+
+pytestmark = pytest.mark.timeout(10, method="thread")
 
 
 class MockHandler(BaseLogHandler):

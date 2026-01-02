@@ -22,7 +22,8 @@ class DiscordLogHandler(BaseLogHandler):
 
         if not webhook.startswith("https://discord.com/api/webhooks/"):
             raise ValueError(
-                f"Invalid webhook format; expected 'https://discord.com/api/webhooks/*' but got {webhook}"
+                f"Invalid webhook format; expected "
+                f"'https://discord.com/api/webhooks/*' but got {webhook}"
             )
 
         self.url = webhook

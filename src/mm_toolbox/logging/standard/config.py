@@ -19,7 +19,7 @@ class LoggerConfig:
     def __init__(
         self,
         base_level: LogLevel = LogLevel.INFO,
-        do_stout: bool = True,
+        do_stdout: bool = True,
         str_format: str = "%(asctime)s [%(levelname)s] %(name)s - %(message)s",
         flush_interval_s: float = 1.0,
         buffer_size: int = 10000,
@@ -31,7 +31,8 @@ class LoggerConfig:
                 Defaults to LogLevel.INFO.
             flush_interval_s (float): Maximum time (in seconds) before forcing
                 a buffer flush, even if it's not full. Must be > 0. Defaults to 1.0.
-            do_stout (bool): If True, logs are also printed to stdout. Defaults to False.
+            do_stdout (bool): If True, logs are also printed to stdout.
+                Defaults to True.
             str_format (str): The format string for log messages.
                 Supports %(asctime)s, %(levelname)s, %(name)s, and %(message)s.
                 Defaults to "%(asctime)s [%(levelname)s] %(name)s - %(message)s".
@@ -43,7 +44,7 @@ class LoggerConfig:
 
         """
         self.base_level = base_level
-        self.do_stout = do_stout
+        self.do_stdout = do_stdout
 
         self.flush_interval_s = flush_interval_s
         if self.flush_interval_s <= 0.0:

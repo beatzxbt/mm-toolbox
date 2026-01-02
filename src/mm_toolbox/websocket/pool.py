@@ -7,7 +7,8 @@ import time
 from collections.abc import Callable
 from typing import Any, Self
 
-import msgspec
+from msgspec import Struct
+from msgspec.json import decode as json_decode
 
 from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
 from mm_toolbox.time.time import time_s
@@ -18,7 +19,7 @@ from mm_toolbox.websocket.connection import (
 )
 
 
-class WsPoolConfig(msgspec.Struct):
+class WsPoolConfig(Struct):
     """Configuration for WebSocket connection pool."""
 
     num_connections: int
@@ -32,7 +33,8 @@ class WsPoolConfig(msgspec.Struct):
             )
         if self.evict_interval_s <= 0:
             raise ValueError(
-                f"Invalid eviction interval; expected >0 but got {self.evict_interval_s}s"
+                f"Invalid eviction interval; expected >0 but got "
+                f"{self.evict_interval_s}s"
             )
 
     @classmethod
@@ -68,7 +70,8 @@ class WsPool:
                 or list(sig.parameters.values())[0].annotation is not bytes
             ):
                 raise ValueError(
-                    f"Invalid on_message signature; expected a single bytes argument but got {sig}"
+                    f"Invalid on_message signature; expected a single bytes "
+                    f"argument but got {sig}"
                 )
 
         self._on_message: Callable[[bytes], None] = (
@@ -88,9 +91,10 @@ class WsPool:
         self._timed_operations_thread.start()
 
     def __default_on_message(self, msg: bytes) -> None:
-        """Default callback for processing WebSocket messages. For convenience in debugging, this just prints the json."""
+        """Default callback for processing WebSocket messages. For convenience
+        in debugging, this just prints the json."""
         try:
-            print(msgspec.json.decode(msg))
+            print(json_decode(msg))
         except Exception as e:
             print(f"Error decoding message: {e}")
 
@@ -196,6 +200,16 @@ class WsPool:
         )
         return pool
 
+    def get_state(self) -> ConnectionState:
+        """Returns the current pool state."""
+        return self._pool_state
+
+    def get_connection_count(self) -> int:
+        """Returns the number of active connections."""
+        return len(
+            [conn for conn in self._conns.values() if conn.get_state().is_connected]
+        )
+
     def close(self) -> None:
         """Shuts down all WebSocket connections and stops the eviction task."""
         self._should_stop = True
@@ -231,17 +245,7 @@ class WsPool:
 
     async def __anext__(self) -> bytes:
         """Returns the next message from the pool's ringbuffer."""
-        return await self._ringbuffer.aconsume_iterable()
-
-    def get_state(self) -> ConnectionState:
-        """Returns the current pool state."""
-        return self._pool_state
-
-    def get_connection_count(self) -> int:
-        """Returns the number of active connections."""
-        return len(
-            [conn for conn in self._conns.values() if conn.get_state().is_connected]
-        )
+        return await self._ringbuffer.aconsume()
 
 
 if __name__ == "__main__":
@@ -252,13 +256,11 @@ if __name__ == "__main__":
         config = WsConnectionConfig.default(
             wss_url="wss://fstream.binance.com/ws/btcusdt@bookTicker"
         )
-        ws = await WsPool.new(
-            config, on_message=lambda msg: print(msgspec.json.decode(msg))
-        )
+        ws = await WsPool.new(config, on_message=lambda msg: print(json_decode(msg)))
         async with ws:
             msg_count = 0
             async for msg in ws:
-                print(msgspec.json.decode(msg))
+                print(json_decode(msg))
                 msg_count += 1
                 if msg_count > 100:
                     print(f"Final state: {ws.get_state()}")

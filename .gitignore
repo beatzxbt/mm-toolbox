@@ -1,5 +1,7 @@
 # Own
 .idea
+.claude
+.cursor
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

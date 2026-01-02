@@ -94,7 +94,8 @@ class TestLogarithmicWeightsScaling:
         max_weight_20 = result_20[-1]
 
         # All should sum to 1, but distribution should be different
-        # Test that max weights are meaningfully different (not just floating point precision)
+        # Test that max weights are meaningfully different (not just floating
+        # point precision)
         assert abs(max_weight_5 - max_weight_10) > 0.05
         assert abs(max_weight_10 - max_weight_20) > 0.02
 

@@ -10,6 +10,10 @@ cdef extern from "ctime_impl.h":
     i64 c_time_ms ()
     i64 c_time_us ()
     i64 c_time_ns ()
+    i64 c_time_monotonic_s ()
+    i64 c_time_monotonic_ms ()
+    i64 c_time_monotonic_us ()
+    i64 c_time_monotonic_ns ()
     char* c_time_iso8601 (double timestamp)
     void c_free_string (char* ptr)
 
@@ -41,6 +45,34 @@ cpdef i64 time_ns():
         raise RuntimeError("Failed to get system time")
     return result
 
+cpdef i64 time_monotonic_s():
+    """Returns monotonic time in seconds (never decreases, unaffected by clock changes)."""
+    cdef i64 result = c_time_monotonic_s()
+    if result == -1:
+        raise RuntimeError("Failed to get monotonic time")
+    return result
+
+cpdef i64 time_monotonic_ms():
+    """Returns monotonic time in milliseconds (never decreases, unaffected by clock changes)."""
+    cdef i64 result = c_time_monotonic_ms()
+    if result == -1:
+        raise RuntimeError("Failed to get monotonic time")
+    return result
+
+cpdef i64 time_monotonic_us():
+    """Returns monotonic time in microseconds (never decreases, unaffected by clock changes)."""
+    cdef i64 result = c_time_monotonic_us()
+    if result == -1:
+        raise RuntimeError("Failed to get monotonic time")
+    return result
+
+cpdef i64 time_monotonic_ns():
+    """Returns monotonic time in nanoseconds (never decreases, unaffected by clock changes)."""
+    cdef i64 result = c_time_monotonic_ns()
+    if result == -1:
+        raise RuntimeError("Failed to get monotonic time")
+    return result
+
 cpdef double iso8601_to_unix(str timestamp):
     """Converts an ISO 8601 formatted timestamp to a Unix timestamp."""
     return ciso8601.parse_datetime(timestamp).timestamp()
@@ -61,11 +93,11 @@ cpdef str time_iso8601(double timestamp = 0.0):
     cdef str result
 
     c_result = c_time_iso8601(timestamp)
-    if c_result == NULL:
+    if c_result is NULL:
         raise MemoryError("Failed to allocate memory for timestamp formatting")
     
     try:
-        result = c_result.decode('ascii')
+        result = bytes(c_result).decode('ascii')
         return result
     finally:
         c_free_string(c_result)

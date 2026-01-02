@@ -7,6 +7,7 @@ cdef class VolumeCandles(BaseCandles):
     """
     def __init__(self, double volume_per_bucket, int num_candles=1000):
         """Initialize the volume-based candle aggregator."""
+        BaseCandles.__init__(self, num_candles)
         self.volume_per_bucket = volume_per_bucket
 
     cpdef void process_trade(self, object trade):

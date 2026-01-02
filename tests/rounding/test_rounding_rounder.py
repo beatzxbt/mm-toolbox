@@ -512,7 +512,8 @@ class TestRounderEdgeCases:
         medium_rounder = Rounder(RounderConfig.default(1e-6, 1e-6))
         medium_price = 1.0 + 1e-5
         result = medium_rounder.bid(medium_price)
-        # With 1e-6 tick size, 1.00001 should round down to 1.00001 (10 ticks up from 1.0)
+        # With 1e-6 tick size, 1.00001 should round down to 1.00001 (10 ticks
+        # up from 1.0)
         assert result == pytest.approx(1.00001, abs=1e-6)
 
     def test_memory_efficiency(self):
@@ -540,7 +541,8 @@ class TestRounderEdgeCases:
             bid_result = rounder.bid(value)
             ask_result = rounder.ask(value)
 
-            # Results should be valid multiples of tick size (with some tolerance for floating point)
+            # Results should be valid multiples of tick size (with some
+            # tolerance for floating point)
             tick_multiple_bid = round(bid_result / 0.01)
             tick_multiple_ask = round(ask_result / 0.01)
 

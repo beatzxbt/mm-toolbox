@@ -5,5 +5,6 @@ cdef class PriceCandles(BaseCandles):
         double price_bucket
         double upper_price_bound
         double lower_price_bound
+    # def __init__(self, double price_bucket, int num_candles=1000)
 
     cpdef void process_trade(self, object trade)

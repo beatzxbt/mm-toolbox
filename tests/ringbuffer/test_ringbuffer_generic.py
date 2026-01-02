@@ -286,8 +286,8 @@ class TestGenericRingBufferAsyncFunctionality:
                 rb.insert(f"item_{i}")
 
         async def consumer():
-            async for item in rb.aconsume_iterable():
-                collected.append(item)
+            async for _item in rb.aconsume_iterable():
+                collected.append(_item)
                 if len(collected) == 5:
                     break
 
@@ -312,7 +312,7 @@ class TestGenericRingBufferAsyncFunctionality:
             await rb.aconsume()
 
         with pytest.raises(RuntimeError, match="Async operations are disabled"):
-            async for item in rb.aconsume_iterable():
+            async for _item in rb.aconsume_iterable():
                 pass
 
     @pytest.mark.asyncio

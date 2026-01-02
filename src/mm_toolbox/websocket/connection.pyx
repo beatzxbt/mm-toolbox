@@ -1,9 +1,11 @@
+import os
+import random
 import asyncio
-import msgspec
 import threading
-from typing import AsyncIterable, Self
+from typing import AsyncIterable, Self, Optional, cast
 
 from time import sleep
+from msgspec import Struct
 from picows import ws_connect
 from picows.picows cimport (
     WSFrame, 
@@ -17,24 +19,32 @@ from mm_toolbox.websocket.connection cimport ConnectionState
 from mm_toolbox.ringbuffer.bytes cimport BytesRingBuffer
 from mm_toolbox.moving_average.ema cimport ExponentialMovingAverage as Ema
 
-class WsConnectionConfig(msgspec.Struct):
+class WsConnectionConfig(Struct):
     conn_id: int
     wss_url: str
     on_connect: list[bytes]
     auto_reconnect: bool
 
+    def __post_init__(self):
+        if not self.wss_url.startswith("wss://"):
+            raise ValueError("Invalid wss_url; must start with 'wss://'")
+    
     @classmethod
-    def default(cls, wss_url: str, conn_id: int=None, on_connect: list[bytes]=None, auto_reconnect: bool=True) -> WsConnectionConfig:
-        import os
-        import random
+    def default(
+        cls, 
+        wss_url: str, 
+        conn_id: Optional[int]=None, 
+        on_connect: Optional[list[bytes]]=None, 
+        auto_reconnect: Optional[bool]=None
+    ) -> WsConnectionConfig:
         return WsConnectionConfig(
-            conn_id=conn_id or (time_ns() + os.getpid() + random.randint(1, 10000)),
+            conn_id=conn_id if conn_id is not None else (time_ns() + os.getpid() + random.randint(1, 10000)),
             wss_url=wss_url,
-            on_connect=on_connect or [],
-            auto_reconnect=auto_reconnect,
+            on_connect=on_connect if on_connect is not None else [],
+            auto_reconnect=auto_reconnect if auto_reconnect is not None else True,
         )
 
-class LatencyTrackerState(msgspec.Struct):
+class LatencyTrackerState(Struct):
     latency_ema: Ema
     latency_ms: float
     
@@ -48,7 +58,7 @@ class LatencyTrackerState(msgspec.Struct):
             latency_ms=1000.0,
         )
     
-class WsConnectionState(msgspec.Struct):
+class WsConnectionState(Struct):
     seq_id: int
     state: ConnectionState
     ringbuffer: BytesRingBuffer
@@ -87,16 +97,16 @@ cdef class WsConnection(WSListener):
             latency=self._latency_tracker,
         )
 
-        self._config: WsConnectionConfig = config
+        self._config = cast('WsConnectionConfig', config)
         
         # Use atomic-like operations for ping/pong tracking (single writes)
         self._tracker_ping_sent_time_ms = 0.0  # 0.0 means no ping sent
         self._tracker_pong_recv_time_ms = 0.0  # 0.0 means no pong received
         
-        self._raw_unfin_msg_buffer = b""
+        self._unfin_msg_buffer = b""
         self._unfin_msg_size = 0  # Track buffer size for memory safety
 
-        self._transport: WSTransport | None = None
+        self._transport: Optional[WSTransport] = None
         self._reconnect_attempts: int = 0
         self._should_stop = False  # Lightweight stop signal
 
@@ -200,12 +210,8 @@ cdef class WsConnection(WSListener):
         self._reconnect_attempts = 0
         self._state.state = ConnectionState.CONNECTED
 
-        # Send on_connect messages with error protection
-        try:
-            for payload in self._config.on_connect:
-                self.send_data(payload)
-        except Exception:
-            pass  # Silently ignore send errors to avoid crashing connection
+        for payload in self._config.on_connect:
+            self.send_data(payload)
 
     cpdef on_ws_frame(self, WSTransport transport, WSFrame frame):
         """Called upon receiving a new frame."""
@@ -217,19 +223,19 @@ cdef class WsConnection(WSListener):
 
         # Memory safety: prevent unbounded buffer growth
         if self._unfin_msg_size + frame_size > 1048576:  # 1MB limit
-            self._raw_unfin_msg_buffer = b""
+            self._unfin_msg_buffer = b""
             self._unfin_msg_size = 0
             return
 
-        self._raw_unfin_msg_buffer += frame_bytes
+        self._unfin_msg_buffer += frame_bytes
         self._unfin_msg_size += frame_size
         
         if frame_unfinished:
             return
 
         if frame_msg_type == WSMsgType.TEXT:
-            self._ringbuffer.insert(self._raw_unfin_msg_buffer)
-            self._raw_unfin_msg_buffer = b""
+            self._ringbuffer.insert(self._unfin_msg_buffer)
+            self._unfin_msg_buffer = b""
             self._unfin_msg_size = 0
             self._seq_id += 1
 

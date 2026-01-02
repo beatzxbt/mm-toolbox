@@ -7,7 +7,8 @@ from numpy.typing import NDArray
 def ema_weights(
     window: int, alpha: float | None = None, normalized: bool = True
 ) -> NDArray[np.float64]:
-    """Return EMA-like weights of length ``window`` using ``alpha`` or default 3/(window+1)."""
+    """Return EMA-like weights of length ``window`` using ``alpha`` or default
+    3/(window+1)."""
     if window <= 1:
         raise ValueError(f"Invalid window size; expected > 1 but got {window}.")
 

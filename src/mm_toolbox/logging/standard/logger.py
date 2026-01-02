@@ -1,12 +1,15 @@
 """Standard single-process logger implementation."""
 
 import asyncio
+import contextlib
 import sys
+import threading
 import traceback
+from queue import Empty, Queue
 
 from mm_toolbox.logging.standard.config import LoggerConfig, LogLevel
 from mm_toolbox.logging.standard.handlers import BaseLogHandler
-from mm_toolbox.time.time import time_iso8601, time_s
+from mm_toolbox.time.time import time_iso8601, time_ms
 
 
 class Logger:
@@ -18,16 +21,17 @@ class Logger:
     def __init__(
         self,
         name: str = "",
-        config: LoggerConfig = None,
+        config: LoggerConfig | None = None,
         handlers: list[BaseLogHandler] | None = None,
     ):
         """Initializes a Logger with specified configuration and handlers.
 
         Args:
             name (str): Name of the logger. Defaults to an empty string.
-            config (LoggerConfig): Configuration settings for the logger (base level, stdout, buffer size, etc.).
-            handlers (list[BaseLogHandler], optional): A list of handler objects that inherit from BaseLogHandler.
-                Defaults to an empty list if not provided.
+            config (LoggerConfig): Configuration settings for the logger
+                (base level, stdout, buffer size, etc.).
+            handlers (list[BaseLogHandler], optional): A list of handler
+                objects that inherit from BaseLogHandler.
 
         Raises:
             TypeError: If one of the provided handlers does not inherit from LogHandler.
@@ -35,83 +39,129 @@ class Logger:
         """
         self._name = name
 
-        self._config = config
-        if self._config is None:
-            self._config = LoggerConfig()
+        self._config: LoggerConfig = config if config is not None else LoggerConfig()
 
-        self._handlers = handlers
-        if self._handlers is None:
-            self._handlers = []
+        self._handlers: list[BaseLogHandler] = handlers if handlers is not None else []
 
         for handler in self._handlers:
-            handler_base_class = handler.__class__.__base__
-            if not handler_base_class == BaseLogHandler:
+            if not isinstance(handler, BaseLogHandler):
                 raise TypeError(
-                    f"Invalid handler base class; expected BaseLogHandler but got {handler_base_class}"
+                    "Invalid handler; handler must inherit from BaseLogHandler"
                 )
 
-            # Mainly for forwarding the str_format to the handler for formatting log messages
-            # where the final point is not a code environment (eg Discord, Telegram, etc).
-            handler.add_primary_config(config)
+            # Mainly for forwarding the str_format to the handler for
+            # formatting log messages where the final point is not a code
+            # environment (eg Discord, Telegram, etc).
+            handler.add_primary_config(self._config)
 
         self._buffer_size = 0
-        self._buffer: list[str] = [""] * 10000  # Should be enough for most apps
-        self._buffer_start_time_s = time_s()
+        self._buffer: list[str] = [""] * self._config.buffer_size
+        self._buffer_start_time_ms = time_ms()
 
-        self._msg_queue = asyncio.Queue()
-        self._ev_loop = asyncio.get_event_loop()
+        # Thread-safe queue for cross-context operation (sync or async)
+        self._msg_queue: Queue[tuple[str, LogLevel]] = Queue()
         self._is_running = True
 
-        # Start the log ingestor task.
-        self._log_ingestor_task = self._ev_loop.create_task(self._log_ingestor())
+        # Start background thread with its own event loop to ingest and flush
+        self._thread = threading.Thread(target=self._thread_main, daemon=True)
+        self._thread.start()
 
     async def _flush_buffer(self):
         """Flushes the log message buffer to all handlers."""
         if self._buffer_size == 0:
             return
 
-        if self._config.do_stout:
-            print(self._buffer[: self._buffer_size])
+        if self._config.do_stdout:
+            for msg in self._buffer[: self._buffer_size]:
+                print(msg)
 
-        for handler in self._handlers:
-            await handler.push(self._buffer[: self._buffer_size])
+        # Push concurrently; handlers must not bring down the logger
+        payload = self._buffer[: self._buffer_size]
+        try:
+            tasks = [handler.push(payload) for handler in self._handlers]
+        except Exception:
+            # In case any handler raises during task creation
+            sys.stderr.write(traceback.format_exc())
+            tasks = []
+
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for res in results:
+                if isinstance(res, Exception):
+                    # Never propagate from logger
+                    sys.stderr.write(traceback.format_exc())
 
         self._buffer_size = 0
-        self._buffer_start_time_s = time_s()
+        self._buffer_start_time_ms = time_ms()
 
-    async def _log_ingestor(self):
-        """Asynchronous loop that ingests log messages from the queue and flushes.
+    def _thread_main(self) -> None:
+        """Background thread entry: manages an event loop and flush cadence."""
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        except Exception:
+            # If loop cannot be created, run a degraded sync loop
+            loop = None
 
-        them based on severity or buffer fullness. Checks for new messages every 100ms
-        and also responds immediately when messages arrive.
+        async def ingest_once() -> None:
+            nonlocal loop
+            # Drain as many messages as arrived
+            drained = 0
+            while True:
+                try:
+                    log_msg, level = self._msg_queue.get_nowait()
+                except Empty:
+                    break
+                try:
+                    if self._buffer_size >= len(self._buffer):
+                        # Expand buffer safely if user under-specified buffer_size
+                        self._buffer.extend([""] * len(self._buffer))
+                    self._buffer[self._buffer_size] = log_msg
+                    self._buffer_size += 1
+                finally:
+                    drained += 1
+            # Time-based flush only
+            if (time_ms() - self._buffer_start_time_ms) >= int(
+                self._config.flush_interval_s * 1000
+            ):
+                await self._flush_buffer()
 
-        Raises:
-            Exception: If an error occurs during the log writing process.
+        try:
+            if loop is None:
+                # Fallback: simple polling loop without asyncio handlers support
+                while self._is_running:
+                    # Drain queue
+                    try:
+                        while True:
+                            log_msg, level = self._msg_queue.get(timeout=0.1)
+                            if self._buffer_size >= len(self._buffer):
+                                self._buffer.extend([""] * len(self._buffer))
+                            self._buffer[self._buffer_size] = log_msg
+                            self._buffer_size += 1
+                    except Empty:
+                        pass
+                    # No async handlers possible in this mode; skip flush
+                return
 
-        """
-        while self._is_running:
-            try:
-                # (log_msg: str, level: LogLevel)
-                log_msg, level = await asyncio.wait_for(
-                    self._msg_queue.get(),
-                    timeout=0.1,  # 100ms timeout
-                )
+            # Normal async loop: run periodic ingestion
+            async def runner():
+                try:
+                    while self._is_running:
+                        await ingest_once()
+                        await asyncio.sleep(0.1)
+                    # Final flush
+                    await ingest_once()
+                except Exception:
+                    sys.stderr.write(traceback.format_exc())
 
-                self._buffer[self._buffer_size] = log_msg
-                self._buffer_size += 1
-
-                if (
-                    time_s() - self._buffer_start_time
-                ) >= self._config.flush_interval_s:
-                    await self._flush_buffer()
-
-                self._msg_queue.task_done()
-
-            except TimeoutError:
-                if (
-                    time_s() - self._buffer_start_time
-                ) >= self._config.flush_interval_s:
-                    await self._flush_buffer()
+            loop.run_until_complete(runner())
+        finally:
+            if loop is not None and not loop.is_closed():
+                try:
+                    loop.stop()
+                    loop.close()
+                except Exception:
+                    pass
 
     def _process_log(self, level: LogLevel, msg: str):
         """Submits a log message to the queue if it meets the minimum base level.
@@ -125,12 +175,12 @@ class Logger:
             log_msg = self._config.str_format % {
                 "asctime": time_iso8601(),
                 "name": self._name,
-                "levelname": level.value,
+                "levelname": level.name,
                 "message": msg,
             }
-            self._msg_queue.put_nowait((log_msg, level))
+            self._msg_queue.put((log_msg, level))
         except Exception:
-            traceback.print_exc(file=sys.stderr)
+            sys.stderr.write(traceback.format_exc())
 
     def set_log_level(self, level: LogLevel) -> None:
         """Modify the logger's base log level at runtime.
@@ -141,8 +191,8 @@ class Logger:
         """
         self.debug(f"Changing base log level from {self._config.base_level} to {level}")
         self._config.base_level = level
-        for handlers in self._handlers:
-            handlers.add_primary_config(self._config)
+        for handler in self._handlers:
+            handler.add_primary_config(self._config)
 
     def trace(self, msg: str) -> None:
         """Send a trace-level log message.
@@ -204,14 +254,24 @@ class Logger:
 
         and handlers are closed.
         """
-        # Let the log ingestor finish ingesting all the logs.
-        # Shutdown flag automatically kills it once the queue is empty.
+        # Signal background to stop and wait for thread exit
         self._is_running = False
-        await self._msg_queue.join()
+        with contextlib.suppress(Exception):
+            if self._thread.is_alive():
+                self._thread.join(timeout=2.0)
 
         if self._buffer_size > 0:
-            await self._flush_buffer()
-            self._buffer.clear()
+            # Flush remaining using the current event loop
+            try:
+                await self._flush_buffer()
+            except Exception:
+                sys.stderr.write(traceback.format_exc())
+        self._buffer.clear()
+
+        # Close handlers (best-effort)
+        for h in self._handlers:
+            with contextlib.suppress(Exception):
+                await h.aclose()
 
     def is_running(self) -> bool:
         """Check if the master logger is running."""

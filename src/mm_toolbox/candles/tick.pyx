@@ -9,6 +9,7 @@ cdef class TickCandles(BaseCandles):
     """
     def __init__(self, int ticks_per_bucket, int num_candles=1000):
         """Initialize the tick-based candle aggregator."""
+        BaseCandles.__init__(self, num_candles)
         self.ticks_per_bucket = ticks_per_bucket
 
     cpdef void process_trade(self, object trade):

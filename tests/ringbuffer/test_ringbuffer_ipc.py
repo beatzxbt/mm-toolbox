@@ -116,14 +116,22 @@ class TestIPCRingBufferConfig:
         # Valid values
         for lm in [0, 1, 10, 1000]:
             cfg = IPCRingBufferConfig(
-                path=valid_path, backlog=128, num_producers=1, num_consumers=1, linger_ms=lm
+                path=valid_path,
+                backlog=128,
+                num_producers=1,
+                num_consumers=1,
+                linger_ms=lm,
             )
             assert cfg.linger_ms == lm
 
         # Invalid: negative
         with pytest.raises(ValueError):
             IPCRingBufferConfig(
-                path=valid_path, backlog=128, num_producers=1, num_consumers=1, linger_ms=-1
+                path=valid_path,
+                backlog=128,
+                num_producers=1,
+                num_consumers=1,
+                linger_ms=-1,
             )
 
     def test_should_producer_bind_rules(self):
@@ -507,6 +515,7 @@ class TestIPCRingBufferTopologies:
             producer.stop()
             for c in consumers:
                 c.stop()
+
 
 class TestIPCRingBufferAsyncOperations:
     """Test async operations (simplified for speed)."""

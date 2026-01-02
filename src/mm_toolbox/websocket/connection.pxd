@@ -26,7 +26,7 @@ cdef class WsConnection(WSListener):
         double          _tracker_ping_sent_time_ms
         double          _tracker_pong_recv_time_ms
 
-        bytes           _raw_unfin_msg_buffer
+        bytes           _unfin_msg_buffer
         int             _unfin_msg_size
 
         WSTransport     _transport

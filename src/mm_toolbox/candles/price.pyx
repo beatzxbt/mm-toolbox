@@ -9,7 +9,7 @@ cdef class PriceCandles(BaseCandles):
     """
     def __init__(self, double price_bucket, int num_candles=1000):
         """Initialize the price-based candle aggregator."""
-        
+        BaseCandles.__init__(self, num_candles)
         self.price_bucket = price_bucket
         self.upper_price_bound = 0.0
         self.lower_price_bound = 0.0

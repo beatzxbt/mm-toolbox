@@ -4,8 +4,6 @@ from collections.abc import Iterator
 
 from mm_toolbox.ringbuffer.generic import GenericRingBuffer
 
-__all__ = ["BaseCandles"]
-
 class Trade:
     time_ms: int
     is_buy: bool

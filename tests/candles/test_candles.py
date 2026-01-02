@@ -39,7 +39,7 @@ class TestCandlesModuleIntegration:
             "PriceCandles": PriceCandles(0.01),
         }
 
-        for name, candle_obj in working_candles.items():
+        for _name, candle_obj in working_candles.items():
             assert candle_obj is not None
 
     def test_cross_candle_type_trade_processing(self):
@@ -62,7 +62,7 @@ class TestCandlesModuleIntegration:
         ]
 
         # Process same trades with all candle types
-        for name, candle_obj in candles.items():
+        for _name, candle_obj in candles.items():
             for trade in trades:
                 candle_obj.process_trade(trade)
 
@@ -101,7 +101,7 @@ class TestCandlesModuleIntegration:
             ("PriceCandles", price_candles),  # Should trigger after trade 4 (0.6 > 0.5)
         ]
 
-        for name, candle_obj in candle_types:
+        for _name, candle_obj in candle_types:
             for trade in trades:
                 candle_obj.process_trade(trade)
 

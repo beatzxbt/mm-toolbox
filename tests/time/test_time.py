@@ -58,7 +58,8 @@ class TestTime:
 
     def test_time_units_scale_relationships(self):
         """Test scale relationships between time units."""
-        # Capture timestamps in order of decreasing precision to minimize cumulative drift
+        # Capture timestamps in order of decreasing precision to minimize
+        # cumulative drift
         start_s = time_s()
         start_ms = time_ms()
         start_us = time_us()

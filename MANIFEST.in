@@ -1,5 +1,6 @@
 # Include the README and license files
 include README.md
+include CHANGELOG.md
 include LICENSE
 include CONTRIBUTING.md
 

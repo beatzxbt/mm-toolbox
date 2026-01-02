@@ -31,7 +31,7 @@ cdef class GenericRingBuffer:
         Parameters:
             capacity (int): The maximum number of elements the buffer can hold.
             disable_async (bool): If True, the buffer will disable use of asyncio.Event for extra performance.
-                All async methods will raise an exception.
+                All async methods will then raise a RuntimeError.
         """
         if max_capacity <= 0:
             raise ValueError(f"Capacity cannot be negative; expected >0 but got {max_capacity}")
@@ -151,7 +151,7 @@ cdef class GenericRingBuffer:
                 if eq_result := bool(item_at_idx == item): 
                     return eq_result
             except Exception:
-                pass
+                break
 
             idx = (idx - 1) & self._mask
             remaining -= 1
@@ -198,6 +198,7 @@ cdef class GenericRingBuffer:
         while True:
             if self._size > 0:
                 yield self.consume()
+                continue
             await self._buffer_not_empty_event.wait()
     
     cpdef object peekright(self):

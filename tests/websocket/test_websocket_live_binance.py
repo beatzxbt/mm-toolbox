@@ -1,6 +1,7 @@
 """Essential live tests with real Binance WebSocket streams.
 
-Only critical live validation. Run with: pytest tests/websocket/test_websocket_live_binance.py --run-live
+Only critical live validation. Run with: pytest
+    tests/websocket/test_websocket_live_binance.py --run-live
 """
 
 import asyncio
@@ -42,9 +43,14 @@ class TestLiveFunctionality:
                 received_data.append(data)
 
                 # Validate book ticker structure
-                if isinstance(data, dict) and "s" in data and data["s"] == "BTCUSDT":
-                    if "b" in data and "a" in data:  # bid and ask
-                        valid_count += 1
+                if (
+                    isinstance(data, dict)
+                    and "s" in data
+                    and data["s"] == "BTCUSDT"
+                    and "b" in data
+                    and "a" in data
+                ):
+                    valid_count += 1
             except msgspec.DecodeError:
                 pass
 
@@ -62,7 +68,8 @@ class TestLiveFunctionality:
             assert len(received_data) > 0
             assert valid_count > 0
             print(
-                f"Received {len(received_data)} messages, {valid_count} valid book tickers"
+                f"Received {len(received_data)} messages, {valid_count} valid "
+                f"book tickers"
             )
 
     @pytest.mark.asyncio
@@ -98,7 +105,8 @@ class TestLiveFunctionality:
             # Validate pool functionality
             assert received_count > 0
             print(
-                f"Pool received {received_count} messages from {pool.get_connection_count()} connections"
+                f"Pool received {received_count} messages from "
+                f"{pool.get_connection_count()} connections"
             )
 
     @pytest.mark.asyncio
@@ -125,7 +133,8 @@ class TestLiveFunctionality:
 
     @pytest.mark.asyncio
     async def test_data_sending_to_real_stream(self):
-        """Test sending data to real stream (will likely get ignored but tests the path)."""
+        """Test sending data to real stream (will likely get ignored but tests
+        the path)."""
         config = WsConnectionConfig.default(
             "wss://fstream.binance.com/ws/btcusdt@bookTicker"
         )

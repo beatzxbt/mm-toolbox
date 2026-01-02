@@ -3,11 +3,19 @@
 
 #include <stdint.h>
 
-/* High-performance time functions using clock_gettime directly */
+/* High-performance wall-clock time functions using clock_gettime(CLOCK_REALTIME) */
 int64_t c_time_s(void);
 int64_t c_time_ms(void);
 int64_t c_time_us(void);
 int64_t c_time_ns(void);
+
+/* High-performance monotonic time functions using clock_gettime(CLOCK_MONOTONIC).
+ * Monotonic time never decreases and is unaffected by system clock changes.
+ * Ideal for measuring elapsed time, timeouts, and performance timing. */
+int64_t c_time_monotonic_s(void);
+int64_t c_time_monotonic_ms(void);
+int64_t c_time_monotonic_us(void);
+int64_t c_time_monotonic_ns(void);
 
 /* ISO8601 conversion functions */
 char* c_time_iso8601(double timestamp);

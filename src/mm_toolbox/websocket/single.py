@@ -32,7 +32,8 @@ class WsSingle:
 
         Args:
             config (WsConnectionConfig): The configuration for the connection.
-            on_message (Callable[[bytes], None], optional): Callback to handle received messages.
+            on_message (Callable[[bytes], None], optional): Callback to handle
+                received messages.
 
         """
         self._config = config
@@ -47,13 +48,15 @@ class WsSingle:
                 or list(sig.parameters.values())[0].annotation is not bytes
             ):
                 raise ValueError(
-                    f"Invalid on_message signature; expected a single bytes argument but got {sig}"
+                    f"Invalid on_message signature; expected a single bytes "
+                    f"argument but got {sig}"
                 )
 
         self._on_message = on_message or self.__default_on_message
 
     def __default_on_message(self, msg: bytes) -> None:
-        """Default callback for processing WebSocket messages. For convenience in debugging, this just prints the json."""
+        """Default callback for processing WebSocket messages. For convenience
+        in debugging, this just prints the json."""
         try:
             print(msgspec.json.decode(msg))
         except Exception:
@@ -73,18 +76,20 @@ class WsSingle:
     async def start(self) -> None:
         """Opens the WebSocket connection and sends any on_connect messages."""
         if self._config.auto_reconnect:
-            conn_iter = WsConnection.new_with_reconnect(self._ringbuffer, self._config)
+            conn_iter = await WsConnection.new_with_reconnect(
+                self._ringbuffer, self._config
+            )
             async for conn in conn_iter:
                 self._ws_conn = conn
                 try:
-                    async for msg in self._ringbuffer:
+                    async for msg in self._ringbuffer.aconsume_iterable():
                         self._on_message(msg)
                 except Exception:
                     pass  # Ignore message processing errors
         else:
             self._ws_conn = await WsConnection.new(self._ringbuffer, self._config)
             try:
-                async for msg in self._ringbuffer:
+                async for msg in self._ringbuffer.aconsume_iterable():
                     self._on_message(msg)
             except Exception:
                 pass  # Ignore message processing errors
@@ -101,18 +106,18 @@ class WsSingle:
     def get_state(self) -> ConnectionState:
         """Retrieves the connection state."""
         if self._ws_conn is not None:
-            return self._ws_conn.get_state()
+            return self._ws_conn.get_state().state
         return ConnectionState.DISCONNECTED
 
     async def __aenter__(self) -> Self:
         """Async context manager entry. Opens the connection."""
         if self._ws_conn is None:
             if self._config.auto_reconnect:
-                conn_iter = WsConnection.new_with_reconnect(
+                conn_iter = await WsConnection.new_with_reconnect(
                     self._ringbuffer, self._config
                 )
                 try:
-                    self._ws_conn = await conn_iter.__anext__()
+                    self._ws_conn = await conn_iter.__aiter__().__anext__()
                 except Exception:
                     # Fall back to single connection if reconnect fails
                     self._ws_conn = await WsConnection.new(
@@ -132,7 +137,7 @@ class WsSingle:
 
     async def __anext__(self) -> bytes:
         """Returns the next message from the connection."""
-        return await self._ringbuffer.aconsume_iterable()
+        return await self._ringbuffer.aconsume()
 
 
 if __name__ == "__main__":

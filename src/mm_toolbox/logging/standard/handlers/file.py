@@ -12,7 +12,8 @@ class FileLogHandler(BaseLogHandler):
         """Initialize the FileLogHandler with a target file path.
 
         Args:
-            filepath (str): Path to the text file for appending logs. Must end with ".txt".
+            filepath (str): Path to the text file for appending logs.
+                Must end with ".txt".
 
         Raises:
             ValueError: If the provided filepath does not end with ".txt".
@@ -22,7 +23,8 @@ class FileLogHandler(BaseLogHandler):
 
         if not filepath.endswith(".txt"):
             raise ValueError(
-                f"Invalid filepath; expected string ending with '.txt' but got {filepath}"
+                f"Invalid filepath; expected string ending with '.txt' but got "
+                f"{filepath}"
             )
 
         # Check if file exists and create it if needed.
