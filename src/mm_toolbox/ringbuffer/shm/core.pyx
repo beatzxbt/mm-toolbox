@@ -5,6 +5,7 @@
 
 """SPSC shared-memory bytes ring buffer."""
 
+import os
 import time
 from libc.stdint cimport uint64_t as u64
 from libc.string cimport memcpy
@@ -97,6 +98,8 @@ cdef class _SharedBytesRing:
     cdef const char* _path
 
     def __cinit__(self) -> None:
+        if os.name != "posix":
+            raise OSError("Shared memory ringbuffer is only supported on POSIX platforms")
         self._hdr = NULL
         self._data = NULL
         self._map_len = 0

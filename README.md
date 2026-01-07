@@ -84,7 +84,7 @@ MM Toolbox v1.0.0 represents a fundamental shift from Numba-accelerated code to 
 - `NumericRingBuffer`: Fast numeric data handling
 - `BytesRingBuffer`: Optimized for byte arrays
 - `GenericRingBuffer`: Flexible support for any Python type
-- `SharedMemoryRingBuffer`: IPC-capable shared memory buffers
+- `SharedMemoryRingBuffer`: IPC-capable shared memory buffers (POSIX-only)
 
 New unified API provides both safe and unsafe access patterns, enabling zero-copy operations for performance-critical code paths.
 

@@ -101,9 +101,13 @@ class BenchmarkResults:
         async_mode = "disabled" if self.config.disable_async else "enabled"
         dtype_name = np.dtype(self.config.dtype).name
         print("=" * 100)
-        print(f"NumericRingBuffer Benchmark Results (dtype={dtype_name}, capacity={self.config.buffer_size}, async={async_mode})")
+        print(
+            f"NumericRingBuffer Benchmark Results (dtype={dtype_name}, capacity={self.config.buffer_size}, async={async_mode})"
+        )
         print("=" * 100)
-        print(f"Operations: {self.config.num_operations:,} (warmup: {self.config.warmup_operations:,})")
+        print(
+            f"Operations: {self.config.num_operations:,} (warmup: {self.config.warmup_operations:,})"
+        )
         print()
 
         print("Operation Performance")
@@ -175,12 +179,12 @@ class NumericRingBufferBenchmark:
 
             for _ in range(warmup_batches):
                 start_idx = np.random.randint(0, len(self.data) - batch_size)
-                batch = self.data[start_idx:start_idx + batch_size]
+                batch = self.data[start_idx : start_idx + batch_size]
                 rb.insert_batch(batch)
 
             for i in range(num_batches):
                 start_idx = (i * batch_size) % (len(self.data) - batch_size)
-                batch = self.data[start_idx:start_idx + batch_size]
+                batch = self.data[start_idx : start_idx + batch_size]
 
                 start = time.perf_counter_ns()
                 rb.insert_batch(batch)
@@ -320,7 +324,7 @@ class NumericRingBufferBenchmark:
 
     def run_sync(self) -> None:
         """Run synchronous benchmarks."""
-        print(f"\nRunning synchronous benchmarks...")
+        print("\nRunning synchronous benchmarks...")
 
         rb = NumericRingBuffer(
             self.config.buffer_size,
@@ -381,7 +385,7 @@ class NumericRingBufferBenchmark:
 
     async def run_async(self) -> None:
         """Run asynchronous benchmarks."""
-        print(f"\nRunning asynchronous benchmarks...")
+        print("\nRunning asynchronous benchmarks...")
 
         rb = NumericRingBuffer(
             self.config.buffer_size,
@@ -402,7 +406,7 @@ class NumericRingBufferBenchmark:
     def run(self) -> None:
         """Run all benchmarks."""
         dtype_name = np.dtype(self.config.dtype).name
-        print(f"Starting NumericRingBuffer benchmark...")
+        print("Starting NumericRingBuffer benchmark...")
         print(f"Buffer size: {self.config.buffer_size}")
         print(f"dtype: {dtype_name}")
         print(f"Async mode: {'disabled' if self.config.disable_async else 'enabled'}")
@@ -455,14 +459,24 @@ def run_multi_size(base_config: BenchmarkConfig, disable_async: bool) -> None:
     print(f"Comparative Summary (async={async_mode})")
     print(f"{'=' * 100}")
 
-    print(f"{'Size':>8} {'insert':>12} {'consume':>12} {'contains':>12} {'peekright':>12}")
+    print(
+        f"{'Size':>8} {'insert':>12} {'consume':>12} {'contains':>12} {'peekright':>12}"
+    )
     print("-" * 100)
 
     for size, results in all_results:
-        insert_stats = results.operations.get("insert", OperationStats("insert")).compute_percentiles()
-        consume_stats = results.operations.get("consume", OperationStats("consume")).compute_percentiles()
-        contains_stats = results.operations.get("contains", OperationStats("contains")).compute_percentiles()
-        peek_stats = results.operations.get("peekright", OperationStats("peekright")).compute_percentiles()
+        insert_stats = results.operations.get(
+            "insert", OperationStats("insert")
+        ).compute_percentiles()
+        consume_stats = results.operations.get(
+            "consume", OperationStats("consume")
+        ).compute_percentiles()
+        contains_stats = results.operations.get(
+            "contains", OperationStats("contains")
+        ).compute_percentiles()
+        peek_stats = results.operations.get(
+            "peekright", OperationStats("peekright")
+        ).compute_percentiles()
 
         print(
             f"{size:>8} {insert_stats['mean']:>12.1f} {consume_stats['mean']:>12.1f} "

@@ -638,8 +638,8 @@ def main() -> None:
     parser.add_argument(
         "--input",
         "-i",
-        default="benchmarks/orderbook/data/btcusdt_orderbook.jsonl",
-        help="Input file path (default: benchmarks/orderbook/data/btcusdt_orderbook.jsonl)",
+        default="benchmarks/orderbook/data/btcusdt_100k.jsonl",
+        help="Input file path (default: benchmarks/orderbook/data/btcusdt_100k.jsonl)",
     )
     parser.add_argument(
         "--warmup",

@@ -70,9 +70,7 @@ class BytesRingBufferBenchmark(BenchmarkRunner[BytesBenchmarkConfig]):
         """
         np.random.seed(42)
         data_by_size = {}
-        num_samples = (
-            self.config.num_operations + self.config.warmup_operations + 10000
-        )
+        num_samples = self.config.num_operations + self.config.warmup_operations + 10000
 
         for size in self.config.item_sizes:
             data = [np.random.bytes(size) for _ in range(num_samples)]
@@ -154,9 +152,9 @@ class BytesRingBufferBenchmark(BenchmarkRunner[BytesBenchmarkConfig]):
 
             def operation():
                 nonlocal batch_idx
-                start_idx = (
-                    (batch_idx + warmup_batches) * batch_size
-                ) % (len(data) - batch_size)
+                start_idx = ((batch_idx + warmup_batches) * batch_size) % (
+                    len(data) - batch_size
+                )
                 batch = data[start_idx : start_idx + batch_size]
                 rb.insert_batch(batch)
                 batch_idx += 1
@@ -168,9 +166,7 @@ class BytesRingBufferBenchmark(BenchmarkRunner[BytesBenchmarkConfig]):
                 measure_count=num_batches,
             )
 
-    def _benchmark_overwrite_latest(
-        self, rb: BytesRingBuffer, item_size: int
-    ) -> None:
+    def _benchmark_overwrite_latest(self, rb: BytesRingBuffer, item_size: int) -> None:
         """Benchmark overwrite_latest operation."""
         data = self.data_by_size[item_size]
         rb.insert(data[0])
@@ -187,9 +183,7 @@ class BytesRingBufferBenchmark(BenchmarkRunner[BytesBenchmarkConfig]):
         """Benchmark single consume operation."""
         data = self.data_by_size[item_size]
 
-        for i in range(
-            self.config.warmup_operations + self.config.num_operations
-        ):
+        for i in range(self.config.warmup_operations + self.config.num_operations):
             rb.insert(data[i % len(data)])
 
         idx = 0
@@ -234,15 +228,11 @@ class BytesRingBufferBenchmark(BenchmarkRunner[BytesBenchmarkConfig]):
 
         self.measure_operation(f"contains(size={item_size})", operation)
 
-    async def _benchmark_aconsume(
-        self, rb: BytesRingBuffer, item_size: int
-    ) -> None:
+    async def _benchmark_aconsume(self, rb: BytesRingBuffer, item_size: int) -> None:
         """Benchmark async consume operation."""
         data = self.data_by_size[item_size]
 
-        for i in range(
-            self.config.warmup_operations + self.config.num_operations
-        ):
+        for i in range(self.config.warmup_operations + self.config.num_operations):
             rb.insert(data[i % len(data)])
 
         metrics = self.stats.add_operation(f"aconsume(size={item_size})")

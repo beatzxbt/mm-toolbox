@@ -26,44 +26,43 @@ from tests.orderbook.advanced.conftest import (
 def _generate_valid_snapshot(
     num_bids: int,
     num_asks: int,
-    seed: int | None = None,
+    rng: random.Random | None = None,
 ) -> tuple[OrderbookLevels, OrderbookLevels]:
     """Generate a valid orderbook snapshot with random but valid levels.
 
     Args:
         num_bids: Number of bid levels to generate (1-50)
         num_asks: Number of ask levels to generate (1-50)
-        seed: Random seed for reproducibility
+        rng: Optional RNG for reproducibility
 
     Returns:
         Tuple of (asks, bids) OrderbookLevels
     """
-    if seed is not None:
-        random.seed(seed)
+    rng = rng or random.Random()
 
     # Generate bid prices: descending from base price
-    base_bid = random.uniform(50.0, 100.0)
+    base_bid = rng.uniform(50.0, 100.0)
     # Ensure strictly descending order
     bid_prices = [base_bid]
     for i in range(1, num_bids):
-        next_price = bid_prices[-1] - random.uniform(0.01, 0.1)
+        next_price = bid_prices[-1] - rng.uniform(0.01, 0.1)
         bid_prices.append(next_price)
 
     # Generate ask prices: ascending from above best bid
-    base_ask = bid_prices[0] + random.uniform(0.01, 1.0)
+    base_ask = bid_prices[0] + rng.uniform(0.01, 1.0)
     # Ensure strictly ascending order
     ask_prices = [base_ask]
     for i in range(1, num_asks):
-        next_price = ask_prices[-1] + random.uniform(0.01, 0.1)
+        next_price = ask_prices[-1] + rng.uniform(0.01, 0.1)
         ask_prices.append(next_price)
 
     # Generate sizes
-    bid_sizes = [random.uniform(0.001, 1000.0) for _ in range(num_bids)]
-    ask_sizes = [random.uniform(0.001, 1000.0) for _ in range(num_asks)]
+    bid_sizes = [rng.uniform(0.001, 1000.0) for _ in range(num_bids)]
+    ask_sizes = [rng.uniform(0.001, 1000.0) for _ in range(num_asks)]
 
     # Generate norders
-    bid_norders = [random.randint(1, 100) for _ in range(num_bids)]
-    ask_norders = [random.randint(1, 100) for _ in range(num_asks)]
+    bid_norders = [rng.randint(1, 100) for _ in range(num_bids)]
+    ask_norders = [rng.randint(1, 100) for _ in range(num_asks)]
 
     asks = OrderbookLevels.from_list_with_ticks_and_lots(
         ask_prices, ask_sizes, ask_norders, TICK_SIZE, LOT_SIZE
@@ -82,12 +81,13 @@ class TestBBOInvariant:
     @pytest.mark.parametrize("seed", range(20))
     def test_bbo_invariant_after_snapshot(self, seed):
         """After any valid snapshot, best_bid <= best_ask."""
+        rng = random.Random(seed)
         book = _mk_book(num_levels=64)
 
-        num_bids = random.randint(5, 30)
-        num_asks = random.randint(5, 30)
+        num_bids = rng.randint(5, 30)
+        num_asks = rng.randint(5, 30)
 
-        asks, bids = _generate_valid_snapshot(num_bids, num_asks, seed=seed)
+        asks, bids = _generate_valid_snapshot(num_bids, num_asks, rng=rng)
         book.consume_snapshot(asks, bids)
 
         asks_arr = book.get_asks_numpy()
@@ -104,17 +104,17 @@ class TestBBOInvariant:
     @pytest.mark.parametrize("seed", range(10))
     def test_bbo_invariant_after_deltas(self, seed):
         """After delta updates, BBO invariant maintained."""
-        random.seed(seed)
+        rng = random.Random(seed)
         book = _mk_book(num_levels=64)
 
         # Initial snapshot
-        asks, bids = _generate_valid_snapshot(10, 10, seed=seed)
+        asks, bids = _generate_valid_snapshot(10, 10, rng=rng)
         book.consume_snapshot(asks, bids)
 
         # Apply random deltas
         for _ in range(10):
-            delta_price = random.uniform(99.0, 101.0)
-            delta_size = random.uniform(0.1, 10.0)
+            delta_price = rng.uniform(99.0, 101.0)
+            delta_size = rng.uniform(0.1, 10.0)
 
             delta = OrderbookLevels.from_list_with_ticks_and_lots(
                 [delta_price], [delta_size], [1], TICK_SIZE, LOT_SIZE
@@ -177,18 +177,18 @@ class TestCapacityInvariant:
     @pytest.mark.parametrize("seed", range(10))
     def test_capacity_never_exceeded_deltas(self, seed):
         """Capacity maintained through delta updates."""
-        random.seed(seed)
+        rng = random.Random(seed)
         capacity = 64
         book = _mk_book(num_levels=capacity)
 
         # Initial snapshot at capacity
-        asks, bids = _generate_valid_snapshot(capacity, capacity, seed=seed)
+        asks, bids = _generate_valid_snapshot(capacity, capacity, rng=rng)
         book.consume_snapshot(asks, bids)
 
         # Random delta updates
         for i in range(50):
-            price = random.uniform(90.0, 110.0)
-            size = random.uniform(0.1, 10.0)
+            price = rng.uniform(90.0, 110.0)
+            size = rng.uniform(0.1, 10.0)
 
             delta = OrderbookLevels.from_list_with_ticks_and_lots(
                 [price], [size], [1], TICK_SIZE, LOT_SIZE
@@ -213,7 +213,7 @@ class TestSortedOrderInvariant:
         """Bids always in descending price order."""
         book = _mk_book(num_levels=64)
 
-        asks, bids = _generate_valid_snapshot(15, 15, seed=seed)
+        asks, bids = _generate_valid_snapshot(15, 15, rng=random.Random(seed))
         book.consume_snapshot(asks, bids)
 
         bids_arr = book.get_bids_numpy()
@@ -230,7 +230,7 @@ class TestSortedOrderInvariant:
         """Asks always in ascending price order."""
         book = _mk_book(num_levels=64)
 
-        asks, bids = _generate_valid_snapshot(15, 15, seed=seed)
+        asks, bids = _generate_valid_snapshot(15, 15, rng=random.Random(seed))
         book.consume_snapshot(asks, bids)
 
         asks_arr = book.get_asks_numpy()
@@ -245,16 +245,16 @@ class TestSortedOrderInvariant:
     @pytest.mark.parametrize("seed", range(10))
     def test_sorted_order_after_deltas(self, seed):
         """Sorted order maintained after delta updates."""
-        random.seed(seed)
+        rng = random.Random(seed)
         book = _mk_book(num_levels=64)
 
-        asks, bids = _generate_valid_snapshot(10, 10, seed=seed)
+        asks, bids = _generate_valid_snapshot(10, 10, rng=rng)
         book.consume_snapshot(asks, bids)
 
         # Apply random deltas
         for _ in range(20):
-            price = random.uniform(95.0, 105.0)
-            size = random.uniform(0.1, 10.0)
+            price = rng.uniform(95.0, 105.0)
+            size = rng.uniform(0.1, 10.0)
 
             delta = OrderbookLevels.from_list_with_ticks_and_lots(
                 [price], [size], [1], TICK_SIZE, LOT_SIZE
@@ -289,7 +289,7 @@ class TestSnapshotClearEquivalence:
         book2 = _mk_book(num_levels=64)
 
         # book1: apply snapshot then clear
-        asks, bids = _generate_valid_snapshot(5, 5, seed=42)
+        asks, bids = _generate_valid_snapshot(5, 5, rng=random.Random(42))
         book1.consume_snapshot(asks, bids)
         book1.clear()
 
@@ -313,7 +313,7 @@ class TestSnapshotClearEquivalence:
         """Calling clear() multiple times is safe."""
         book = _mk_book(num_levels=64)
 
-        asks, bids = _generate_valid_snapshot(5, 5, seed=123)
+        asks, bids = _generate_valid_snapshot(5, 5, rng=random.Random(123))
         book.consume_snapshot(asks, bids)
 
         # Clear multiple times
@@ -333,23 +333,23 @@ class TestOperationSequenceConsistency:
     @pytest.mark.parametrize("seed", range(5))
     def test_random_sequence_maintains_invariants(self, seed):
         """10-100 random ops maintain consistency."""
-        random.seed(seed)
+        rng = random.Random(seed)
         book = _mk_book(num_levels=64)
 
-        num_operations = random.randint(10, 100)
+        num_operations = rng.randint(10, 100)
 
         for i in range(num_operations):
-            operation = random.choice(["snapshot", "delta", "clear"])
+            operation = rng.choice(["snapshot", "delta", "clear"])
 
             if operation == "snapshot":
-                num_bids = random.randint(1, 15)
-                num_asks = random.randint(1, 15)
-                asks, bids = _generate_valid_snapshot(num_bids, num_asks, seed=seed + i)
+                num_bids = rng.randint(1, 15)
+                num_asks = rng.randint(1, 15)
+                asks, bids = _generate_valid_snapshot(num_bids, num_asks, rng=rng)
                 book.consume_snapshot(asks, bids)
 
             elif operation == "delta":
-                price = random.uniform(90.0, 110.0)
-                size = random.uniform(0.0, 10.0)  # Include deletions
+                price = rng.uniform(90.0, 110.0)
+                size = rng.uniform(0.0, 10.0)  # Include deletions
                 norders = 0 if size == 0.0 else 1
 
                 delta = OrderbookLevels.from_list_with_ticks_and_lots(
@@ -395,7 +395,7 @@ class TestOperationSequenceConsistency:
         for i in range(20):
             if i % 2 == 0:
                 # Snapshot
-                asks, bids = _generate_valid_snapshot(8, 8, seed=i * 10)
+                asks, bids = _generate_valid_snapshot(8, 8, rng=random.Random(i * 10))
                 book.consume_snapshot(asks, bids)
             else:
                 # Delta
@@ -420,17 +420,18 @@ class TestOperationSequenceConsistency:
     @pytest.mark.slow
     def test_stress_rapid_updates(self):
         """Stress test with 1000 rapid sequential updates."""
+        rng = random.Random(999)
         book = _mk_book(num_levels=64)
 
         # Initial snapshot
-        asks, bids = _generate_valid_snapshot(10, 10, seed=999)
+        asks, bids = _generate_valid_snapshot(10, 10, rng=rng)
         book.consume_snapshot(asks, bids)
 
         # Rapid updates
         for i in range(1000):
             price = 100.0 + (i % 50) * 0.01
-            size = random.uniform(0.0, 5.0)
-            norders = 0 if size == 0.0 else random.randint(1, 10)
+            size = rng.uniform(0.0, 5.0)
+            norders = 0 if size == 0.0 else rng.randint(1, 10)
 
             delta = OrderbookLevels.from_list_with_ticks_and_lots(
                 [price], [size], [norders], TICK_SIZE, LOT_SIZE
@@ -455,7 +456,7 @@ class TestDataIntegrityInvariants:
         book = _mk_book(num_levels=64)
 
         # Valid snapshot
-        asks, bids = _generate_valid_snapshot(5, 5, seed=777)
+        asks, bids = _generate_valid_snapshot(5, 5, rng=random.Random(777))
         book.consume_snapshot(asks, bids)
 
         asks_arr = book.get_asks_numpy()
@@ -468,7 +469,7 @@ class TestDataIntegrityInvariants:
         """All sizes must be non-negative."""
         book = _mk_book(num_levels=64)
 
-        asks, bids = _generate_valid_snapshot(5, 5, seed=888)
+        asks, bids = _generate_valid_snapshot(5, 5, rng=random.Random(888))
         book.consume_snapshot(asks, bids)
 
         asks_arr = book.get_asks_numpy()
@@ -481,7 +482,7 @@ class TestDataIntegrityInvariants:
         """Orderbook should not contain levels with price=0."""
         book = _mk_book(num_levels=64)
 
-        asks, bids = _generate_valid_snapshot(5, 5, seed=111)
+        asks, bids = _generate_valid_snapshot(5, 5, rng=random.Random(111))
         book.consume_snapshot(asks, bids)
 
         asks_arr = book.get_asks_numpy()
@@ -496,7 +497,7 @@ class TestDataIntegrityInvariants:
         """When size > 0, norders should be > 0."""
         book = _mk_book(num_levels=64)
 
-        asks, bids = _generate_valid_snapshot(8, 8, seed=seed)
+        asks, bids = _generate_valid_snapshot(8, 8, rng=random.Random(seed))
         book.consume_snapshot(asks, bids)
 
         asks_arr = book.get_asks_numpy()

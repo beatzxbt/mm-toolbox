@@ -90,4 +90,5 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "boundary: marks boundary condition tests",
     "property: marks property/invariant tests",
+    "timeout: marks tests with runtime limits (requires pytest-timeout)",
 ]

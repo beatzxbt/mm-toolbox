@@ -10,6 +10,11 @@ from mm_toolbox.ringbuffer.shm import (
     SharedBytesRingBufferProducer,
 )
 
+pytestmark = pytest.mark.skipif(
+    os.name != "posix",
+    reason="Shared memory ringbuffer requires POSIX support",
+)
+
 
 @pytest.fixture()
 def shm_path(tmp_path: Path) -> str:

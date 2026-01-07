@@ -168,9 +168,7 @@ class BenchmarkStats:
 
         if self.delta_latencies:
             print("Delta Processing by Level Count (non-linearity analysis)")
-            print(
-                "Note: Level count refers to levels in incoming messages"
-            )
+            print("Note: Level count refers to levels in incoming messages")
             print("-" * 80)
 
             max_levels_consumed = max(self.delta_levels) if self.delta_levels else 0
@@ -262,9 +260,7 @@ class StandardOrderbookBenchmark:
         )
         self.stats = BenchmarkStats()
 
-    def _parse_levels_to_list(
-        self, levels: list[list[str]]
-    ) -> list[OrderbookLevel]:
+    def _parse_levels_to_list(self, levels: list[list[str]]) -> list[OrderbookLevel]:
         """Parse Binance level format to OrderbookLevel list.
 
         Args:
@@ -550,8 +546,8 @@ def main() -> None:
     parser.add_argument(
         "--input",
         "-i",
-        default="benchmarks/orderbook/data/btcusdt_orderbook.jsonl",
-        help="Input file path (default: benchmarks/orderbook/data/btcusdt_orderbook.jsonl)",
+        default="benchmarks/orderbook/data/btcusdt_100k.jsonl",
+        help="Input file path (default: benchmarks/orderbook/data/btcusdt_100k.jsonl)",
     )
     parser.add_argument(
         "--warmup",

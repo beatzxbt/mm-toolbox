@@ -1,22 +1,25 @@
-import asyncio
-import glob
-import os
+import time
+from collections.abc import Callable
+
 import pytest
 
-
-# Ignore all .pyx files from collection - need absolute paths
-_test_root = os.path.dirname(os.path.abspath(__file__))
-collect_ignore = [
-    os.path.relpath(f, _test_root)
-    for f in glob.glob(os.path.join(_test_root, "**/*.pyx"), recursive=True)
-]
+WAIT_TIMEOUT_S = 1.0
 
 
 @pytest.fixture
-def event_loop():
-    """Provide a fresh event loop for tests that request 'event_loop'."""
-    loop = asyncio.new_event_loop()
-    try:
-        yield loop
-    finally:
-        loop.close()
+def wait_for() -> Callable[[Callable[[], bool], float, float], bool]:
+    """Return a helper to poll for a condition instead of sleeping a fixed amount."""
+
+    def _wait_for(
+        predicate: Callable[[], bool],
+        timeout_s: float = WAIT_TIMEOUT_S,
+        interval_s: float = 0.01,
+    ) -> bool:
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(interval_s)
+        return predicate()
+
+    return _wait_for

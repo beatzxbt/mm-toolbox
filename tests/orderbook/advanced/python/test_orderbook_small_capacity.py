@@ -91,8 +91,12 @@ class TestBBOCrossRemovalRestoration:
 
         # BBO update: bid at 101.0 (higher than all asks), ask at 102.0
         # This should wipe all asks and restore from incoming ask
-        bbo_ask = OrderbookLevel.with_ticks_and_lots(102.0, 5.0, TICK_SIZE, LOT_SIZE, norders=1)
-        bbo_bid = OrderbookLevel.with_ticks_and_lots(101.0, 3.0, TICK_SIZE, LOT_SIZE, norders=1)
+        bbo_ask = OrderbookLevel.with_ticks_and_lots(
+            102.0, 5.0, TICK_SIZE, LOT_SIZE, norders=1
+        )
+        bbo_bid = OrderbookLevel.with_ticks_and_lots(
+            101.0, 3.0, TICK_SIZE, LOT_SIZE, norders=1
+        )
         book.consume_bbo(bbo_ask, bbo_bid)
 
         # Ask side should be restored with incoming BBO ask
@@ -120,8 +124,12 @@ class TestBBOCrossRemovalRestoration:
         # BBO update: ask at 98.0 (lower than all bids), bid at 97.0
         # Note: consume_bbo doesn't process ask-side cross removal the same way
         # The cross removal logic removes asks when bid >= ask
-        bbo_ask = OrderbookLevel.with_ticks_and_lots(98.0, 5.0, TICK_SIZE, LOT_SIZE, norders=1)
-        bbo_bid = OrderbookLevel.with_ticks_and_lots(97.0, 3.0, TICK_SIZE, LOT_SIZE, norders=1)
+        bbo_ask = OrderbookLevel.with_ticks_and_lots(
+            98.0, 5.0, TICK_SIZE, LOT_SIZE, norders=1
+        )
+        bbo_bid = OrderbookLevel.with_ticks_and_lots(
+            97.0, 3.0, TICK_SIZE, LOT_SIZE, norders=1
+        )
         book.consume_bbo(bbo_ask, bbo_bid)
 
         # Both sides should still have data
@@ -293,8 +301,12 @@ class TestBBOCrossRemovalEdgeCases:
         book.consume_snapshot(asks, bids)
 
         # BBO with bid exactly at best ask price
-        bbo_ask = OrderbookLevel.with_ticks_and_lots(101.0, 1.0, TICK_SIZE, LOT_SIZE, norders=1)
-        bbo_bid = OrderbookLevel.with_ticks_and_lots(100.0, 1.0, TICK_SIZE, LOT_SIZE, norders=1)
+        bbo_ask = OrderbookLevel.with_ticks_and_lots(
+            101.0, 1.0, TICK_SIZE, LOT_SIZE, norders=1
+        )
+        bbo_bid = OrderbookLevel.with_ticks_and_lots(
+            100.0, 1.0, TICK_SIZE, LOT_SIZE, norders=1
+        )
         book.consume_bbo(bbo_ask, bbo_bid)
 
         # Should handle cross correctly
@@ -316,12 +328,16 @@ class TestBBOCrossRemovalEdgeCases:
         book.consume_snapshot(asks, bids)
 
         # BBO with zero-size ask (deletion marker)
-        bbo_ask = OrderbookLevel.with_ticks_and_lots(100.0, 0.0, TICK_SIZE, LOT_SIZE, norders=0)
-        bbo_bid = OrderbookLevel.with_ticks_and_lots(99.99, 1.0, TICK_SIZE, LOT_SIZE, norders=1)
+        bbo_ask = OrderbookLevel.with_ticks_and_lots(
+            100.0, 0.0, TICK_SIZE, LOT_SIZE, norders=0
+        )
+        bbo_bid = OrderbookLevel.with_ticks_and_lots(
+            99.99, 1.0, TICK_SIZE, LOT_SIZE, norders=1
+        )
         book.consume_bbo(bbo_ask, bbo_bid)
 
         # Book should remain valid
-        asks_arr = book.get_asks_numpy()
+        book.get_asks_numpy()
         bids_arr = book.get_bids_numpy()
         assert len(bids_arr) >= 1
 
@@ -338,8 +354,12 @@ class TestBBOCrossRemovalEdgeCases:
         book.consume_snapshot(asks, bids)
 
         # BBO with zero-size bid (deletion marker)
-        bbo_ask = OrderbookLevel.with_ticks_and_lots(100.0, 1.0, TICK_SIZE, LOT_SIZE, norders=1)
-        bbo_bid = OrderbookLevel.with_ticks_and_lots(99.99, 0.0, TICK_SIZE, LOT_SIZE, norders=0)
+        bbo_ask = OrderbookLevel.with_ticks_and_lots(
+            100.0, 1.0, TICK_SIZE, LOT_SIZE, norders=1
+        )
+        bbo_bid = OrderbookLevel.with_ticks_and_lots(
+            99.99, 0.0, TICK_SIZE, LOT_SIZE, norders=0
+        )
         book.consume_bbo(bbo_ask, bbo_bid)
 
         # Book should remain valid

@@ -21,6 +21,7 @@ Notes
   wrapping multiple SPSC rings within the same API.
 """
 
+import os
 import time
 from libc.stdint cimport uint64_t as u64
 from libc.string cimport memcpy
@@ -198,6 +199,8 @@ cdef class _SharedBytesRing:
     """
     def __cinit__(self) -> None:
         """Initialize the shared bytes ring buffer."""
+        if os.name != "posix":
+            raise OSError("Shared memory ringbuffer is only supported on POSIX platforms")
         self._hdr = NULL
         self._data = NULL
         self._map_len = 0
@@ -659,5 +662,4 @@ cdef class SharedBytesRingBufferConsumer(_SharedBytesRing):
             items.append(bytes(mv[off : off + L]))
             off += L
         return items
-
 
