@@ -10,6 +10,9 @@ mm-toolbox/
 │       ├── logging/            # Lightweight logger + Discord/Telegram support
 │       │   ├── standard/       # Standard logger implementation
 │       │   └── advanced/       # Distributed HFT logger (worker/master)
+│       ├── misc/               # Filtering and rate limiting helpers
+│       │   ├── filter/         # Bounds-based change filter
+│       │   └── limiter/        # Token bucket rate limiter
 │       ├── moving_average/     # Various moving averages (EMA/SMA/WMA/TEMA)
 │       ├── orderbook/          # Multiple orderbook implementations & tools
 │       │   ├── standard/       # Python-based orderbook
@@ -62,7 +65,7 @@ logger = Logger(
 )
 ```
 
-## Latest release notes (v1.0.0)
+## Latest release notes (v1.0.0, feature complete)
 
 ### Major Architecture Shift: Numba → Cython/C
 
@@ -76,34 +79,39 @@ MM Toolbox v1.0.0 represents a fundamental shift from Numba-accelerated code to 
 
 **Zero-Allocation Designs**: Many components have been redesigned with zero-allocation patterns, reducing GC pressure and improving performance in tight loops.
 
+The v1.0 feature set is complete. Each component ships with a focused README
+that covers API details, architecture notes, and usage examples.
+
 ### Component Highlights
 
-**Candles** (`mm_toolbox.candles`): High-performance candlestick aggregation supporting price, time, volume, and tick-based candles. New `.next()` method allows previewing next-state values without updating internal state, useful for backtesting and simulation scenarios.
+**Candles** (`mm_toolbox.candles`): High-performance candle aggregation with time, tick, volume, price, and multi-trigger buckets. Maintains a live `latest_candle`, stores completed candles in a ring buffer, and supports async iteration for stream processing.
+
+**Misc** (`mm_toolbox.misc`): Utility helpers including `DataBoundsFilter` for bounds-based change detection and `RateLimiter` for token-bucket rate limiting with optional burst policies and per-second sub-buckets.
 
 **Ringbuffer** (`mm_toolbox.ringbuffer`): Efficient circular buffers with multiple implementations:
 - `NumericRingBuffer`: Fast numeric data handling
 - `BytesRingBuffer`: Optimized for byte arrays
+- `BytesRingBufferFast`: Pre-allocated slots for predictable byte workloads
 - `GenericRingBuffer`: Flexible support for any Python type
-- `SharedMemoryRingBuffer`: IPC-capable shared memory buffers (POSIX-only)
+- `IPCRingBuffer`: PUSH/PULL transport for SPSC/MPSC/SPMC topologies
+- `SharedMemoryRingBuffer`: SPSC shared-memory ring buffer (POSIX-only)
 
-New unified API provides both safe and unsafe access patterns, enabling zero-copy operations for performance-critical code paths.
+All ring buffers share consistent insert/consume semantics and overwrite oldest
+entries on overflow for bounded memory usage.
 
 **Moving Average** (`mm_toolbox.moving_average`): Comprehensive moving average implementations including EMA, SMA, WMA, and TEMA (Triple Exponential Moving Average). All implementations support `.next()` for previewing future values without state mutation.
 
-**Orderbook** (`mm_toolbox.orderbook`): Dual implementation approach:
+**Orderbook** (`mm_toolbox.orderbook`): Dual implementation approach with aligned APIs:
 - `standard`: Pure Python implementation for flexibility
 - `advanced`: Zero-allocation Cython implementation achieving >4x faster BBO updates and >5x faster per-level batch updates
 
-**Websocket** (`mm_toolbox.websocket`): Production-ready WebSocket client library:
-- `SingleConnection`: Auto-pinging, latency tracking, and raw data access
-- `ConnectionPool`: Smart load balancing, latency-aware routing, and modular design
-- Built-in verification tools for message integrity
+**Websocket** (`mm_toolbox.websocket`): WebSocket connection management built on PicoWs with latency tracking, ring-buffered message ingestion, and pool routing to the fastest connection.
 
 **Logging** (`mm_toolbox.logging`): Two-tier logging system:
 - `standard`: Lightweight logger with Discord/Telegram support
 - `advanced`: Distributed HFT logger with worker/master architecture, batching, and customizable handlers
 
-**Rounding** (`mm_toolbox.rounding`): Fast price/size rounding utilities optimized for trading operations.
+**Rounding** (`mm_toolbox.rounding`): Fast, directional price/size rounding with scalar and vectorized paths.
 
 **Time** (`mm_toolbox.time`): High-performance time utilities for timestamp operations.
 
@@ -124,21 +132,10 @@ Most code should work with minimal changes. The primary differences are:
 
 *Components not mentioned have either not incurred significant changes or maintain backward compatibility.*
 
-## Planned additions/upgrades
-
-### v1.1.0 (no earlier than Jun 25')
-**Misc**: Introduction of `filter` and `limiter` modules for data filtering and rate limiting utilities.
-
-**Orderbook**: Further performance optimizations for orderbook operations.
-
-**Logger**: AdvancedLogger performance improvements & two-way communication between Master<>Worker loggers, enabling health checks and remote shutdown capabilities.
-
-**Websocket**: VerifyWsPayload performance improvements, FastWsPool optimizations.
+## Roadmap
 
 ### v1.2.0
 **Parsers**: Introduction of high-performance parsing utilities including JSON parsers and crypto exchange-specific parsers (e.g., Binance top-of-book parser).
-
-**Ringbuffer**: Introduction of `SharedMemoryRingBuffer` for inter-process communication (IPC) scenarios, enabling efficient data sharing between processes.
 
 ## License
 MM Toolbox is licensed under the MIT License. See the [LICENSE](/LICENSE) file for more information.
