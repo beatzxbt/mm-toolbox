@@ -13,11 +13,11 @@ cd mm-toolbox
 
 # 2. Setup development environment
 uv sync --all-groups  # Installs all deps including dev tools
-make build           # Compile Cython extensions
+make build-lib        # Compile Cython extensions
 
 # 3. Verify everything works
-make test           # Run test suite
-make check         # Format, lint, typecheck
+make test-all       # Run C + Python test suites
+make fix            # Format + typecheck
 ```
 
 ## 💡 Making Changes
@@ -28,9 +28,9 @@ make check         # Format, lint, typecheck
 git checkout -b feature/your-feature-name
 
 # Make your changes, then verify quality
-make check    # Runs: format, lint, typecheck
-make test     # Run all tests
-make build    # Ensure Cython compiles
+make fix        # Runs: format + typecheck
+make test-all   # Run C + Python tests
+make build-lib  # Ensure Cython compiles
 
 # Commit and push
 git commit -m "feat: add awesome feature"
@@ -43,7 +43,7 @@ git push origin feature/your-feature-name
 
 **Code Style**:
 - **Ruff formatting**: `make format` (automatic)
-- **Type hints required**: Use strict typing for Pyright compliance
+- **Type hints required**: Use strict typing for ty compliance
 - **Docstrings**: Compact Google style, one-liner for simple functions
 - **Dependencies**: Avoid adding new ones unless absolutely necessary
 
@@ -69,7 +69,7 @@ tests/module_name/       # Comprehensive test coverage
 ### Cython Development
 ```bash
 # Fast iteration during development
-make build  # Rebuilds only changed files
+make build-lib  # Rebuilds only changed files
 
 # For profiling/debugging, enable line tracing:
 # Edit setup.py: compiler_directives = {"profile": True, "linetrace": True}
@@ -77,7 +77,9 @@ make build  # Rebuilds only changed files
 
 ### Running Tests
 ```bash
-make test                    # All tests
+make test-all                     # C + Python tests
+make test-py                      # Python-only tests
+make test-c                       # C-only tests
 uv run pytest tests/candles/ -xvv  # Specific module
 uv run pytest -k "test_name" -s    # Specific test with output
 ```
