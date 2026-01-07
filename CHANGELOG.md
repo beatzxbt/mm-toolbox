@@ -26,5 +26,9 @@ All notable changes to this project will be documented in this file.
 ### Moving Average
 - Remove unused base-class hooks from moving average implementations.
 
+### Ringbuffer
+- Remove silent overflow truncation in fast bytes ringbuffer inserts.
+- Add coverage for oversized fast ringbuffer insertions.
+
 ### Documentation
 - Add a candles component overview and consolidate logging docs under `logging/`.

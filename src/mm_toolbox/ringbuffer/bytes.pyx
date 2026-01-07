@@ -256,7 +256,7 @@ from cpython.mem cimport PyMem_Malloc, PyMem_Free
 cdef class BytesRingBufferFast:
     """A high-performance fixed-size ring buffer using pre-allocated memory slots."""
 
-    def __cinit__(self, int max_capacity, bint disable_async=False, bint only_insert_unique=False, int expected_item_size=128, double buffer_percent=25.0, bint silent_overflow=False) -> None:
+    def __cinit__(self, int max_capacity, bint disable_async=False, bint only_insert_unique=False, int expected_item_size=128, double buffer_percent=25.0) -> None:
         if max_capacity <= 0:
             raise ValueError(f"Capacity cannot be negative; expected >0 but got {max_capacity}")
         if expected_item_size <= 0:
@@ -288,7 +288,6 @@ cdef class BytesRingBufferFast:
         self._buffer_not_empty_event = asyncio.Event()
         self._disable_async = disable_async
         self._only_insert_unique = only_insert_unique
-        self._silent_overflow = silent_overflow
 
     def __dealloc__(self):
         if self._buffer:
@@ -356,12 +355,9 @@ cdef class BytesRingBufferFast:
             Py_ssize_t item_len = len(item)
             Py_ssize_t copy_len
 
-        if item_len <= self._slot_size:
-            copy_len = item_len
-        elif self._silent_overflow:
-            copy_len = self._slot_size
-        else:
+        if item_len > self._slot_size:
             raise ValueError(f"Item length {item_len} exceeds slot size {self._slot_size}")
+        copy_len = item_len
         
         memcpy(dest, <const char*>item, copy_len)
         self._lengths[idx] = copy_len
@@ -380,12 +376,9 @@ cdef class BytesRingBufferFast:
             Py_ssize_t item_len = len(item)
             Py_ssize_t copy_len
 
-        if item_len <= self._slot_size:
-            copy_len = item_len
-        elif self._silent_overflow:
-            copy_len = self._slot_size
-        else:
+        if item_len > self._slot_size:
             raise ValueError(f"Item length {item_len} exceeds slot size {self._slot_size}")
+        copy_len = item_len
 
         memcpy(dest, <const char*>item, copy_len)
         self._lengths[head] = copy_len
@@ -411,12 +404,9 @@ cdef class BytesRingBufferFast:
             char*   dest = self._get_slot_ptr(head)
             Py_ssize_t copy_len
 
-        if item_len <= self._slot_size:
-            copy_len = item_len
-        elif self._silent_overflow:
-            copy_len = self._slot_size
-        else:
+        if item_len > self._slot_size:
             raise ValueError(f"Item length {item_len} exceeds slot size {self._slot_size}")
+        copy_len = item_len
 
         memcpy(dest, item, copy_len)
         self._lengths[head] = copy_len
@@ -466,12 +456,9 @@ cdef class BytesRingBufferFast:
                 item = items[i]
                 dest = self._get_slot_ptr(head)
                 item_len = len(item)
-                if item_len <= self._slot_size:
-                    copy_len = item_len
-                elif self._silent_overflow:
-                    copy_len = self._slot_size
-                else:
+                if item_len > self._slot_size:
                     raise ValueError(f"Item length {item_len} exceeds slot size {self._slot_size}")
+                copy_len = item_len
                 memcpy(dest, <const char*>item, copy_len)
                 self._lengths[head] = copy_len
                 head = (head + 1) & mask
@@ -486,12 +473,9 @@ cdef class BytesRingBufferFast:
                     continue
                 dest = self._get_slot_ptr(head)
                 item_len = len(item)
-                if item_len <= self._slot_size:
-                    copy_len = item_len
-                elif self._silent_overflow:
-                    copy_len = self._slot_size
-                else:
+                if item_len > self._slot_size:
                     raise ValueError(f"Item length {item_len} exceeds slot size {self._slot_size}")
+                copy_len = item_len
                 memcpy(dest, <const char*>item, copy_len)
                 self._lengths[head] = copy_len
                 if self._size == max_capacity:

@@ -50,7 +50,6 @@ cdef class BytesRingBufferFast:
         object      _buffer_not_empty_event
         bint        _disable_async
         bint        _only_insert_unique
-        bint        _silent_overflow
 
     cpdef list raw(self, bint copy=*)
     cpdef list unwrapped(self)

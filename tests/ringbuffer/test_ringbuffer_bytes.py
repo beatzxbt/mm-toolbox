@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
+from mm_toolbox.ringbuffer.bytes import BytesRingBuffer, BytesRingBufferFast
 
 
 class TestBytesRingBufferBasics:
@@ -239,6 +239,22 @@ class TestBytesRingBufferAsyncFunctionality:
 
         expected = [b"bytes_0", b"bytes_1", b"bytes_2"]
         assert collected == expected
+
+
+class TestBytesRingBufferFast:
+    """Test BytesRingBufferFast behavior."""
+
+    def test_oversize_items_raise(self):
+        """Oversized inserts should raise instead of truncating."""
+        rb = BytesRingBufferFast(
+            max_capacity=4,
+            expected_item_size=4,
+            buffer_percent=0.0,
+            disable_async=True,
+        )
+
+        with pytest.raises(ValueError, match="exceeds slot size"):
+            rb.insert(b"12345")
 
     @pytest.mark.asyncio
     async def test_async_disabled_mode(self):
