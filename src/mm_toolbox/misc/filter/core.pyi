@@ -2,7 +2,7 @@
 
 class DataBoundsFilter:
     def __init__(self, threshold_pct: float) -> None:
-        """Initialize with threshold percentage (e.g., 1.0 for ±1%)."""
+        """Initialize with threshold percentage in (0, 100) (e.g., 1.0 for ±1%)."""
         ...
 
     def reset(self, value: float) -> None:

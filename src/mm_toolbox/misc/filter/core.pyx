@@ -10,6 +10,16 @@ cdef class DataBoundsFilter:
     """Maintains dynamic bounds around a reference value by percentage."""
 
     def __cinit__(self, double threshold_pct):
+        """Initialize the filter with a percentage threshold.
+
+        Args:
+            threshold_pct (float): Percent change threshold in (0, 100).
+
+        Raises:
+            ValueError: If the threshold is not within (0, 100).
+        """
+        if threshold_pct <= 0.0 or threshold_pct >= 100.0:
+            raise ValueError("threshold_pct must be in (0, 100)")
         self._threshold = threshold_pct / 100.0
         self._lower_bound = 0.0
         self._upper_bound = 0.0
@@ -34,5 +44,3 @@ cdef class DataBoundsFilter:
             return True
 
         return False
-
-

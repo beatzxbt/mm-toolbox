@@ -20,7 +20,7 @@ from libc.stdint cimport int64_t as i64
 from libc.string cimport memset
 from msgspec import Struct
 
-from .types cimport RateLimitState, SubEventTokenState, EventTokenState
+from .types cimport SubEventTokenState, EventTokenState
 from .config import (
     RateLimiterConfig,
     RateLimitBurstConfig,
@@ -29,6 +29,13 @@ from .config import (
 )
 
 # Python-visible result
+cpdef enum RateLimitState:
+    NORMAL
+    WARNING
+    BLOCKED
+    OVERRIDE
+
+
 class ConsumeResult(Struct):
     """Result of a consumption attempt."""
     allowed: bool
@@ -56,6 +63,9 @@ cdef EventTokenState make_event_token_state(i64 capacity, i64 window_s, object s
 
     # Strategy: DISABLED -> 1 bucket; PER_SECOND -> window_s buckets
     cdef i64 bucket_count = 1
+    cdef i64 i = 0
+    cdef i64 q = 0
+    cdef i64 r = 0
     if strategy is not None and strategy == SubBucketStrategy.PER_SECOND:
         bucket_count = window_s if window_s > 0 else 1
     if bucket_count < 1:
@@ -64,9 +74,6 @@ cdef EventTokenState make_event_token_state(i64 capacity, i64 window_s, object s
     state.num_sub_event_states = bucket_count
     state.sub_event_states = <SubEventTokenState*> malloc(sizeof(SubEventTokenState) * bucket_count)
     if state.sub_event_states != NULL:
-        cdef i64 i
-        cdef i64 q = 0
-        cdef i64 r = 0
         q = capacity // bucket_count
         r = capacity - q * bucket_count
         for i in range(bucket_count):
@@ -91,7 +98,7 @@ cdef class RateLimiter:
     high utilization, and an optional burst policy allows limited overage.
     """
 
-    def __cinit__(self, RateLimiterConfig config):
+    def __cinit__(self, object config):
         """Construct a limiter with a given configuration."""
         self._config = config
         self._state = make_event_token_state(
@@ -104,25 +111,29 @@ cdef class RateLimiter:
             self._state.sub_event_states = NULL
 
     cdef inline i64 _active_sub_index(self, i64 now):
+        cdef i64 elapsed = 0
         if self._state.num_sub_event_states <= 1:
             return 0
-        cdef i64 elapsed = now - self._state.prev_refill_time_ms
+        elapsed = now - self._state.prev_refill_time_ms
         if elapsed < 0:
             elapsed = 0
         return (elapsed // 1000) % self._state.num_sub_event_states
 
     cdef inline void _refresh_sub_bucket(self, i64 now, i64 idx):
+        cdef i64 start = 0
         if self._state.num_sub_event_states <= 0 or self._state.sub_event_states == NULL:
             return
         if self._state.sub_event_states[idx].next_refill_time_ms <= now:
             # Align to current second boundary
-            cdef i64 start = (now // 1000) * 1000
+            start = (now // 1000) * 1000
             self._state.sub_event_states[idx].prev_refill_time_ms = start
             self._state.sub_event_states[idx].next_refill_time_ms = start + 1000
             self._state.sub_event_states[idx].used_tokens = 0
 
     cdef void _reset_state(self, i64 now):
         """Reset overall and per-second buckets to the start of a new window."""
+        cdef i64 n = 0
+        cdef i64 i = 0
         self._state.allocated_tokens = self._config.capacity
         self._state.used_tokens = 0
         self._state.burst_attempts_used = 0
@@ -130,8 +141,7 @@ cdef class RateLimiter:
         self._state.next_refill_time_ms = now + self._config.window_s * 1000
 
         if self._state.num_sub_event_states > 0 and self._state.sub_event_states != NULL:
-            cdef i64 n = self._state.num_sub_event_states
-            cdef i64 i
+            n = self._state.num_sub_event_states
             for i in range(n):
                 self._state.sub_event_states[i].used_tokens = 0
                 if n == 1:
@@ -179,6 +189,19 @@ cdef class RateLimiter:
         Returns:
             ConsumeResult: Allowed flag, state, remaining, and usage.
         """
+        cdef i64 now_force = 0
+        cdef bint sub_enabled_force = 0
+        cdef i64 idx_force = 0
+        cdef i64 capacity = 0
+        cdef i64 new_used = 0
+        cdef bint sub_enabled = 0
+        cdef i64 now = 0
+        cdef i64 idx = 0
+        cdef i64 sub_new_used = 0
+        cdef bint sub_ok = 1
+        cdef bint overall_ok = 0
+        cdef double usage = 0.0
+
         self._maybe_refill()
 
         if num_tokens <= 0:
@@ -194,9 +217,11 @@ cdef class RateLimiter:
 
         if force:
             # Apply usage without enforcing capacity, annotate as OVERRIDE.
-            cdef i64 now_force = time_ms()
-            cdef bint sub_enabled_force = self._state.num_sub_event_states > 0 and self._state.sub_event_states != NULL
-            cdef i64 idx_force = 0
+            now_force = time_ms()
+            sub_enabled_force = (
+                self._state.num_sub_event_states > 0
+                and self._state.sub_event_states != NULL
+            )
             if sub_enabled_force:
                 idx_force = self._active_sub_index(now_force)
                 self._refresh_sub_bucket(now_force, idx_force)
@@ -212,23 +237,23 @@ cdef class RateLimiter:
                 ),
             )
 
-        cdef i64 capacity = self._state.allocated_tokens
-        cdef i64 new_used = self._state.used_tokens + num_tokens
+        capacity = self._state.allocated_tokens
+        new_used = self._state.used_tokens + num_tokens
 
-        cdef bint sub_enabled = self._state.num_sub_event_states > 0 and self._state.sub_event_states != NULL
-        cdef i64 now = time_ms()
-        cdef i64 idx = 0
-        cdef i64 sub_new_used = 0
-        cdef bint sub_ok = 1
+        sub_enabled = (
+            self._state.num_sub_event_states > 0
+            and self._state.sub_event_states != NULL
+        )
+        now = time_ms()
         if sub_enabled:
             idx = self._active_sub_index(now)
             self._refresh_sub_bucket(now, idx)
             sub_new_used = self._state.sub_event_states[idx].used_tokens + num_tokens
             sub_ok = sub_new_used <= self._state.sub_event_states[idx].allocated_tokens
 
-        cdef bint overall_ok = new_used <= capacity
+        overall_ok = new_used <= capacity
         if overall_ok and sub_ok:
-            cdef double usage = <double>new_used / <double>capacity
+            usage = <double>new_used / <double>capacity
             if self._config.state_config.is_enabled and usage > self._config.state_config.block_threshold:
                 return ConsumeResult(
                     allowed=False,

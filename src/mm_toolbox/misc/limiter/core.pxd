@@ -1,5 +1,5 @@
 from libc.stdint cimport int64_t as i64
-from .types cimport EventTokenState, RateLimitState
+from .types cimport EventTokenState
 
 
 cdef class RateLimiter:
@@ -17,5 +17,4 @@ cdef class RateLimiter:
     cpdef void              refill(self)
     cpdef i64               tokens_remaining(self)
     cpdef double            usage(self)
-
 
