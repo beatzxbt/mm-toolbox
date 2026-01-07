@@ -16,10 +16,10 @@ class TestEmaWeightsBasic:
         assert result.dtype == np.float64
 
     def test_default_alpha_calculation(self):
-        """Test that default alpha uses 3/(window+1) formula."""
+        """Test that default alpha uses 2/(window+1) formula."""
         window = 5
         result = ema_weights(window)
-        expected = ema_weights(window, alpha=3.0 / float(window + 1))
+        expected = ema_weights(window, alpha=2.0 / float(window + 1))
         np.testing.assert_allclose(result, expected, rtol=1e-12)
 
     def test_weights_normalization(self):

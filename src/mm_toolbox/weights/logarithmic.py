@@ -5,7 +5,18 @@ from numpy.typing import NDArray
 
 
 def logarithmic_weights(num: int, normalized: bool = True) -> NDArray[np.float64]:
-    """Return logarithmic weights of length ``num`` (start from log(1))."""
+    """Return logarithmic weights of length ``num``.
+
+    Args:
+        num: Number of weights to generate. Must be > 1.
+        normalized: Whether to normalize weights so they sum to 1.
+
+    Returns:
+        Array of logarithmic weights starting at log(1).
+
+    Raises:
+        ValueError: If ``num`` is <= 1.
+    """
     if num <= 1:
         raise ValueError(f"Invalid number of weights; expected > 1 but got {num}.")
 
