@@ -11,7 +11,7 @@ cdef class ExponentialMovingAverage(MovingAverage):
 
     cpdef double initialize(self, cnp.ndarray values):
         cdef: 
-            int     i, n = values.shape[0]
+            int i, n = values.shape[0]
             double  _temp_var 
 
         self._value = values[0]

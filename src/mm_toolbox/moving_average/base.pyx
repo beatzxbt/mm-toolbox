@@ -30,17 +30,6 @@ cdef class MovingAverage:
         """Returns the current value of the moving average."""
         return self._value
 
-    def push_to_ringbuffer(self):
-        """Push the current value to the ringbuffer for historical tracking."""
-        # Note: This method may be a no-op or use a different mechanism
-        # The ringbuffer is primarily used for get_values() functionality
-        pass
-
-    def ensure_warm(self):
-        """Ensure the moving average is warmed up (has enough data)."""
-        # This method checks if the moving average has enough data points
-        pass
-
     cpdef cnp.ndarray get_values(self):
         """Returns the historical values in the moving average as a numpy array."""
         self.__enforce_not_fast()

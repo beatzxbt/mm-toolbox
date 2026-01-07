@@ -23,5 +23,8 @@ All notable changes to this project will be documented in this file.
 - Expose limiter `RateLimitState` in core and tighten Cython initialization paths.
 - Add filter/limiter test coverage for configuration validation, thresholds, burst policy, and refill timing.
 
+### Moving Average
+- Remove unused base-class hooks from moving average implementations.
+
 ### Documentation
 - Add a candles component overview and consolidate logging docs under `logging/`.
