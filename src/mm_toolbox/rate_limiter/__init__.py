@@ -11,7 +11,8 @@ from .config import (
     RateLimitStateConfig,
     SubBucketStrategy,
 )
-from .core import RateLimiter, RateLimitState, ConsumeResult
+from .result import RateLimitState, ConsumeResult
+from .limiter import RateLimiter
 
 __all__ = [
     "RateLimiter",

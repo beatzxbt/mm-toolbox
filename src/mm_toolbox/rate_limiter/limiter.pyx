@@ -13,80 +13,18 @@ This module is single-threaded by design. No explicit locking is used and no
 nogil sections are required. Time alignment is based on the current wall clock
 at creation/refill time; per-second buckets align to second boundaries.
 """
+from __future__ import annotations
+
 from mm_toolbox.time.time cimport time_ms
 
-from libc.stdlib cimport malloc, free
+from libc.stdlib cimport free
 from libc.stdint cimport int64_t as i64
-from libc.string cimport memset
-from msgspec import Struct
 
-from .types cimport SubEventTokenState, EventTokenState
-from .config import (
-    RateLimiterConfig,
-    RateLimitBurstConfig,
-    RateLimitStateConfig,
-    SubBucketStrategy,
-)
-
-# Python-visible result
-cpdef enum RateLimitState:
-    NORMAL
-    WARNING
-    BLOCKED
-    OVERRIDE
-
-
-class ConsumeResult(Struct):
-    """Result of a consumption attempt."""
-    allowed: bool
-    state: RateLimitState
-    remaining: int
-    usage: float
-
-
-cdef EventTokenState make_event_token_state(i64 capacity, i64 window_s, object strategy):
-    """Create and initialize an event token state.
-
-    The window is optionally subdivided into per-second buckets depending on
-    `strategy`. Capacity is distributed exactly across buckets so that the sum
-    of sub-bucket allocations equals `capacity`.
-    """
-    cdef i64 now = time_ms()
-    cdef EventTokenState state
-    memset(<void*>&state, 0, sizeof(EventTokenState))
-
-    state.allocated_tokens = capacity
-    state.used_tokens = 0
-    state.prev_refill_time_ms = now
-    state.next_refill_time_ms = now + window_s * 1000
-    state.burst_attempts_used = 0
-
-    # Strategy: DISABLED -> 1 bucket; PER_SECOND -> window_s buckets
-    cdef i64 bucket_count = 1
-    cdef i64 i = 0
-    cdef i64 q = 0
-    cdef i64 r = 0
-    if strategy is not None and strategy == SubBucketStrategy.PER_SECOND:
-        bucket_count = window_s if window_s > 0 else 1
-    if bucket_count < 1:
-        bucket_count = 1
-
-    state.num_sub_event_states = bucket_count
-    state.sub_event_states = <SubEventTokenState*> malloc(sizeof(SubEventTokenState) * bucket_count)
-    if state.sub_event_states != NULL:
-        q = capacity // bucket_count
-        r = capacity - q * bucket_count
-        for i in range(bucket_count):
-            # Distribute the remainder to the first r buckets
-            state.sub_event_states[i].allocated_tokens = q + (1 if i < r else 0)
-            state.sub_event_states[i].used_tokens = 0
-            state.sub_event_states[i].prev_refill_time_ms = now if bucket_count == 1 else now + i * 1000
-            state.sub_event_states[i].next_refill_time_ms = state.sub_event_states[i].prev_refill_time_ms + 1000
-    else:
-        # Allocation failed; degrade gracefully to no sub-events
-        state.num_sub_event_states = 0
-
-    return state
+from .types cimport EventTokenState
+from .result import RateLimitState, ConsumeResult
+from .state cimport make_event_token_state
+from .bucket cimport active_sub_index, refresh_sub_bucket, reset_state
+from .config import RateLimiterConfig
 
 
 cdef class RateLimiter:
@@ -99,73 +37,40 @@ cdef class RateLimiter:
     """
 
     def __cinit__(self, object config):
-        """Construct a limiter with a given configuration."""
+        """Construct a limiter with a given configuration.
+
+        Args:
+            config: RateLimiterConfig specifying capacity, window, and policies.
+        """
         self._config = config
         self._state = make_event_token_state(
             config.capacity, config.window_s, config.sub_bucket_strategy
         )
 
     def __dealloc__(self):
+        """Free allocated sub-bucket memory."""
         if self._state.sub_event_states != NULL:
             free(self._state.sub_event_states)
             self._state.sub_event_states = NULL
 
-    cdef inline i64 _active_sub_index(self, i64 now):
-        cdef i64 elapsed = 0
-        if self._state.num_sub_event_states <= 1:
-            return 0
-        elapsed = now - self._state.prev_refill_time_ms
-        if elapsed < 0:
-            elapsed = 0
-        return (elapsed // 1000) % self._state.num_sub_event_states
-
-    cdef inline void _refresh_sub_bucket(self, i64 now, i64 idx):
-        cdef i64 start = 0
-        if self._state.num_sub_event_states <= 0 or self._state.sub_event_states == NULL:
-            return
-        if self._state.sub_event_states[idx].next_refill_time_ms <= now:
-            # Align to current second boundary
-            start = (now // 1000) * 1000
-            self._state.sub_event_states[idx].prev_refill_time_ms = start
-            self._state.sub_event_states[idx].next_refill_time_ms = start + 1000
-            self._state.sub_event_states[idx].used_tokens = 0
-
-    cdef void _reset_state(self, i64 now):
-        """Reset overall and per-second buckets to the start of a new window."""
-        cdef i64 n = 0
-        cdef i64 i = 0
-        self._state.allocated_tokens = self._config.capacity
-        self._state.used_tokens = 0
-        self._state.burst_attempts_used = 0
-        self._state.prev_refill_time_ms = now
-        self._state.next_refill_time_ms = now + self._config.window_s * 1000
-
-        if self._state.num_sub_event_states > 0 and self._state.sub_event_states != NULL:
-            n = self._state.num_sub_event_states
-            for i in range(n):
-                self._state.sub_event_states[i].used_tokens = 0
-                if n == 1:
-                    self._state.sub_event_states[i].prev_refill_time_ms = now
-                else:
-                    self._state.sub_event_states[i].prev_refill_time_ms = now + i * 1000
-                self._state.sub_event_states[i].next_refill_time_ms = self._state.sub_event_states[i].prev_refill_time_ms + 1000
-
     cdef void _maybe_refill(self):
+        """Trigger a refill if the overall window has expired."""
         cdef i64 now = time_ms()
         cdef bint time_to_refill = now >= self._state.next_refill_time_ms
 
         if not time_to_refill:
             return
 
-        self._reset_state(now)
+        reset_state(&self._state, self._config, now)
+
+    cdef inline EventTokenState get_state(self):
+        """Return the internal state structure (for testing/debugging)."""
+        return self._state
 
     cpdef void refill(self):
         """Force a refill cycle immediately."""
         cdef i64 now = time_ms()
-        self._reset_state(now)
-
-    cdef inline EventTokenState get_state(self):
-        return self._state
+        reset_state(&self._state, self._config, now)
 
     cpdef object try_consume(self, bint force=False):
         """Consume a single token and return a ConsumeResult.
@@ -216,15 +121,15 @@ cdef class RateLimiter:
             )
 
         if force:
-            # Apply usage without enforcing capacity, annotate as OVERRIDE.
+            # Apply usage without enforcing capacity, annotate as OVERRIDE
             now_force = time_ms()
             sub_enabled_force = (
                 self._state.num_sub_event_states > 0
                 and self._state.sub_event_states != NULL
             )
             if sub_enabled_force:
-                idx_force = self._active_sub_index(now_force)
-                self._refresh_sub_bucket(now_force, idx_force)
+                idx_force = active_sub_index(&self._state, now_force)
+                refresh_sub_bucket(&self._state, now_force, idx_force)
                 self._state.sub_event_states[idx_force].used_tokens += num_tokens
             self._state.used_tokens += num_tokens
             return ConsumeResult(
@@ -246,8 +151,8 @@ cdef class RateLimiter:
         )
         now = time_ms()
         if sub_enabled:
-            idx = self._active_sub_index(now)
-            self._refresh_sub_bucket(now, idx)
+            idx = active_sub_index(&self._state, now)
+            refresh_sub_bucket(&self._state, now, idx)
             sub_new_used = self._state.sub_event_states[idx].used_tokens + num_tokens
             sub_ok = sub_new_used <= self._state.sub_event_states[idx].allocated_tokens
 
@@ -261,7 +166,7 @@ cdef class RateLimiter:
                     remaining=<int>(capacity - self._state.used_tokens),
                     usage=float(<double>self._state.used_tokens / <double>capacity),
                 )
-            # apply
+            # Apply consumption
             self._state.used_tokens = new_used
             if sub_enabled:
                 self._state.sub_event_states[idx].used_tokens = sub_new_used
@@ -331,15 +236,37 @@ cdef class RateLimiter:
 
     @classmethod
     def per_window(cls, int capacity, int window_s):
-        """Create a limiter with given capacity and window size (seconds)."""
+        """Create a limiter with given capacity and window size (seconds).
+
+        Args:
+            capacity: Total token capacity.
+            window_s: Window duration in seconds.
+
+        Returns:
+            RateLimiter: Configured limiter instance.
+        """
         return cls(RateLimiterConfig.default(capacity=capacity, window_s=window_s))
 
     @classmethod
     def per_second(cls, int capacity):
-        """Create a per-second limiter."""
+        """Create a per-second limiter.
+
+        Args:
+            capacity: Token capacity per second.
+
+        Returns:
+            RateLimiter: Configured limiter instance.
+        """
         return cls(RateLimiterConfig.default(capacity=capacity, window_s=1))
 
     @classmethod
     def per_minute(cls, int capacity):
-        """Create a per-minute limiter."""
+        """Create a per-minute limiter.
+
+        Args:
+            capacity: Token capacity per minute.
+
+        Returns:
+            RateLimiter: Configured limiter instance.
+        """
         return cls(RateLimiterConfig.default(capacity=capacity, window_s=60))

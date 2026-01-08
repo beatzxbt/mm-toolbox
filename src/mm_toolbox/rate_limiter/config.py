@@ -1,10 +1,10 @@
 from typing import Self
 
 from msgspec import Struct
-from enum import Enum
+from enum import StrEnum
 
 
-class SubBucketStrategy(str, Enum):
+class SubBucketStrategy(StrEnum):
     """How per-second buckets apply within the window."""
 
     DISABLED = "disabled"

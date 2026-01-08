@@ -61,15 +61,18 @@ def get_build_dir():
 
 #   * Hierarchy of build dependencies *
 #
-#   - Rounding (depends on -)
-#   - Time (depends on -)
-#   - Ringbuffer (depends on -)
-#   - Orderbook (depends on -)
+#   - Rounding (no dependencies)
+#   - Time (no dependencies)
+#   - Ringbuffer (no dependencies)
+#   - Orderbook (no dependencies)
 #
-#   - Logger (depends on Time)
-#   - Candles (depends on Ringbuffer)
 #   - Moving Average (depends on Ringbuffer & Time)
-#   - Websocket (depends on Logger & Time)
+#   - Candles (depends on Ringbuffer & Time)
+#   - Logging (depends on Ringbuffer & Time)
+#   - Websocket (depends on Ringbuffer, Moving Average, & Time)
+#   - Misc.Filter (no dependencies) / Misc.Limiter (depends on Time)
+
+
 def get_rounding_extensions():
     """Get list of rounding extensions for compilation."""
     return [
@@ -312,6 +315,44 @@ def get_websocket_extensions():
     ]
 
 
+def get_misc_extensions():
+    """Get list of misc extensions for compilation."""
+    return [
+        get_extension(
+            name="mm_toolbox.misc.filter.core",
+            sources=["src/mm_toolbox/misc/filter/core.pyx"],
+            include_dirs=["src", "src/mm_toolbox/misc/filter"],
+        ),
+    ]
+
+
+def get_rate_limiter_extensions():
+    """Get list of rate limiter extensions for compilation."""
+    base_include_dirs = ["src", "src/mm_toolbox/rate_limiter"]
+    return [
+        get_extension(
+            name="mm_toolbox.rate_limiter.result",
+            sources=["src/mm_toolbox/rate_limiter/result.pyx"],
+            include_dirs=base_include_dirs,
+        ),
+        get_extension(
+            name="mm_toolbox.rate_limiter.state",
+            sources=["src/mm_toolbox/rate_limiter/state.pyx"],
+            include_dirs=base_include_dirs,
+        ),
+        get_extension(
+            name="mm_toolbox.rate_limiter.bucket",
+            sources=["src/mm_toolbox/rate_limiter/bucket.pyx"],
+            include_dirs=base_include_dirs,
+        ),
+        get_extension(
+            name="mm_toolbox.rate_limiter.limiter",
+            sources=["src/mm_toolbox/rate_limiter/limiter.pyx"],
+            include_dirs=base_include_dirs,
+        ),
+    ]
+
+
 module_list: list[Extension] = []
 module_list.extend(get_rounding_extensions())
 module_list.extend(get_time_extensions())
@@ -321,6 +362,8 @@ module_list.extend(get_moving_average_extensions())
 module_list.extend(get_candles_extensions())
 module_list.extend(get_logging_extensions())
 module_list.extend(get_websocket_extensions())
+module_list.extend(get_misc_extensions())
+module_list.extend(get_rate_limiter_extensions())
 
 
 class build_ext(_build_ext):
@@ -356,5 +399,10 @@ setup(
         module_list=module_list,
         compiler_directives=COMPILER_DIRECTIVES,
         build_dir=get_build_dir(),
+        include_path=[
+            "src",
+            "src/mm_toolbox/misc/filter",
+            "src/mm_toolbox/rate_limiter",
+        ],
     ),
 )
