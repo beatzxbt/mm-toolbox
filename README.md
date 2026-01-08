@@ -10,13 +10,13 @@ mm-toolbox/
 │       ├── logging/            # Lightweight logger + Discord/Telegram support
 │       │   ├── standard/       # Standard logger implementation
 │       │   └── advanced/       # Distributed HFT logger (worker/master)
-│       ├── misc/               # Filtering and rate limiting helpers
-│       │   ├── filter/         # Bounds-based change filter
-│       │   └── limiter/        # Token bucket rate limiter
+│       ├── misc/               # Filtering helpers
+│       │   └── filter/         # Bounds-based change filter
 │       ├── moving_average/     # Various moving averages (EMA/SMA/WMA/TEMA)
 │       ├── orderbook/          # Multiple orderbook implementations & tools
 │       │   ├── standard/       # Python-based orderbook
 │       │   └── advanced/       # High-performance Cython orderbook
+│       ├── rate_limiter/       # Token bucket rate limiter
 │       ├── ringbuffer/         # Efficient fixed-size circular buffers
 │       ├── rounding/           # Fast price/size rounding utilities
 │       ├── time/               # Time utilities
@@ -86,7 +86,9 @@ that covers API details, architecture notes, and usage examples.
 
 **Candles** (`mm_toolbox.candles`): High-performance candle aggregation with time, tick, volume, price, and multi-trigger buckets. Maintains a live `latest_candle`, stores completed candles in a ring buffer, and supports async iteration for stream processing.
 
-**Misc** (`mm_toolbox.misc`): Utility helpers including `DataBoundsFilter` for bounds-based change detection and `RateLimiter` for token-bucket rate limiting with optional burst policies and per-second sub-buckets.
+**Misc** (`mm_toolbox.misc`): Utility helpers including `DataBoundsFilter` for bounds-based change detection.
+
+**Rate Limiter** (`mm_toolbox.rate_limiter`): Token-bucket rate limiting with optional burst policies and per-second sub-buckets, plus explicit state tracking via `RateLimitState`.
 
 **Ringbuffer** (`mm_toolbox.ringbuffer`): Efficient circular buffers with multiple implementations:
 - `NumericRingBuffer`: Fast numeric data handling
@@ -119,22 +121,25 @@ entries on overflow for bounded memory usage.
 
 ### Breaking Changes
 
-- **API Unification**: Some function signatures and parameter names have been standardized across components for consistency.
-- **Ringbuffer**: Integer-specific ringbuffers removed; use `NumericRingBuffer` instead. Multi-ringbuffer now supports any numeric type, strings, and bytes.
-- **Numba Deprecation**: Previous Numba implementations are no longer included. If you were using Numba-specific features, you'll need to migrate to the Cython equivalents.
+- **Orderbook**: `consume_*` functions now take `asks` before `bids`; `update_bbo` is renamed to `consume_bbo`. Snapshots replace both ladders, and deltas that would wipe the opposite side without replacement levels are ignored.
+- **Rate Limiter Module**: The limiter moved from `mm_toolbox.misc` to `mm_toolbox.rate_limiter` and exposes `RateLimitState` from the core module.
+- **Ringbuffer**: Integer-specific ringbuffers removed; use `NumericRingBuffer` instead. `BytesRingBufferFast` now rejects oversized inserts instead of truncating silently.
+- **API Unification**: Function signatures and parameter names were standardized across components.
+- **Numba Deprecation**: Previous Numba implementations are no longer included; migrate to the Cython/C equivalents.
 
 ### Migration Guide
 
-Most code should work with minimal changes. The primary differences are:
-1. Import paths remain the same (e.g., `from mm_toolbox import ExponentialMovingAverage`)
-2. Performance characteristics are improved, so you may be able to simplify your code
-3. Type hints are now fully supported and recommended for better IDE support
+Most code should work with minimal changes. Update the following if you rely on affected components:
+1. **Rate limiter imports**: Replace `mm_toolbox.misc.limiter` with `mm_toolbox.rate_limiter` and update any `RateLimiter`/`RateLimitState` imports accordingly.
+2. **Orderbook ingestion**: Swap parameter order to `asks, bids` for `consume_*` calls, and rename `update_bbo` to `consume_bbo`. Remove any optional flags for tick/lot computation.
+3. **Ringbuffer usage**: Replace integer-only ringbuffers with `NumericRingBuffer` and handle oversized inserts for `BytesRingBufferFast` explicitly.
+4. **Numba users**: Migrate any Numba-specific paths to the Cython implementations and rebuild extensions with `make build`.
 
 *Components not mentioned have either not incurred significant changes or maintain backward compatibility.*
 
 ## Roadmap
 
-### v1.2.0
+### v1.1.0
 **Parsers**: Introduction of high-performance parsing utilities including JSON parsers and crypto exchange-specific parsers (e.g., Binance top-of-book parser).
 
 ## License
