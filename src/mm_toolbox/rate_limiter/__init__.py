@@ -1,3 +1,10 @@
+"""Rate limiter utilities and configuration exports.
+
+Provides token bucket limiter types along with configuration helpers.
+"""
+
+from __future__ import annotations
+
 from .config import (
     RateLimitBurstConfig,
     RateLimiterConfig,

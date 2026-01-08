@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from mm_toolbox.misc.limiter import (
+from mm_toolbox.rate_limiter import (
     RateLimitBurstConfig,
     RateLimiter,
     RateLimiterConfig,
@@ -98,9 +98,7 @@ class TestRateLimitBurstConfig:
         assert cfg.max_burst_attempts == 0
 
     @pytest.mark.parametrize("max_tokens, max_attempts", [(0, 1), (1, 0), (-1, 2)])
-    def test_invalid_enabled_settings(
-        self, max_tokens: int, max_attempts: int
-    ) -> None:
+    def test_invalid_enabled_settings(self, max_tokens: int, max_attempts: int) -> None:
         """Enabled burst config requires positive limits."""
         with pytest.raises(ValueError):
             RateLimitBurstConfig(
