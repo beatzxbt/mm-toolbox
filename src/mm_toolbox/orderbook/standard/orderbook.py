@@ -37,7 +37,7 @@ class Orderbook:
         self._is_populated = False
 
         if initial_bids is not None and initial_asks is not None:
-            self.consume_snapshot(bids=initial_bids, asks=initial_asks)
+            self.consume_snapshot(asks=initial_asks, bids=initial_bids)
 
     def _ensure_populated(self) -> None:
         """Check if the orderbook is populated."""
@@ -66,22 +66,22 @@ class Orderbook:
 
     def consume_snapshot(
         self,
-        bids: list[OrderbookLevel],
         asks: list[OrderbookLevel],
+        bids: list[OrderbookLevel],
     ) -> None:
         """Consume a snapshot of the orderbook.
 
         Args:
-            bids: List of bid levels.
             asks: List of ask levels.
+            bids: List of bid levels.
         """
-        if len(bids) < self._size:
-            raise ValueError(
-                f"Invalid bids with snapshot; expected >= {self._size} levels but got {len(bids)}"
-            )
         if len(asks) < self._size:
             raise ValueError(
                 f"Invalid asks with snapshot; expected >= {self._size} levels but got {len(asks)}"
+            )
+        if len(bids) < self._size:
+            raise ValueError(
+                f"Invalid bids with snapshot; expected >= {self._size} levels but got {len(bids)}"
             )
 
         self.reset()
@@ -104,14 +104,14 @@ class Orderbook:
 
     def consume_deltas(
         self,
-        bids: list[OrderbookLevel],
         asks: list[OrderbookLevel],
+        bids: list[OrderbookLevel],
     ) -> None:
         """Consume deltas of the orderbook.
 
         Args:
-            bids: List of bid levels.
             asks: List of ask levels.
+            bids: List of bid levels.
         """
         for ask in asks:
             ask.add_precision_info(self._tick_size, self._lot_size, unsafe=True)
@@ -137,8 +137,8 @@ class Orderbook:
 
     def consume_bbo(
         self,
-        bid: OrderbookLevel,
         ask: OrderbookLevel,
+        bid: OrderbookLevel,
     ) -> None:
         """Update the best bid and offer.
 
@@ -147,8 +147,8 @@ class Orderbook:
         fixing any issues arising with the orderbook by assuming this source of truth.
 
         Args:
-            bid: Bid level.
             ask: Ask level.
+            bid: Bid level.
         """
         bid.add_precision_info(self._tick_size, self._lot_size, unsafe=True)
         ask.add_precision_info(self._tick_size, self._lot_size, unsafe=True)

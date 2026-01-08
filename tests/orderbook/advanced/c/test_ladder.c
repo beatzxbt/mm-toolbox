@@ -32,7 +32,7 @@ static OrderbookLevel make_level(double price, double size, uint64_t norders) {
  * roll_right tests
  * ============================================================================ */
 
-static MunitResult test_roll_right_at_start(const MunitParameter params[], void* data) {
+static MunitResult test_roll_right_at_start(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     OrderbookLadderData ladder_data = {
         .num_levels = 2,
@@ -58,7 +58,7 @@ static MunitResult test_roll_right_at_start(const MunitParameter params[], void*
     return MUNIT_OK;
 }
 
-static MunitResult test_roll_right_in_middle(const MunitParameter params[], void* data) {
+static MunitResult test_roll_right_in_middle(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     OrderbookLadderData ladder_data = {
         .num_levels = 3,
@@ -84,7 +84,7 @@ static MunitResult test_roll_right_in_middle(const MunitParameter params[], void
     return MUNIT_OK;
 }
 
-static MunitResult test_roll_right_at_max_capacity(const MunitParameter params[], void* data) {
+static MunitResult test_roll_right_at_max_capacity(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[3];
     OrderbookLadderData ladder_data = {
         .num_levels = 3,
@@ -110,7 +110,7 @@ static MunitResult test_roll_right_at_max_capacity(const MunitParameter params[]
     return MUNIT_OK;
 }
 
-static MunitResult test_roll_right_beyond_count(const MunitParameter params[], void* data) {
+static MunitResult test_roll_right_beyond_count(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     OrderbookLadderData ladder_data = {
         .num_levels = 2,
@@ -134,7 +134,7 @@ static MunitResult test_roll_right_beyond_count(const MunitParameter params[], v
  * roll_left tests
  * ============================================================================ */
 
-static MunitResult test_roll_left_at_start(const MunitParameter params[], void* data) {
+static MunitResult test_roll_left_at_start(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     OrderbookLadderData ladder_data = {
         .num_levels = 3,
@@ -156,7 +156,7 @@ static MunitResult test_roll_left_at_start(const MunitParameter params[], void* 
     return MUNIT_OK;
 }
 
-static MunitResult test_roll_left_in_middle(const MunitParameter params[], void* data) {
+static MunitResult test_roll_left_in_middle(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     OrderbookLadderData ladder_data = {
         .num_levels = 3,
@@ -178,7 +178,7 @@ static MunitResult test_roll_left_in_middle(const MunitParameter params[], void*
     return MUNIT_OK;
 }
 
-static MunitResult test_roll_left_at_end(const MunitParameter params[], void* data) {
+static MunitResult test_roll_left_at_end(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     OrderbookLadderData ladder_data = {
         .num_levels = 3,
@@ -200,7 +200,7 @@ static MunitResult test_roll_left_at_end(const MunitParameter params[], void* da
     return MUNIT_OK;
 }
 
-static MunitResult test_roll_left_beyond_count(const MunitParameter params[], void* data) {
+static MunitResult test_roll_left_beyond_count(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     OrderbookLadderData ladder_data = {
         .num_levels = 2,
@@ -224,7 +224,7 @@ static MunitResult test_roll_left_beyond_count(const MunitParameter params[], vo
  * insert_level tests
  * ============================================================================ */
 
-static MunitResult test_insert_level(const MunitParameter params[], void* data) {
+static MunitResult test_insert_level(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     OrderbookLevel new_level = make_level(100.5, 2.0, 3);
     
@@ -236,7 +236,7 @@ static MunitResult test_insert_level(const MunitParameter params[], void* data) 
     return MUNIT_OK;
 }
 
-static MunitResult test_insert_level_multiple(const MunitParameter params[], void* data) {
+static MunitResult test_insert_level_multiple(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     
     for (uint64_t i = 0; i < 3; i++) {

@@ -182,7 +182,7 @@ class TestOrderbookSnapshots:
             OrderbookLevel.from_values(100.03, 3.5, 3, 0.01, 0.001),
         ]
 
-        ob.consume_snapshot(bids=bids, asks=asks)
+        ob.consume_snapshot(asks=asks, bids=bids)
 
         assert ob._is_populated
         assert len(ob._bids) == 3
@@ -205,7 +205,7 @@ class TestOrderbookSnapshots:
             OrderbookLevel(price=100.02, size=2.5, norders=2),
         ]
 
-        ob.consume_snapshot(bids=bids, asks=asks)
+        ob.consume_snapshot(asks=asks, bids=bids)
 
         # Verify precision info was added automatically
         for bid in bids:
@@ -220,10 +220,22 @@ class TestOrderbookSnapshots:
         ob = Orderbook(tick_size=0.01, lot_size=0.001, size=5)
 
         bids = [OrderbookLevel.from_values(100.00, 1.0, 1, 0.01, 0.001)]  # Only 1 level
-        asks = [OrderbookLevel.from_values(100.01, 1.5, 1, 0.01, 0.001)]  # Only 1 level
+        asks = [
+            OrderbookLevel.from_values(100.01 + i * 0.01, 1.5, 1, 0.01, 0.001)
+            for i in range(5)
+        ]
 
         with pytest.raises(ValueError, match="Invalid bids with snapshot"):
-            ob.consume_snapshot(bids=bids, asks=asks)
+            ob.consume_snapshot(asks=asks, bids=bids)
+
+        bids = [
+            OrderbookLevel.from_values(100.00 - i * 0.01, 1.0, 1, 0.01, 0.001)
+            for i in range(5)
+        ]
+        asks = [OrderbookLevel.from_values(100.01, 1.5, 1, 0.01, 0.001)]  # Only 1 level
+
+        with pytest.raises(ValueError, match="Invalid asks with snapshot"):
+            ob.consume_snapshot(asks=asks, bids=bids)
 
 
 class TestOrderbookIncrementalUpdates:
@@ -244,13 +256,13 @@ class TestOrderbookIncrementalUpdates:
             OrderbookLevel.from_values(100.03, 3.5, 3, 0.01, 0.001),
         ]
 
-        self.ob.consume_snapshot(bids=bids, asks=asks)
+        self.ob.consume_snapshot(asks=asks, bids=bids)
 
     def test_level_addition(self):
         """Test adding new levels."""
         # Add new ask level
         new_asks = [OrderbookLevel.from_values(100.04, 1.0, 1, 0.01, 0.001)]
-        self.ob.consume_deltas(bids=[], asks=new_asks)
+        self.ob.consume_deltas(asks=new_asks, bids=[])
 
         assert len(self.ob._asks) == 4
         assert 10004 in self.ob._asks
@@ -260,7 +272,7 @@ class TestOrderbookIncrementalUpdates:
         """Test modifying existing levels."""
         # Modify existing bid
         modified_bids = [OrderbookLevel.from_values(100.00, 5.0, 5, 0.01, 0.001)]
-        self.ob.consume_deltas(bids=modified_bids, asks=[])
+        self.ob.consume_deltas(asks=[], bids=modified_bids)
 
         best_bid, _ = self.ob.get_bbo()
         assert best_bid.size == 5.0
@@ -270,7 +282,7 @@ class TestOrderbookIncrementalUpdates:
         """Test deleting levels using zero size."""
         # Delete best bid
         deleted_bids = [OrderbookLevel.from_values(100.00, 0.0, 0, 0.01, 0.001)]
-        self.ob.consume_deltas(bids=deleted_bids, asks=[])
+        self.ob.consume_deltas(asks=[], bids=deleted_bids)
 
         assert len(self.ob._bids) == 2
         assert 10000 not in self.ob._bids
@@ -298,14 +310,14 @@ class TestOrderbookBBOUpdates:
             OrderbookLevel.from_values(100.03, 3.5, 3, 0.01, 0.001),
         ]
 
-        self.ob.consume_snapshot(bids=bids, asks=asks)
+        self.ob.consume_snapshot(asks=asks, bids=bids)
 
     def test_bbo_replacement(self):
         """Test replacing BBO levels."""
         new_bid = OrderbookLevel.from_values(100.005, 2.0, 1, 0.01, 0.001)
         new_ask = OrderbookLevel.from_values(100.015, 1.8, 1, 0.01, 0.001)
 
-        self.ob.consume_bbo(bid=new_bid, ask=new_ask)
+        self.ob.consume_bbo(ask=new_ask, bid=new_bid)
 
         best_bid, best_ask = self.ob.get_bbo()
         assert best_bid.price == 100.005
@@ -316,7 +328,7 @@ class TestOrderbookBBOUpdates:
         zero_bid = OrderbookLevel.from_values(100.00, 0.0, 0, 0.01, 0.001)
         zero_ask = OrderbookLevel.from_values(100.01, 0.0, 0, 0.01, 0.001)
 
-        self.ob.consume_bbo(bid=zero_bid, ask=zero_ask)
+        self.ob.consume_bbo(ask=zero_ask, bid=zero_bid)
 
         best_bid, best_ask = self.ob.get_bbo()
         assert best_bid.price == 99.99
@@ -345,7 +357,7 @@ class TestOrderbookAccessors:
             OrderbookLevel.from_values(100.05, 5.5, 5, 0.01, 0.001),
         ]
 
-        self.ob.consume_snapshot(bids=bids, asks=asks)
+        self.ob.consume_snapshot(asks=asks, bids=bids)
 
     def test_get_bbo(self):
         """Test getting best bid and offer."""
@@ -416,7 +428,7 @@ class TestOrderbookCalculations:
             OrderbookLevel.from_values(100.03, 3.5, 3, 0.01, 0.001),
         ]
 
-        self.ob.consume_snapshot(bids=bids, asks=asks)
+        self.ob.consume_snapshot(asks=asks, bids=bids)
 
     def test_get_bbo_spread(self):
         """Test BBO spread calculation using integer arithmetic."""
@@ -506,7 +518,7 @@ class TestOrderbookIntegrationAndEdgeCases:
             OrderbookLevel.from_values(100.03, 3.5, 3, 0.01, 0.001),
         ]
 
-        ob.consume_snapshot(bids=bids, asks=asks)
+        ob.consume_snapshot(asks=asks, bids=bids)
 
         # Verify initial state
         best_bid, best_ask = ob.get_bbo()
@@ -515,8 +527,8 @@ class TestOrderbookIntegrationAndEdgeCases:
 
         # Update 1: Modify best bid
         ob.consume_bbo(
-            bid=OrderbookLevel.from_values(100.005, 1.2, 1, 0.01, 0.001),
             ask=OrderbookLevel.from_values(100.01, 1.5, 1, 0.01, 0.001),
+            bid=OrderbookLevel.from_values(100.005, 1.2, 1, 0.01, 0.001),
         )
 
         best_bid, best_ask = ob.get_bbo()
@@ -526,7 +538,7 @@ class TestOrderbookIntegrationAndEdgeCases:
 
         # Update 2: Add new ask level
         new_asks = [OrderbookLevel.from_values(100.004, 0.5, 1, 0.01, 0.001)]
-        ob.consume_deltas(bids=[], asks=new_asks)
+        ob.consume_deltas(asks=new_asks, bids=[])
 
         best_bid, best_ask = ob.get_bbo()
         assert best_ask.price == 100.004  # Should be new best ask
@@ -536,10 +548,7 @@ class TestOrderbookIntegrationAndEdgeCases:
             OrderbookLevel.from_values(99.99, 0.0, 0, 0.01, 0.001),  # Delete second bid
             OrderbookLevel.from_values(100.02, 0.0, 0, 0.01, 0.001),  # Delete ask level
         ]
-        ob.consume_deltas(
-            bids=[del_updates[0]],
-            asks=[del_updates[1]],
-        )
+        ob.consume_deltas(asks=[del_updates[1]], bids=[del_updates[0]])
 
         assert len(ob._bids) == 2
         assert 9999 not in ob._bids
@@ -571,7 +580,7 @@ class TestOrderbookIntegrationAndEdgeCases:
             for i in range(5)
         ]
 
-        ob.consume_snapshot(bids=bids, asks=asks)
+        ob.consume_snapshot(asks=asks, bids=bids)
 
         for i in range(10):
             if i % 2 == 0:
@@ -580,8 +589,8 @@ class TestOrderbookIntegrationAndEdgeCases:
                 new_ask_price = 100.01 + (i * 0.001)
 
                 ob.consume_bbo(
-                    bid=OrderbookLevel.from_values(new_bid_price, 1.0, 1, 0.01, 0.001),
                     ask=OrderbookLevel.from_values(new_ask_price, 1.0, 1, 0.01, 0.001),
+                    bid=OrderbookLevel.from_values(new_bid_price, 1.0, 1, 0.01, 0.001),
                 )
             else:
                 # Regular update - add new levels
@@ -589,11 +598,11 @@ class TestOrderbookIntegrationAndEdgeCases:
                 new_ask_price = 100.06 + (i * 0.01)
 
                 ob.consume_deltas(
-                    bids=[
-                        OrderbookLevel.from_values(new_bid_price, 1.0, 1, 0.01, 0.001)
-                    ],
                     asks=[
                         OrderbookLevel.from_values(new_ask_price, 1.0, 1, 0.01, 0.001)
+                    ],
+                    bids=[
+                        OrderbookLevel.from_values(new_bid_price, 1.0, 1, 0.01, 0.001)
                     ],
                 )
 
@@ -622,7 +631,7 @@ class TestOrderbookIntegrationAndEdgeCases:
             OrderbookLevel.from_values(100.04, 1.0, 1, 0.01, 0.001),
         ]
 
-        ob.consume_snapshot(bids=bids, asks=asks)
+        ob.consume_snapshot(asks=asks, bids=bids)
 
         spread = ob.get_bbo_spread()
 
@@ -661,7 +670,7 @@ class TestOrderbookIntegrationAndEdgeCases:
             OrderbookLevel.from_values(100.03, 1.0, 1, 0.01, 0.001),
         ]
 
-        ob.consume_snapshot(bids=bids, asks=asks)
+        ob.consume_snapshot(asks=asks, bids=bids)
         assert ob._is_populated
 
         ob.reset()
@@ -721,7 +730,7 @@ class TestPrecisionAndIntegerArithmetic:
             OrderbookLevel.from_values(100.03, 1.0, 1, 0.01, 0.001),
         ]
 
-        ob.consume_snapshot(bids=bids, asks=asks)
+        ob.consume_snapshot(asks=asks, bids=bids)
 
         spread = ob.get_bbo_spread()
 
