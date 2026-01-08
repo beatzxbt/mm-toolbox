@@ -36,8 +36,22 @@ cdef InternalMessage bytes_to_internal_message(bytes message):
         MessageType     msg_type = <MessageType>reader.read_u8()
         u64             timestamp_ns = reader.read_u64()
         u32             data_len = reader.read_u32()
-        unsigned char*  data = reader.read_chars(data_len)
+        const unsigned char*  data_view = reader.read_chars(data_len)
+        unsigned char*  data = NULL
+    if data_len > 0:
+        data = <unsigned char*>malloc(data_len)
+        if data == NULL:
+            raise MemoryError("Failed to allocate memory for InternalMessage data")
+        memcpy(data, data_view, data_len)
+    # Caller owns data buffer and must free via free_internal_message().
     return create_internal_message(msg_type, timestamp_ns, data_len, data)
+
+
+cdef void free_internal_message(InternalMessage* message) noexcept nogil:
+    if message != NULL and message.data != NULL:
+        free(message.data)
+        message.data = NULL
+        message.len = 0
 
 cdef class BinaryWriter:
     """Fast, type-safe binary serializer."""
@@ -55,11 +69,16 @@ cdef class BinaryWriter:
     cdef void _ensure_capacity(self, u32 needed):
         """Grow buffer if needed."""
         cdef u32 new_size
+        cdef unsigned char* new_buffer
         if self._pos + needed > self._capacity:
             new_size = max(self._capacity * 2, self._pos + needed)
-            self._buffer = <unsigned char*>realloc(self._buffer, new_size * sizeof(unsigned char))
-            if not self._buffer:
+            new_buffer = <unsigned char*>realloc(
+                self._buffer,
+                new_size * sizeof(unsigned char),
+            )
+            if new_buffer == NULL:
                 raise MemoryError("Failed to reallocate memory for BinaryWriter")
+            self._buffer = new_buffer
             self._capacity = new_size
     
     cdef inline u32 length(self) nogil:
