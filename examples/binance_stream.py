@@ -293,7 +293,7 @@ class BinanceDataProcessor:
             OrderbookLevel(price=price, size=size, norders=1, ticks=-1, lots=-1)
             for price, size in snapshot_data.asks
         ]
-        self.orderbook.consume_snapshot(bids=bids, asks=asks)
+        self.orderbook.consume_snapshot(asks=asks, bids=bids)
         self.snapshot_received = True
         self.logger.info(
             f"Orderbook snapshot received: {len(bids)} bids, {len(asks)} asks"
@@ -312,7 +312,7 @@ class BinanceDataProcessor:
             OrderbookLevel(price=price, size=size, norders=1, ticks=-1, lots=-1)
             for price, size in delta_data.asks
         ]
-        self.orderbook.consume_deltas(bids=bids, asks=asks)
+        self.orderbook.consume_deltas(asks=asks, bids=bids)
 
     def _handle_bbo(self, bbo_data: BBOUpdate) -> None:
         """Handle BBO update."""
@@ -334,7 +334,7 @@ class BinanceDataProcessor:
             ticks=-1,
             lots=-1,
         )
-        self.orderbook.consume_bbo(bid=bid_level, ask=ask_level)
+        self.orderbook.consume_bbo(ask=ask_level, bid=bid_level)
 
         # Get mid price and log it
         mid_price = self.orderbook.get_mid_price()

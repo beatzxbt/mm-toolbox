@@ -307,8 +307,7 @@ class StandardOrderbookBenchmark:
 
         start = time.perf_counter_ns()
         try:
-            # CRITICAL: Standard uses (bids, asks) order, not (asks, bids)!
-            self.orderbook.consume_snapshot(bids, asks)
+            self.orderbook.consume_snapshot(asks, bids)
         except Exception as e:
             raise RuntimeError(
                 f"Failed to process snapshot: {e}. "
@@ -343,8 +342,7 @@ class StandardOrderbookBenchmark:
 
         start = time.perf_counter_ns()
         try:
-            # CRITICAL: Standard uses (bids, asks) order, not (asks, bids)!
-            self.orderbook.consume_deltas(bids, asks)
+            self.orderbook.consume_deltas(asks, bids)
         except Exception as e:
             raise RuntimeError(
                 f"Failed to process delta: {e}. "
@@ -388,8 +386,7 @@ class StandardOrderbookBenchmark:
         num_levels = 2
 
         start = time.perf_counter_ns()
-        # CRITICAL: Standard uses consume_bbo(bid, ask), not consume_bbo(ask, bid)!
-        self.orderbook.consume_bbo(bid_level, ask_level)
+        self.orderbook.consume_bbo(ask_level, bid_level)
         elapsed = time.perf_counter_ns() - start
 
         return OperationMetric(
