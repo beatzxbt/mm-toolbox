@@ -31,7 +31,11 @@ jobs:
     - name: Install dependencies
       run: |
         uv sync --all-groups
-    
+
+    - name: Build Cython extensions
+      run: |
+        make build-lib
+
     - name: Run tests
       run: |
         make test-all
@@ -46,10 +50,6 @@ jobs:
 
         # Type check
         make typecheck
-    
-    - name: Build Cython extensions
-      run: |
-        make build-all
 
   build-wheel:
     name: Build wheel

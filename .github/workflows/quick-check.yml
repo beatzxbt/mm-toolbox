@@ -42,4 +42,4 @@ jobs:
     
     - name: Test build
       run: |
-        make build-all
+        make build-lib
