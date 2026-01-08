@@ -1,6 +1,6 @@
 .PHONY: help format typecheck fix test-py test-c test-all sync build-lib build-test build-all \
         remove-build-lib remove-build-tests rebuild-test remove-build-all rebuild-all wheel remove-wheel sdist remove-sdist \
-        check-dist upload-test upload-prod %
+        check-dist upload-test upload-prod clean-caches %
 
 .DEFAULT_GOAL := help
 
@@ -39,9 +39,14 @@ build-test: ## Build all test extensions (C unit tests + Cython)
 build-all: ## Build all Cython extensions
 	$(MAKE) build-lib build-test
 
+clean-caches: ## Remove pytest and ruff caches
+	find . -type d -name "__pycache__" -delete
+	rm -rf .pytest_cache/ .ruff_cache/
+
 remove-build-lib: ## Remove build artifacts and compiled extensions
 	rm -rf build/ *.egg-info/
 	find ./src -name "*.so" -delete
+	$(MAKE) clean-caches
 
 remove-build-tests: ## Remove C test build artifacts
 	rm -rf build/ *.egg-info/
@@ -49,6 +54,7 @@ remove-build-tests: ## Remove C test build artifacts
 	cd tests && uv run python setup.py clean --all || true
 	find ./tests/orderbook/advanced -path "*/cython/*.so" -delete
 	find ./tests/orderbook/advanced -path "*/cython/*.c" -type f -delete
+	$(MAKE) clean-caches
 
 remove-build-all: ## Remove build artifacts and compiled extensions
 	$(MAKE) remove-build-lib remove-build-tests
@@ -106,7 +112,7 @@ help: ## Display this help message
 	@grep -E '^(test-py|test-c|test-all):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 	@echo 'Build:'
-	@grep -E '^(build-lib|build-test|build-all|remove-build-lib|remove-build-tests|rebuild-test|remove-build-all|rebuild-all):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(build-lib|build-test|build-all|remove-build-lib|remove-build-tests|rebuild-test|remove-build-all|rebuild-all|clean-caches):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 	@echo 'Distribution:'
 	@grep -E '^(wheel|remove-wheel|sdist|remove-sdist|check-dist):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
