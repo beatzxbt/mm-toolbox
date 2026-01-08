@@ -1,6 +1,6 @@
 [project]
 name = "mm-toolbox"
-version = "1.0.0"
+version = "1.0.0b0"
 description = "High-performance Python tools for market making systems"
 readme = "README.md"
 authors = [
@@ -10,7 +10,7 @@ requires-python = ">=3.12,<3.14"
 license = "MIT"
 keywords = ["market making", "hft", "high-frequency trading", "trading", "cython", "performance"]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Financial and Insurance Industry",
     "Natural Language :: English",

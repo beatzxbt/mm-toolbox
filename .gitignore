@@ -4,6 +4,8 @@
 .cursor
 .DS_Store
 .ipc/
+AGENTS.md
+CLAUDE.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
