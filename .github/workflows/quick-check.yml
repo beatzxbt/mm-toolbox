@@ -33,13 +33,13 @@ jobs:
       run: |
         # Format check (but don't fix)
         uv run ruff format --check .
-        
+
         # Lint check (but don't fix)
-        make lint-check
-        
+        uv run ruff check .
+
         # Type check
-        uv run pyright
+        make typecheck
     
     - name: Test build
       run: |
-        make build
+        make build-all

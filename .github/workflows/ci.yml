@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, 'v[0-9]+.[0-9]+*' ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, 'v[0-9]+.[0-9]+*' ]
 
 jobs:
   test:
@@ -34,22 +34,22 @@ jobs:
     
     - name: Run tests
       run: |
-        make test
+        make test-all
     
     - name: Run code quality checks
       run: |
         # Format check (but don't fix)
         uv run ruff format --check .
-        
+
         # Lint check (but don't fix)
-        make lint-check
-        
+        uv run ruff check .
+
         # Type check
-        uv run pyright
+        make typecheck
     
     - name: Build Cython extensions
       run: |
-        make build
+        make build-all
 
   build-wheel:
     name: Build wheel
