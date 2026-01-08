@@ -37,6 +37,18 @@ MM Toolbox is available on PyPI and can be installed using pip:
 pip install mm_toolbox
 ```
 
+To try the beta without replacing a stable install, use a separate virtual environment and install the pre-release:
+```bash
+python -m venv mm_toolbox_beta
+source mm_toolbox_beta/bin/activate
+pip install mm-toolbox==1.0.0b0
+```
+
+To always pull the latest pre-release:
+```bash
+pip install --pre mm-toolbox
+```
+
 To install directly from the source, clone the repository and install the dependencies:
 ```bash
 git clone https://github.com/beatzxbt/mm-toolbox.git
