@@ -166,6 +166,7 @@ cdef class _SharedBytesRing:
             void* base
             size_t total_len
             u64 capacity
+            u64 mask
         fd = open(path_b, O_RDWR, 0o600)
         if fd < 0:
             raise OSError(errno, "open failed for shared ring")
@@ -179,6 +180,11 @@ cdef class _SharedBytesRing:
             close(fd)
             raise RuntimeError("Shared ring header mismatch")
         capacity = self._hdr.capacity
+        mask = self._hdr.mask
+        if capacity == 0 or (capacity & (capacity - 1)) != 0 or mask != capacity - 1:
+            munmap(base, _HEADER_SIZE)
+            close(fd)
+            raise RuntimeError("Shared ring header invalid")
         munmap(base, _HEADER_SIZE)
 
         total_len = _HEADER_SIZE + <size_t>capacity
@@ -423,6 +429,8 @@ cdef class SharedBytesRingBufferProducer(_SharedBytesRing):
             atomic_add(&self._hdr.msg_count, <u64>n)
             atomic_store_release(&self._hdr.latest_insert_time_ns, now_ns)
         self._cached_write = write_pos
+        self._prod_ctx.cached_read = self._cached_read
+        self._prod_ctx.cached_write = write_pos
         return True
 
     cpdef bint insert_packed(self, list[bytes] items):
