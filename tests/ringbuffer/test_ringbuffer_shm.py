@@ -1,6 +1,14 @@
+"""Shared-memory ring buffer tests.
+
+Exercises single- and multi-process behavior, batch semantics, and header validation.
+"""
+
+from __future__ import annotations
+
+import multiprocessing as mp
 import os
 import random
-import multiprocessing as mp
+import struct
 from pathlib import Path
 
 import pytest
@@ -18,10 +26,25 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture()
 def shm_path(tmp_path: Path) -> str:
+    """Build a temporary backing file path for SHM ringbuffer tests.
+
+    Args:
+        tmp_path: pytest-provided temporary directory path.
+
+    Returns:
+        String path to the backing file.
+    """
     return str(tmp_path / "shm_ring.bin")
 
 
 def _consumer_proc(path: str, n: int, q: mp.Queue) -> None:
+    """Consume a fixed number of messages and return a checksum.
+
+    Args:
+        path: Filesystem path to the shared memory ringbuffer file.
+        n: Number of messages to consume.
+        q: Multiprocessing queue used to return results.
+    """
     cons = SharedBytesRingBufferConsumer(path, spin_wait=4096)
     try:
         got: list[bytes] = []
@@ -37,6 +60,11 @@ class TestSharedBytesRingBuffer:
     """Tests for SharedBytesRingBuffer (shm) implementation."""
 
     def test_basic_send_receive(self, shm_path: str) -> None:
+        """Send one payload and confirm it round-trips correctly.
+
+        Args:
+            shm_path: Temporary file path for the shared memory ringbuffer.
+        """
         prod = SharedBytesRingBufferProducer(
             shm_path, 1 << 16, create=True, unlink_on_close=True
         )
@@ -52,6 +80,11 @@ class TestSharedBytesRingBuffer:
             assert not os.path.exists(shm_path)
 
     def test_batch_and_drain(self, shm_path: str) -> None:
+        """Insert a batch and drain in order.
+
+        Args:
+            shm_path: Temporary file path for the shared memory ringbuffer.
+        """
         prod = SharedBytesRingBufferProducer(shm_path, 1 << 15, create=True)
         cons = SharedBytesRingBufferConsumer(shm_path)
         try:
@@ -64,6 +97,11 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_insert_overwrites_oldest(self, shm_path: str) -> None:
+        """Ensure overwrites drop oldest items when capacity is exceeded.
+
+        Args:
+            shm_path: Temporary file path for the shared memory ringbuffer.
+        """
         capacity = 1 << 12
         prod = SharedBytesRingBufferProducer(shm_path, capacity, create=True)
         cons = SharedBytesRingBufferConsumer(shm_path)
@@ -80,6 +118,11 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_packed_roundtrip(self, shm_path: str) -> None:
+        """Verify packed messages unpack correctly.
+
+        Args:
+            shm_path: Temporary file path for the shared memory ringbuffer.
+        """
         prod = SharedBytesRingBufferProducer(shm_path, 1 << 14, create=True)
         cons = SharedBytesRingBufferConsumer(shm_path)
         try:
@@ -92,6 +135,11 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_oversize_rejected(self, shm_path: str) -> None:
+        """Reject inserts that exceed capacity.
+
+        Args:
+            shm_path: Temporary file path for the shared memory ringbuffer.
+        """
         capacity = 1 << 12
         prod = SharedBytesRingBufferProducer(shm_path, capacity, create=True)
         cons = SharedBytesRingBufferConsumer(shm_path)
@@ -102,7 +150,50 @@ class TestSharedBytesRingBuffer:
             cons.close()
             prod.close()
 
+    def test_batch_then_single_insert_keeps_order(self, shm_path: str) -> None:
+        """Keep consistent ordering when a batch is followed by a single insert.
+
+        Args:
+            shm_path: Temporary file path for the shared memory ringbuffer.
+        """
+        prod = SharedBytesRingBufferProducer(shm_path, 1 << 14, create=True)
+        cons = SharedBytesRingBufferConsumer(shm_path)
+        try:
+            msgs = [f"m{i}".encode() for i in range(32)]
+            assert prod.insert_batch(msgs)
+            assert prod.insert(b"tail")
+            got = cons.consume_all()
+            assert got == msgs + [b"tail"]
+        finally:
+            cons.close()
+            prod.close()
+
+    def test_attach_rejects_invalid_header(self, shm_path: str) -> None:
+        """Reject attaching to a ringbuffer with a corrupted header.
+
+        Args:
+            shm_path: Temporary file path for the shared memory ringbuffer.
+        """
+        prod = SharedBytesRingBufferProducer(
+            shm_path, 1 << 12, create=True, unlink_on_close=False
+        )
+        prod.close()
+        try:
+            with open(shm_path, "r+b") as handle:
+                handle.seek(16)  # mask offset
+                handle.write(struct.pack("Q", 123))
+            with pytest.raises(RuntimeError):
+                SharedBytesRingBufferConsumer(shm_path)
+        finally:
+            if os.path.exists(shm_path):
+                os.unlink(shm_path)
+
     def test_multiprocess_roundtrip(self, shm_path: str) -> None:
+        """Send messages from producer and consume in a separate process.
+
+        Args:
+            shm_path: Temporary file path for the shared memory ringbuffer.
+        """
         n = 2000
         prod = SharedBytesRingBufferProducer(shm_path, 1 << 18, create=True)
         try:
