@@ -371,6 +371,8 @@ cdef class CoreAdvancedOrderbook:
             ask_level = &asks.levels[i]
             if ask_level.ticks == best_ask_ticks:
                 self._process_matching_ask_ticks(ask_level)
+                if asks_data.num_levels > 0:
+                    best_ask_ticks = asks_data.levels[0].ticks
                 i += 1
 
         ask_count = asks_data.num_levels
@@ -396,7 +398,7 @@ cdef class CoreAdvancedOrderbook:
         else:
             worst_ask_ticks = asks_data.levels[ask_count - 1].ticks
 
-            ask_idx = 1
+            ask_idx = 0
             while i < asks.num_levels:
                 ask_level = &asks.levels[i]
                 ask_count = asks_data.num_levels
@@ -464,6 +466,8 @@ cdef class CoreAdvancedOrderbook:
             bid_level = &bids.levels[i]
             if bid_level.ticks == best_bid_ticks:
                 self._process_matching_bid_ticks(bid_level)
+                if bids_data.num_levels > 0:
+                    best_bid_ticks = bids_data.levels[0].ticks
                 i += 1
             else:
                 break
@@ -491,7 +495,7 @@ cdef class CoreAdvancedOrderbook:
         if bid_count > 0:
             worst_bid_ticks = bids_data.levels[bid_count - 1].ticks
 
-        cdef u64 bid_idx = 1
+        cdef u64 bid_idx = 0
         while i < bids.num_levels:
             bid_level = &bids.levels[i]
             bid_count = bids_data.num_levels

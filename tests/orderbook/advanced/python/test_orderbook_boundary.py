@@ -227,6 +227,65 @@ class TestEmptyOrderbookBoundaries:
 
 
 @pytest.mark.boundary
+class TestDeltaBatchTopLevelRemovals:
+    """Boundary coverage for delta batches that remove multiple top levels."""
+
+    def test_ask_batch_removals_do_not_duplicate_levels(self):
+        """Ensure ask-side removals in one delta do not duplicate prices.
+
+        Returns:
+            None
+        """
+        book = _mk_book(num_levels=64)
+
+        asks, _ = _make_levels(
+            [100.00, 100.01, 100.02], [1.0, 1.0, 1.0], with_precision=True
+        )
+        bids, _ = _make_levels(
+            [99.99, 99.98, 99.97], [1.0, 1.0, 1.0], with_precision=True
+        )
+        book.consume_snapshot(asks, bids)
+
+        delta_asks = OrderbookLevels.from_list_with_ticks_and_lots(
+            [100.00, 100.01, 100.02], [0.0, 0.0, 2.0], [0, 0, 1], TICK_SIZE, LOT_SIZE
+        )
+        book.consume_deltas(delta_asks, _empty_bid_levels())
+
+        asks_arr = book.get_asks_numpy()
+        assert len(asks_arr) == 1
+        assert asks_arr["price"][0] == pytest.approx(100.02)
+        assert asks_arr["size"][0] == pytest.approx(2.0)
+        assert len(asks_arr["ticks"]) == len(set(asks_arr["ticks"]))
+
+    def test_bid_batch_removals_do_not_duplicate_levels(self):
+        """Ensure bid-side removals in one delta do not duplicate prices.
+
+        Returns:
+            None
+        """
+        book = _mk_book(num_levels=64)
+
+        asks, _ = _make_levels(
+            [100.01, 100.02, 100.03], [1.0, 1.0, 1.0], with_precision=True
+        )
+        bids, _ = _make_levels(
+            [99.99, 99.98, 99.97], [1.0, 1.0, 1.0], with_precision=True
+        )
+        book.consume_snapshot(asks, bids)
+
+        delta_bids = OrderbookLevels.from_list_with_ticks_and_lots(
+            [99.99, 99.98, 99.97], [0.0, 0.0, 2.0], [0, 0, 1], TICK_SIZE, LOT_SIZE
+        )
+        book.consume_deltas(_empty_levels(), delta_bids)
+
+        bids_arr = book.get_bids_numpy()
+        assert len(bids_arr) == 1
+        assert bids_arr["price"][0] == pytest.approx(99.97)
+        assert bids_arr["size"][0] == pytest.approx(2.0)
+        assert len(bids_arr["ticks"]) == len(set(bids_arr["ticks"]))
+
+
+@pytest.mark.boundary
 class TestMaxCapacityBoundaries:
     """Test max capacity edge cases and overflow protection."""
 
