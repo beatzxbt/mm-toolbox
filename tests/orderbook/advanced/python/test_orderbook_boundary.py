@@ -32,7 +32,7 @@ class TestEmptyOrderbookBoundaries:
 
     def test_empty_orderbook_initialization(self):
         """Verify that num_levels<16 raises ValueError."""
-        with pytest.raises(ValueError, match="expected >=64"):
+        with pytest.raises(ValueError, match="expected >=16"):
             AdvancedOrderbook(
                 tick_size=TICK_SIZE,
                 lot_size=LOT_SIZE,

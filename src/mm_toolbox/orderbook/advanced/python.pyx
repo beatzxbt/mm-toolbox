@@ -43,7 +43,7 @@ cdef class PyAdvancedOrderbook:
         Args:
             tick_size: Minimum price increment (must be > 0)
             lot_size: Minimum size increment (must be > 0)
-            num_levels: Maximum number of levels per side (must be > 0)
+            num_levels: Maximum number of levels per side (must be >= 16)
             delta_sortedness: Expected sort order for delta updates (default: UNKNOWN)
             snapshot_sortedness: Expected sort order for snapshot updates (default: UNKNOWN)
         """
