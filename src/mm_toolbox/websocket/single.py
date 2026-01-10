@@ -83,16 +83,22 @@ class WsSingle:
                 self._ws_conn = conn
                 try:
                     async for msg in self._ringbuffer.aconsume_iterable():
-                        self._on_message(msg)
-                except Exception:
-                    pass  # Ignore message processing errors
+                        try:
+                            self._on_message(msg)
+                        except Exception as exc:
+                            print(f"Error in on_message callback: {exc}")
+                except Exception as exc:
+                    print(f"Error consuming WebSocket messages: {exc}")
         else:
             self._ws_conn = await WsConnection.new(self._ringbuffer, self._config)
             try:
                 async for msg in self._ringbuffer.aconsume_iterable():
-                    self._on_message(msg)
-            except Exception:
-                pass  # Ignore message processing errors
+                    try:
+                        self._on_message(msg)
+                    except Exception as exc:
+                        print(f"Error in on_message callback: {exc}")
+            except Exception as exc:
+                print(f"Error consuming WebSocket messages: {exc}")
 
     def close(self) -> None:
         """Closes the WebSocket connection gracefully."""
