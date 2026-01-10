@@ -45,8 +45,8 @@ cdef class CoreAdvancedOrderbook:
             raise ValueError(f"Invalid tick_size; expected >0 but got {tick_size}")
         if lot_size <= 0.0:
             raise ValueError(f"Invalid lot_size; expected >0 but got {lot_size}")
-        if num_levels < 64:
-            raise ValueError(f"Invalid num_levels; expected >=64 but got {num_levels}")
+        if num_levels < 16:
+            raise ValueError(f"Invalid num_levels; expected >=16 but got {num_levels}")
         self._tick_size = tick_size
         self._lot_size = lot_size
         self._tick_size_recip = 1.0 / tick_size
@@ -402,6 +402,8 @@ cdef class CoreAdvancedOrderbook:
             while i < asks.num_levels:
                 ask_level = &asks.levels[i]
                 ask_count = asks_data.num_levels
+                if ask_idx > ask_count:
+                    ask_idx = ask_count
                 if ask_level.ticks > worst_ask_ticks and ask_count == asks_data.max_levels:
                     break
                 while ask_idx < ask_count and asks_data.levels[ask_idx].ticks < ask_level.ticks:
@@ -417,6 +419,9 @@ cdef class CoreAdvancedOrderbook:
                         target.norders = ask_level.norders
                 else:
                     if ask_level.lots != 0:
+                        if ask_idx >= ask_count and ask_count == asks_data.max_levels:
+                            i += 1
+                            continue
                         self._asks.roll_right(ask_idx)
                         self._asks.increment_count()
                         target = &asks_data.levels[ask_idx]
@@ -499,6 +504,8 @@ cdef class CoreAdvancedOrderbook:
         while i < bids.num_levels:
             bid_level = &bids.levels[i]
             bid_count = bids_data.num_levels
+            if bid_idx > bid_count:
+                bid_idx = bid_count
             if bid_level.ticks < worst_bid_ticks and bid_count == bids_data.max_levels:
                 break
             while bid_idx < bid_count and bids_data.levels[bid_idx].ticks > bid_level.ticks:
@@ -514,6 +521,9 @@ cdef class CoreAdvancedOrderbook:
                     target.norders = bid_level.norders
             else:
                 if bid_level.lots != 0:
+                    if bid_idx >= bid_count and bid_count == bids_data.max_levels:
+                        i += 1
+                        continue
                     self._bids.roll_right(bid_idx)
                     self._bids.increment_count()
                     target = &bids_data.levels[bid_idx]
