@@ -1,8 +1,16 @@
-"""Single WebSocket connection management."""
+"""Single WebSocket connection management.
+
+Provides:
+- WsSingle wrapper around WsConnection
+- async context manager usage for connect/close
+- async iteration and optional on_message callback handling
+"""
+
+from __future__ import annotations
 
 import inspect
 from collections.abc import Callable
-from typing import Self
+from typing import Self, get_type_hints
 
 import msgspec
 
@@ -43,10 +51,20 @@ class WsSingle:
         # Verify the signature of the on_message, must be a single bytes arg
         if on_message is not None:
             sig = inspect.signature(on_message)
-            if (
-                len(sig.parameters) != 1
-                or list(sig.parameters.values())[0].annotation is not bytes
-            ):
+            if len(sig.parameters) != 1:
+                raise ValueError(
+                    f"Invalid on_message signature; expected a single bytes "
+                    f"argument but got {sig}"
+                )
+            param = next(iter(sig.parameters.values()))
+            try:
+                type_hints = get_type_hints(on_message)
+            except Exception:
+                type_hints = {}
+            param_type = type_hints.get(param.name, param.annotation)
+            if param_type == "bytes":
+                param_type = bytes
+            if param_type is not bytes:
                 raise ValueError(
                     f"Invalid on_message signature; expected a single bytes "
                     f"argument but got {sig}"
@@ -76,9 +94,7 @@ class WsSingle:
     async def start(self) -> None:
         """Opens the WebSocket connection and sends any on_connect messages."""
         if self._config.auto_reconnect:
-            conn_iter = await WsConnection.new_with_reconnect(
-                self._ringbuffer, self._config
-            )
+            conn_iter = WsConnection.new_with_reconnect(self._ringbuffer, self._config)
             async for conn in conn_iter:
                 self._ws_conn = conn
                 try:
@@ -103,7 +119,10 @@ class WsSingle:
     def close(self) -> None:
         """Closes the WebSocket connection gracefully."""
         if self._ws_conn is not None:
-            self._ws_conn.close()
+            try:
+                self._ws_conn.close()
+            except Exception as exc:
+                print(f"Error closing WebSocket connection: {exc}")
 
     def get_config(self) -> WsConnectionConfig:
         """Retrieves the connection's configuration."""
@@ -119,7 +138,7 @@ class WsSingle:
         """Async context manager entry. Opens the connection."""
         if self._ws_conn is None:
             if self._config.auto_reconnect:
-                conn_iter = await WsConnection.new_with_reconnect(
+                conn_iter = WsConnection.new_with_reconnect(
                     self._ringbuffer, self._config
                 )
                 try:
