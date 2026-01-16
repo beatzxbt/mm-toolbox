@@ -31,17 +31,25 @@ class DiscordLogHandler(BaseLogHandler):
 
     async def push(self, buffer):
         try:
-            tasks = []
-
-            for log_msg in buffer:
-                tasks.append(
-                    self.http_session.post(
-                        url=self.url,
-                        headers=self.headers,
-                        data=self.json_encode({"content": log_msg}),
-                    )
-                )
-            await asyncio.gather(*tasks)
-
+            tasks = [self._post(log_msg) for log_msg in buffer]
         except Exception as e:
-            print(f"Failed to send message to Discord; {e}")
+            self._handle_exception(e, "push")
+            return
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for res in results:
+            if isinstance(res, Exception):
+                self._handle_exception(res, "push")
+
+    async def _post(self, log_msg: str) -> None:
+        """Send a single log message to Discord.
+
+        Args:
+            log_msg (str): Formatted log message content.
+
+        """
+        resp = await self.http_session.post(
+            url=self.url,
+            headers=self.headers,
+            data=self.json_encode({"content": log_msg}),
+        )
+        await resp.read()

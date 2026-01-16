@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import threading
 import contextlib
+import sys
+import threading
+import traceback
 from abc import ABC, abstractmethod
 from concurrent.futures import Future
 from typing import TYPE_CHECKING
@@ -69,6 +71,7 @@ class BaseLogHandler(ABC):
         self._loop_thread: threading.Thread | None = None
         self._primary_config: LoggerConfig | None = None
         self._futures: list[Future] = []
+        self._on_error: Callable[[BaseException, str], None] | None = None
 
     @property
     def encode_json(self):
@@ -124,6 +127,35 @@ class BaseLogHandler(ABC):
         """Add the primary config to the handler."""
         self._primary_config = config
 
+    def set_error_handler(
+        self, handler: "Callable[[BaseException, str], None] | None"
+    ) -> None:
+        """Set a handler-specific exception callback.
+
+        Args:
+            handler: Callable invoked with (exception, context). Use None to reset.
+        """
+        self._on_error = handler
+
+    def _handle_exception(self, exc: BaseException, context: str) -> None:
+        """Handle handler exceptions with optional custom callback.
+
+        Args:
+            exc: The exception raised by handler work.
+            context: Short label describing where the error occurred.
+
+        """
+        if self._on_error is not None:
+            try:
+                self._on_error(exc, context)
+                return
+            except Exception:
+                pass
+        sys.stderr.write(f"[{self.__class__.__name__}] {context}: {exc}\n")
+        sys.stderr.write(
+            "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        )
+
     def format_log(self, log: PyLog) -> str:
         """Format a log message to a string."""
         if self._primary_config:
@@ -150,9 +182,22 @@ class BaseLogHandler(ABC):
 
     def _track_future(self, fut: Future) -> None:
         self._futures.append(fut)
+        fut.add_done_callback(self._on_future_done)
         # Trim to avoid unbounded growth
         if len(self._futures) > 4096:
             self._futures = self._futures[-2048:]
+
+    def _on_future_done(self, fut: Future) -> None:
+        """Capture exceptions from background handler tasks.
+
+        Args:
+            fut: Future returned by run_coroutine_threadsafe.
+
+        """
+        with contextlib.suppress(Exception):
+            exc = fut.exception()
+            if exc is not None:
+                self._handle_exception(exc, "handler task")
 
     def close(self, timeout_s: float = 2.0) -> None:
         """Close HTTP session and stop the handler loop."""
@@ -161,8 +206,10 @@ class BaseLogHandler(ABC):
             remaining = max(0.0, timeout_s)
             per = min(0.25, remaining) if remaining > 0 else 0.0
             for fut in list(self._futures):
-                with contextlib.suppress(Exception):
+                try:
                     fut.result(timeout=per)
+                except Exception as exc:
+                    self._handle_exception(exc, "handler close")
         # Close session on the loop
         if (
             self._ev_loop

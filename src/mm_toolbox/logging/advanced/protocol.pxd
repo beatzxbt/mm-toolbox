@@ -21,6 +21,7 @@ cdef struct InternalMessage:
 cdef InternalMessage create_internal_message(MessageType type, u64 timestamp_ns, u32 len, unsigned char* data) noexcept nogil
 cdef bytes internal_message_to_bytes(InternalMessage message)
 cdef InternalMessage bytes_to_internal_message(bytes message)
+cdef void free_internal_message_data(unsigned char* data) noexcept nogil
 
 cdef class BinaryWriter:
     cdef:

@@ -199,6 +199,7 @@ class TestTelegramLogHandler:
         handler = TelegramLogHandler("token", "chat")
         config = LoggerConfig(str_format="%(message)s")
         handler.add_primary_config(config)
+        mock_post.return_value.read = AsyncMock()
 
         logs = [
             PyLog(1, b"name", PyLogLevel.INFO, b"msg1"),
@@ -206,7 +207,10 @@ class TestTelegramLogHandler:
         ]
         handler.push(logs)
 
-        await asyncio.sleep(0.1)
+        for _ in range(50):
+            if mock_post.call_count >= 2:
+                break
+            await asyncio.sleep(0.01)
 
         assert mock_post.call_count == 2
         calls = mock_post.call_args_list

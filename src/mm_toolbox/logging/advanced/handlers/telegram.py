@@ -31,11 +31,12 @@ class TelegramLogHandler(BaseLogHandler):
         await self._limiter.acquire(1.0)
         payload = dict(self.partial_payload)
         payload["text"] = text
-        await self._http_session.post(  # type: ignore[union-attr]
+        resp = await self._http_session.post(  # type: ignore[union-attr]
             self.url,
             headers=self.headers,
             data=self.encode_json(payload),
         )
+        await resp.read()
 
     @staticmethod
     def _chunk(text: str, limit: int) -> list[str]:
@@ -58,4 +59,4 @@ class TelegramLogHandler(BaseLogHandler):
                     self._track_future(fut)
 
         except Exception as e:
-            print(f"Failed to send message to Telegram; {e}")
+            self._handle_exception(e, "push")

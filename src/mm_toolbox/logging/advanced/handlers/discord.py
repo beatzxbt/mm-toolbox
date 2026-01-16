@@ -31,11 +31,12 @@ class DiscordLogHandler(BaseLogHandler):
     async def _post(self, content: str):
         await self._ensure_session()
         await self._limiter.acquire(1.0)
-        await self._http_session.post(  # type: ignore[union-attr]
+        resp = await self._http_session.post(  # type: ignore[union-attr]
             self.url,
             headers=self.headers,
             data=self.encode_json({"content": content}),
         )
+        await resp.read()
 
     @staticmethod
     def _chunk(text: str, limit: int) -> list[str]:
@@ -58,4 +59,4 @@ class DiscordLogHandler(BaseLogHandler):
                 self._track_future(fut)
 
         except Exception as e:
-            print(f"Failed to send message to Discord; {str(e)}")
+            self._handle_exception(e, "push")

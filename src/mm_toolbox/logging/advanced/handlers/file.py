@@ -41,14 +41,15 @@ class FileLogHandler(BaseLogHandler):
                 with open(self.filepath, "w"):
                     pass
             except Exception as e:
-                print(f"Failed to create or truncate file; {e}")
+                self._handle_exception(e, "init")
 
     def push(self, logs):
         try:
             if not os.path.exists(self.filepath):
                 if not self.create:
-                    print(
-                        "Failed to write logs to file; target file does not exist and create=False"
+                    self._handle_exception(
+                        RuntimeError("Target file does not exist and create=False"),
+                        "push",
                     )
                     return
                 # If create=True and file missing, create parent dirs and file
@@ -63,4 +64,4 @@ class FileLogHandler(BaseLogHandler):
                 file.flush()
 
         except Exception as e:
-            print(f"Failed to write logs to file; {e}")
+            self._handle_exception(e, "push")

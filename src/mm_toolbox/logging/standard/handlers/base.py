@@ -1,7 +1,10 @@
 """Base class for standard logging handlers."""
 
 import asyncio
+import sys
+import traceback
 from abc import ABC, abstractmethod
+from typing import Callable
 
 import aiohttp
 import msgspec
@@ -20,6 +23,7 @@ class BaseLogHandler(ABC):
         self._http_session = None
         self._ev_loop = None
         self._primary_config = None
+        self._on_error: Callable[[BaseException, str], None] | None = None
 
     @property
     def json_encode(self):
@@ -55,6 +59,35 @@ class BaseLogHandler(ABC):
     def add_primary_config(self, config: LoggerConfig):
         """Add the primary configuration to the handler."""
         self._primary_config = config
+
+    def set_error_handler(
+        self, handler: Callable[[BaseException, str], None] | None
+    ) -> None:
+        """Set a handler-specific exception callback.
+
+        Args:
+            handler: Callable invoked with (exception, context). Use None to reset.
+        """
+        self._on_error = handler
+
+    def _handle_exception(self, exc: BaseException, context: str) -> None:
+        """Handle handler exceptions with optional custom callback.
+
+        Args:
+            exc: The exception raised by handler work.
+            context: Short label describing where the error occurred.
+
+        """
+        if self._on_error is not None:
+            try:
+                self._on_error(exc, context)
+                return
+            except Exception:
+                pass
+        sys.stderr.write(f"[{self.__class__.__name__}] {context}: {exc}\n")
+        sys.stderr.write(
+            "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        )
 
     def __del__(self):
         """Clean up resources when the handler is garbage collected."""
