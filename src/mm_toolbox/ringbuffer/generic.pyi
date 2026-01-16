@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Coroutine, Iterator
-from typing import Any, TypeVar
+from typing import Any, Generic, TypeVar
 
 T = TypeVar("T")
 
-class GenericRingBuffer[T]:
+class GenericRingBuffer(Generic[T]):
     def __init__(self, max_capacity: int, disable_async: bool = False) -> None: ...
     def raw(self, copy: bool = True) -> list[T]: ...
     def unwrapped(self) -> list[T]: ...
