@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterable
+from collections.abc import AsyncIterator
 from enum import IntEnum
 from typing import Any, Self
 
@@ -89,8 +89,8 @@ class WsConnection(WSListener):
         """Opens a Websocket connection to the specified URL."""
         ...
     @classmethod
-    async def new_with_reconnect(
+    def new_with_reconnect(
         cls, ringbuffer: BytesRingBuffer, config: WsConnectionConfig
-    ) -> AsyncIterable[Self]:
+    ) -> AsyncIterator[Self]:
         """Opens a Websocket connection to the specified URL with reconnect."""
         ...

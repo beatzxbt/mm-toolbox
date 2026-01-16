@@ -33,7 +33,8 @@ cdef class WsConnection(WSListener):
         int             _reconnect_attempts
         bint            _should_stop
 
-        object          _timed_operations_thread
+        public object   _timed_operations_thread
+        object          _loop
 
     cpdef void          _timed_operations(self)
     cpdef void          set_on_connect(self, list[bytes] on_connect)

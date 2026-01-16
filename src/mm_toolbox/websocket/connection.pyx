@@ -221,6 +221,30 @@ cdef class WsConnection(WSListener):
             bint       frame_unfinished = frame.fin == 0
             int        frame_size = len(frame_bytes)
 
+        if frame_msg_type == WSMsgType.PONG:
+            self._tracker_pong_recv_time_ms = time_ms()
+            return
+
+        if frame_msg_type == WSMsgType.PING:
+            try:
+                self.send_pong(frame_bytes)
+            except Exception:
+                pass  # Ignore pong send errors
+            return
+
+        if frame_msg_type == WSMsgType.CLOSE:
+            self._should_stop = True
+            self._state.state = ConnectionState.DISCONNECTED
+            if self._transport is not None:
+                try:
+                    self._transport.disconnect(graceful=True)
+                except Exception:
+                    pass
+            self._transport = None
+            self._unfin_msg_buffer = b""
+            self._unfin_msg_size = 0
+            return
+
         # Memory safety: prevent unbounded buffer growth
         if self._unfin_msg_size + frame_size > 1048576:  # 1MB limit
             self._unfin_msg_buffer = b""
@@ -233,22 +257,15 @@ cdef class WsConnection(WSListener):
         if frame_unfinished:
             return
 
-        if frame_msg_type == WSMsgType.TEXT:
+        if frame_msg_type in (WSMsgType.TEXT, WSMsgType.CONTINUATION, WSMsgType.BINARY):
             self._ringbuffer.insert(self._unfin_msg_buffer)
             self._unfin_msg_buffer = b""
             self._unfin_msg_size = 0
             self._seq_id += 1
 
-        elif frame_msg_type == WSMsgType.PONG:
-            self._tracker_pong_recv_time_ms = time_ms()
-            return
-
-        elif frame_msg_type == WSMsgType.PING:
-            try:
-                self.send_pong(frame_bytes)
-            except Exception:
-                pass  # Ignore pong send errors
-            return
+        else:
+            self._unfin_msg_buffer = b""
+            self._unfin_msg_size = 0
 
     cpdef on_ws_disconnected(self, WSTransport transport):
         """Called when the Websocket connection is closed."""
