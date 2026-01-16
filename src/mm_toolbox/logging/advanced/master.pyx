@@ -137,10 +137,7 @@ cdef class MasterLogger:
                     for message in self._transport.consume_all():
                         decoded_logs = self._decode_worker_message(message)
                         for handler in self._log_handlers:
-                            try:
-                                handler.push(decoded_logs)
-                            except Exception as e:
-                                handler._handle_exception(e, "push")  # type: ignore[attr-defined]
+                            handler.push(decoded_logs)
                 except Exception as e:
                     if self._is_running:
                         self.error(f"Error consuming messages: {e}")
@@ -152,10 +149,7 @@ cdef class MasterLogger:
             for message in self._transport.consume_all():
                 decoded_logs = self._decode_worker_message(message)
                 for handler in self._log_handlers:
-                    try:
-                        handler.push(decoded_logs)
-                    except Exception as e:
-                        handler._handle_exception(e, "push")  # type: ignore[attr-defined]
+                    handler.push(decoded_logs)
         finally:
             if self._transport is not None:
                 self._transport.stop()

@@ -3,6 +3,7 @@
 import os
 
 from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
+from mm_toolbox.logging.advanced.pylog import PyLog
 
 
 class FileLogHandler(BaseLogHandler):
@@ -43,7 +44,12 @@ class FileLogHandler(BaseLogHandler):
             except Exception as e:
                 self._handle_exception(e, "init")
 
-    def push(self, logs):
+    def push(self, logs: list[PyLog]) -> None:
+        """Append a batch of log messages to disk.
+
+        Args:
+            logs (list[PyLog]): Batch of log entries.
+        """
         try:
             if not os.path.exists(self.filepath):
                 if not self.create:
