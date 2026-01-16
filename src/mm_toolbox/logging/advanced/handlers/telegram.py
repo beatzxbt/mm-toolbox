@@ -1,6 +1,7 @@
 """Telegram bot log handler for advanced logging."""
 
 from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler, _RateLimiter
+from mm_toolbox.logging.advanced.pylog import PyLog
 
 
 class TelegramLogHandler(BaseLogHandler):
@@ -27,18 +28,33 @@ class TelegramLogHandler(BaseLogHandler):
         self._limiter = _RateLimiter(rate_per_sec=1.0, burst=20)
 
     async def _post(self, text: str) -> None:
+        """Send a single log message to Telegram.
+
+        Args:
+            text (str): Message content to send.
+        """
         await self._ensure_session()
-        await self._limiter.acquire(1.0)
+        await self._limiter.acquire(1)
         payload = dict(self.partial_payload)
         payload["text"] = text
-        await self._http_session.post(  # type: ignore[union-attr]
+        resp = await self._http_session.post(  # type: ignore[union-attr]
             self.url,
             headers=self.headers,
             data=self.encode_json(payload),
         )
+        await resp.read()
 
     @staticmethod
     def _chunk(text: str, limit: int) -> list[str]:
+        """Split a message into chunks under a character limit.
+
+        Args:
+            text (str): Full message text.
+            limit (int): Maximum characters per chunk.
+
+        Returns:
+            list[str]: Chunked message parts.
+        """
         if len(text) <= limit:
             return [text]
         parts: list[str] = []
@@ -49,7 +65,12 @@ class TelegramLogHandler(BaseLogHandler):
             start = end
         return parts
 
-    def push(self, logs):
+    def push(self, logs: list[PyLog]) -> None:
+        """Send a batch of log messages to Telegram.
+
+        Args:
+            logs (list[PyLog]): Batch of log entries.
+        """
         try:
             # Telegram message limit ~4096 chars
             for log in logs:
@@ -58,4 +79,4 @@ class TelegramLogHandler(BaseLogHandler):
                     self._track_future(fut)
 
         except Exception as e:
-            print(f"Failed to send message to Telegram; {e}")
+            self._handle_exception(e, "push")

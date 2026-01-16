@@ -31,13 +31,39 @@ cdef bytes internal_message_to_bytes(InternalMessage message):
     return writer.finalize()
 
 cdef InternalMessage bytes_to_internal_message(bytes message):
+    """Parse bytes into an InternalMessage with owned data.
+
+    Args:
+        message (bytes): Serialized message payload.
+
+    Returns:
+        InternalMessage: Parsed message with heap-owned data.
+
+    """
     cdef:
         BinaryReader    reader = BinaryReader(message)
         MessageType     msg_type = <MessageType>reader.read_u8()
         u64             timestamp_ns = reader.read_u64()
         u32             data_len = reader.read_u32()
-        unsigned char*  data = reader.read_chars(data_len)
+        unsigned char*  data = NULL
+        unsigned char*  source = NULL
+    if data_len > 0:
+        source = reader.read_chars(data_len)
+        data = <unsigned char*>malloc(data_len * sizeof(unsigned char))
+        if not data:
+            raise MemoryError("Failed to allocate memory for InternalMessage data")
+        memcpy(data, source, data_len)
     return create_internal_message(msg_type, timestamp_ns, data_len, data)
+
+cdef void free_internal_message_data(unsigned char* data) noexcept nogil:
+    """Release heap memory allocated for InternalMessage.data.
+
+    Args:
+        data (unsigned char*): Data pointer to free.
+
+    """
+    if data != NULL:
+        free(data)
 
 cdef class BinaryWriter:
     """Fast, type-safe binary serializer."""
@@ -55,11 +81,15 @@ cdef class BinaryWriter:
     cdef void _ensure_capacity(self, u32 needed):
         """Grow buffer if needed."""
         cdef u32 new_size
+        cdef unsigned char* new_buffer
         if self._pos + needed > self._capacity:
             new_size = max(self._capacity * 2, self._pos + needed)
-            self._buffer = <unsigned char*>realloc(self._buffer, new_size * sizeof(unsigned char))
-            if not self._buffer:
+            new_buffer = <unsigned char*>realloc(
+                self._buffer, new_size * sizeof(unsigned char)
+            )
+            if not new_buffer:
                 raise MemoryError("Failed to reallocate memory for BinaryWriter")
+            self._buffer = new_buffer
             self._capacity = new_size
     
     cdef inline u32 length(self) nogil:

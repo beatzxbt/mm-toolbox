@@ -77,19 +77,21 @@ class Logger:
 
         # Push concurrently; handlers must not bring down the logger
         payload = self._buffer[: self._buffer_size]
-        try:
-            tasks = [handler.push(payload) for handler in self._handlers]
-        except Exception:
-            # In case any handler raises during task creation
-            sys.stderr.write(traceback.format_exc())
-            tasks = []
+        handler_tasks: list[tuple[BaseLogHandler, asyncio.Task[None]]] = []
+        for handler in self._handlers:
+            try:
+                task = asyncio.create_task(handler.push(payload))
+                handler_tasks.append((handler, task))
+            except Exception as exc:
+                handler._handle_exception(exc, "push")  # type: ignore[attr-defined]
 
-        if tasks:
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for res in results:
+        if handler_tasks:
+            results = await asyncio.gather(
+                *(task for _, task in handler_tasks), return_exceptions=True
+            )
+            for (handler, _), res in zip(handler_tasks, results, strict=False):
                 if isinstance(res, Exception):
-                    # Never propagate from logger
-                    sys.stderr.write(traceback.format_exc())
+                    handler._handle_exception(res, "push")  # type: ignore[attr-defined]
 
         self._buffer_size = 0
         self._buffer_start_time_ms = time_ms()
