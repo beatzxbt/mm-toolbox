@@ -1,6 +1,6 @@
 .PHONY: help format typecheck fix test-py test-c test-all sync build-lib build-test build-all \
-        remove-build-lib remove-build-tests rebuild-test remove-build-all rebuild-all wheel remove-wheel sdist remove-sdist \
-        check-dist upload-test upload-prod clean-caches %
+        remove-build-lib remove-build-tests rebuild-test remove-build-all rebuild-all wheel wheel-binary wheel-pep517 \
+        wheel-check remove-wheel sdist remove-sdist check-dist clean-dist upload-test upload-prod clean-caches %
 
 .DEFAULT_GOAL := help
 
@@ -43,6 +43,9 @@ clean-caches: ## Remove pytest and ruff caches
 	find . -type d -name "__pycache__" -delete
 	rm -rf .pytest_cache/ .ruff_cache/
 
+clean-dist: ## Remove distribution artifacts
+	if [ -d dist ]; then find dist -type f ! -name ".gitignore" -delete; fi
+
 remove-build-lib: ## Remove build artifacts and compiled extensions
 	rm -rf build/ *.egg-info/
 	find ./src -name "*.so" -delete
@@ -65,7 +68,15 @@ rebuild-test: remove-build-tests build-test ## Clean and rebuild Cython test ext
 
 rebuild-all: remove-build-all build-all ## Clean and rebuild all Cython extensions
 
-wheel: ## Build wheel distribution
+wheel: ## Build binary wheel distribution
+	$(MAKE) wheel-binary
+
+wheel-binary: ## Build binary wheel distribution (compiled extensions)
+	$(MAKE) remove-build-lib
+	$(MAKE) build-lib
+	uv run python setup.py bdist_wheel
+
+wheel-pep517: ## Build wheel via PEP 517 (uv_build)
 	$(MAKE) remove-build-lib
 	uv run python -m build --wheel
 
@@ -81,6 +92,14 @@ remove-sdist: ## Clean sdist build artifacts
 
 check-dist: ## Check distribution files for PyPI upload
 	uv run python -m twine check dist/*
+
+wheel-check: ## Validate wheel contains native extensions
+	uv run python -c "import glob,zipfile,sys,os; wheels=glob.glob('dist/*.whl'); \
+    wheels.sort(key=os.path.getmtime); \
+    whl=wheels[-1] if wheels else None; \
+    (whl and any(n.endswith(('.so','.pyd')) for n in zipfile.ZipFile(whl).namelist())) \
+        or sys.exit('wheel missing native extensions'); \
+    print(f'wheel ok: {whl}')"
 
 upload-test: ## Upload to TestPyPI
 	uv run python -m twine upload --repository testpypi dist/*
@@ -115,7 +134,7 @@ help: ## Display this help message
 	@grep -E '^(build-lib|build-test|build-all|remove-build-lib|remove-build-tests|rebuild-test|remove-build-all|rebuild-all|clean-caches):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 	@echo 'Distribution:'
-	@grep -E '^(wheel|remove-wheel|sdist|remove-sdist|check-dist):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(wheel|wheel-binary|wheel-pep517|wheel-check|remove-wheel|sdist|remove-sdist|check-dist|clean-dist):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 	@echo 'Deployment:'
 	@grep -E '^(upload-test|upload-prod):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
