@@ -363,7 +363,7 @@ class BinanceDataProcessor:
                     f"H={completed_candle.high_price:.2f} "
                     f"L={completed_candle.low_price:.2f} "
                     f"C={completed_candle.close_price:.2f} "
-                    f"VWAP={completed_candle.vwap_price:.2f}"
+                    f"VWAP={completed_candle.vwap:.2f}"
                 )
 
     def _process_message(self, msg_bytes: bytes) -> None:

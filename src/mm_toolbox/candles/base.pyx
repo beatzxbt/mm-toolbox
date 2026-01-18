@@ -34,7 +34,7 @@ class Candle(Struct):
     buy_volume: float
     sell_size: float
     sell_volume: float
-    vwap_price: float
+    vwap: float
     num_trades: int
     trades: list[Trade]
 
@@ -50,7 +50,7 @@ class Candle(Struct):
         self.buy_volume = 0.0
         self.sell_size = 0.0
         self.sell_volume = 0.0
-        self.vwap_price = 0.0
+        self.vwap = 0.0
         self.num_trades = 0
         self.trades.clear()
 
@@ -72,7 +72,7 @@ class Candle(Struct):
             buy_volume=0.0,
             sell_size=0.0,
             sell_volume=0.0,
-            vwap_price=0.0,
+            vwap=0.0,
             num_trades=0,
             trades=[]
         )
@@ -119,6 +119,8 @@ cdef class BaseCandles:
         self.candle_push_event = asyncio.Future[Candle]()
         
         self.latest_candle.reset()
+        self.__cum_volume = 0.0
+        self.__total_size = 0.0
 
         # This ensures the newest candle is always the latest one incase the 
         # ringbuffer is accessed whilst there is an open candle.
@@ -134,6 +136,8 @@ cdef class BaseCandles:
 
         self.latest_candle.reset()
         self.ringbuffer.clear()
+        self.__cum_volume = 0.0
+        self.__total_size = 0.0
 
         for trade in trades:
             self.process_trade(trade)

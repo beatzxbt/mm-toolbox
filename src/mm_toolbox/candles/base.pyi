@@ -21,7 +21,7 @@ class Candle:
     buy_volume: float
     sell_size: float
     sell_volume: float
-    vwap_price: float
+    vwap: float
     num_trades: int
     trades: list[Trade]
 

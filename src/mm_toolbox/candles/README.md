@@ -7,7 +7,7 @@ exposes a live, in-progress `latest_candle`.
 ## Core concepts
 
 - `Trade`: time_ms, side, price, size
-- `Candle`: OHLC, buy/sell size + volume, VWAP, trade count, trade list
+- `Candle`: OHLC, buy/sell size + volume, VWAP (`vwap`), trade count, trade list
 - `BaseCandles`: shared ring buffer, initialization, async notification
 
 ## Basic usage

@@ -60,7 +60,7 @@ class TestCandleStructure:
         assert candle.buy_volume == 0.0
         assert candle.sell_size == 0.0
         assert candle.sell_volume == 0.0
-        assert candle.vwap_price == 0.0
+        assert candle.vwap == 0.0
         assert candle.num_trades == 0
         assert candle.trades == []
 
@@ -77,7 +77,7 @@ class TestCandleStructure:
             buy_volume=100.0,
             sell_size=0.5,
             sell_volume=50.0,
-            vwap_price=100.5,
+            vwap=100.5,
             num_trades=2,
             trades=[Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0)],
         )
@@ -92,7 +92,7 @@ class TestCandleStructure:
         assert candle.buy_volume == 100.0
         assert candle.sell_size == 0.5
         assert candle.sell_volume == 50.0
-        assert candle.vwap_price == 100.5
+        assert candle.vwap == 100.5
         assert candle.num_trades == 2
         assert len(candle.trades) == 1
 
@@ -109,7 +109,7 @@ class TestCandleStructure:
             buy_volume=100.0,
             sell_size=0.5,
             sell_volume=50.0,
-            vwap_price=100.5,
+            vwap=100.5,
             num_trades=2,
             trades=[Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0)],
         )
@@ -120,7 +120,7 @@ class TestCandleStructure:
         empty_candle = Candle.empty()
         assert candle.open_time_ms == empty_candle.open_time_ms
         assert candle.num_trades == empty_candle.num_trades
-        assert candle.vwap_price == empty_candle.vwap_price
+        assert candle.vwap == empty_candle.vwap
 
     def test_candle_copy(self):
         """Test Candle copy functionality."""
@@ -135,7 +135,7 @@ class TestCandleStructure:
             buy_volume=100.0,
             sell_size=0.5,
             sell_volume=50.0,
-            vwap_price=100.5,
+            vwap=100.5,
             num_trades=1,
             trades=[],
         )
@@ -145,7 +145,7 @@ class TestCandleStructure:
         # Should be equal but different objects
         assert copied.open_price == original.open_price
         assert copied.num_trades == original.num_trades
-        assert copied.vwap_price == original.vwap_price
+        assert copied.vwap == original.vwap
 
 
 class TestBaseCandlesFunctionality:
@@ -194,6 +194,57 @@ class TestBaseCandlesFunctionality:
 
         # VWAP calculation happens internally - if no crash, it's working
         assert True
+
+    def test_vwap_uses_price_weighting(self):
+        """Verify VWAP uses price-weighted sizes for calculations.
+
+        Args:
+            self (TestBaseCandlesFunctionality): Test instance.
+
+        Returns:
+            None
+        """
+        from mm_toolbox.candles import TickCandles
+
+        tick_candles = TickCandles(3)
+
+        trades = [
+            Trade(time_ms=1000, is_buy=True, price=100.0, size=2.0),
+            Trade(time_ms=2000, is_buy=True, price=110.0, size=1.0),
+        ]
+
+        for trade in trades:
+            tick_candles.process_trade(trade)
+
+        expected_vwap = (100.0 * 2.0 + 110.0 * 1.0) / (2.0 + 1.0)
+        assert tick_candles.latest_candle.vwap == pytest.approx(expected_vwap)
+
+    def test_vwap_resets_after_candle_completion(self):
+        """Verify VWAP resets when a candle is completed and restarted.
+
+        Args:
+            self (TestBaseCandlesFunctionality): Test instance.
+
+        Returns:
+            None
+        """
+        from mm_toolbox.candles import TickCandles
+
+        tick_candles = TickCandles(2)
+
+        first_trades = [
+            Trade(time_ms=1000, is_buy=True, price=100.0, size=2.0),
+            Trade(time_ms=2000, is_buy=False, price=200.0, size=1.0),
+        ]
+
+        for trade in first_trades:
+            tick_candles.process_trade(trade)
+
+        next_trade = Trade(time_ms=3000, is_buy=True, price=50.0, size=4.0)
+        tick_candles.process_trade(next_trade)
+
+        assert tick_candles.latest_candle.num_trades == 1
+        assert tick_candles.latest_candle.vwap == pytest.approx(50.0)
 
     def test_stale_trade_handling(self):
         """Test stale trade handling through subclasses."""

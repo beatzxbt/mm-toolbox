@@ -44,7 +44,7 @@ cdef class TickCandles(BaseCandles):
             self.latest_candle.sell_size += size
             self.latest_candle.sell_volume += volume
 
-        self.latest_candle.vwap_price = self.calculate_vwap(volume, size)
+        self.latest_candle.vwap = self.calculate_vwap(price, size)
         self.latest_candle.trades.append(trade)
         self.latest_candle.num_trades += 1
         self.latest_candle.close_time_ms = time_ms
