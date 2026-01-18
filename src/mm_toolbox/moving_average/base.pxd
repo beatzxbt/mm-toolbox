@@ -21,5 +21,7 @@ cdef class MovingAverage:
     # def __len__(self)
     # def __iter__(self)
     # def __getitem__(self, int idx)
+    cdef inline void        ensure_warm(self)
+    cdef inline void        push_to_ringbuffer(self)
     cdef inline void        __enforce_moving_average_initialized(self)
     cdef inline void        __enforce_not_fast(self)
