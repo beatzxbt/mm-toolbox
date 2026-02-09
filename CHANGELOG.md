@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 1.0.0b0 (Unreleased)
+## 1.0.0b2 (Unreleased)
 
 ### Notes
 - Beta pre-release for the v1.0 feature set.

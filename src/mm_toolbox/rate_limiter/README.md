@@ -68,6 +68,122 @@ per_window = RateLimiter.per_window(20, 3)
 - This is a controlled escape hatch for spiky traffic; it does not increase
   the long-term capacity.
 
+## Internal diagrams
+
+### Bucket layout (overall + optional per-second)
+
+Overall window bucket:
+
+```text
+window_s seconds
+|<------------------------------->|
+capacity = C tokens (refill on window boundary)
+```
+
+Optional per-second sub-buckets (`SubBucketStrategy.PER_SECOND`):
+
+```text
+capacity = C, window_s = W
+q = C // W, r = C % W
+
+sec 0   sec 1   ...  sec (r-1)  sec r   ...  sec (W-1)
+ +----+  +----+       +----+     +----+       +----+
+ |q+1|  |q+1|  ...   |q+1|     | q |  ...   | q |
+ +----+  +----+       +----+     +----+       +----+
+```
+
+Notes:
+- The first `r` seconds get one extra token each.
+- If `W == 1` or sub-buckets are disabled, there is only a single bucket.
+
+### Window and sub-bucket alignment
+
+```text
+time (ms)
+t0             t0+1s          t0+2s          ...        t0+W
+|---------------|---------------|-----------------------|
+^ prev_refill   ^ per-second    ^ per-second            ^ next_refill
+
+overall window: refills at t0+W
+sub-buckets: refresh on the current second boundary
+```
+
+### Consumption decision flow
+
+```text
++-----------------------+
+| try_consume_multiple  |
++-----------------------+
+            |
+            v
++-----------------------+
+| window expired?       |
++-----------------------+
+   | yes            | no
+   v                v
++-------------+  +----------------------+
+| reset_state |  | num_tokens <= 0?     |
++-------------+  +----------------------+
+                     | yes        | no
+                     v            v
+              +--------------+  +-----------+
+              | allow, NORMAL|  | force?    |
+              +--------------+  +-----------+
+                                   | yes  | no
+                                   v      v
+                        +-------------------+  +---------------------------+
+                        | apply usage,      |  | compute overall + sub usage|
+                        | OVERRIDE          |  +---------------------------+
+                        +-------------------+              |
+                                                           v
+                                              +------------------------+
+                                              | overall_ok & sub_ok?   |
+                                              +------------------------+
+                                                | yes           | no
+                                                v              v
+                                       +------------------+   +-------------------------------+
+                                       | usage > block?   |   | burst enabled & sub_enabled? |
+                                       +------------------+   +-------------------------------+
+                                        | yes       | no        | no           | yes
+                                        v          v           v              v
+                                +--------------+  +--------------------+  +-----------------+
+                                | deny, BLOCKED|  | apply usage        |  | num_tokens >    |
+                                +--------------+  +--------------------+  | max_tokens?     |
+                                                     |                    +-----------------+
+                                                     v                     | yes      | no
+                                             +----------------------+      v          v
+                                             | usage > warning?     | +--------------+ +--------------------------------+
+                                             +----------------------+ | deny, BLOCKED| | burst_attempts_used < max?      |
+                                              | yes        | no      +--------------+ +--------------------------------+
+                                              v           v                              | yes               | no
+                                       +--------------+ +--------------+                  v                  v
+                                       | allow, WARNING| | allow, NORMAL|          +------------------+  +---------------+
+                                       +--------------+ +--------------+          | allow, NORMAL     |  | deny, WARNING |
+                                                                                | (cap usage)      |  +---------------+
+                                                                                +------------------+
+```
+
+### Threshold bands
+
+```text
+usage (used / capacity)
+0%            warning_threshold          block_threshold              100%+
+|--------------------|--------------------------|------------------------|
+NORMAL               WARNING                    BLOCKED
+```
+
+### Burst allowance within the active second
+
+```text
+per-second bucket capacity = 5, burst max_tokens = 2, max_burst_attempts = 1
+
+second boundary
+|--------------------------------------------------------------->
+consume 5 tokens (normal) -> at capacity
+1 burst attempt of up to 2 tokens -> allowed once
+further attempts in same second -> denied
+```
+
 ## Scenario examples
 
 ### Simple per-second limiter

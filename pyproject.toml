@@ -1,6 +1,6 @@
 [project]
 name = "mm-toolbox"
-version = "1.0.0b0"
+version = "1.0.0b2"
 description = "High-performance Python tools for market making systems"
 readme = "README.md"
 authors = [
@@ -76,6 +76,7 @@ dev = [
     "uv>=0.8.8",
     "setuptools>=80.9.0",
     "pytest-asyncio>=1.1.0",
+    "websockets>=12.0",
 ]
 build = [
     "build>=1.0.0",
@@ -91,4 +92,7 @@ markers = [
     "boundary: marks boundary condition tests",
     "property: marks property/invariant tests",
     "timeout: marks tests with runtime limits (requires pytest-timeout)",
+    "live: marks tests that require live network access",
+    "stress: marks tests as stress/load tests",
+    "chaos: marks tests with randomized concurrency patterns",
 ]

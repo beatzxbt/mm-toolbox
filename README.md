@@ -41,7 +41,7 @@ To try the beta without replacing a stable install, use a separate virtual envir
 ```bash
 python -m venv mm_toolbox_beta
 source mm_toolbox_beta/bin/activate
-pip install mm-toolbox==1.0.0b0
+pip install mm-toolbox==1.0.0b2
 ```
 
 To always pull the latest pre-release:
@@ -62,18 +62,22 @@ make build  # Compile Cython extensions
 
 After installation, you can start using MM Toolbox by importing the necessary modules:
 ```python
-from mm_toolbox import Orderbook
-from mm_toolbox import ExponentialMovingAverage as EMA
+from mm_toolbox.moving_average import ExponentialMovingAverage as EMA
+from mm_toolbox.orderbook import Orderbook, OrderbookLevel
 from mm_toolbox.logging.standard import Logger, LogLevel, LoggerConfig
 
 # Example usage:
 ema = EMA(window=10, is_fast=True)
+tick_size = 0.01
+lot_size = 0.001
+orderbook = Orderbook(tick_size=tick_size, lot_size=lot_size, size=100)
+orderbook.consume_bbo(
+    ask=OrderbookLevel.from_values(100.01, 1.2, 1, tick_size, lot_size),
+    bid=OrderbookLevel.from_values(100.00, 1.0, 1, tick_size, lot_size),
+)
 logger = Logger(
-    config=LoggerConfig(
-        base_level=LogLevel.INFO,
-        do_stdout=True
-    ),
     name="Example",
+    config=LoggerConfig(base_level=LogLevel.INFO, do_stdout=True),
 )
 ```
 
@@ -133,25 +137,128 @@ entries on overflow for bounded memory usage.
 
 ### Breaking Changes
 
-- **Orderbook**: `consume_*` functions now take `asks` before `bids`; `update_bbo` is renamed to `consume_bbo`. Snapshots replace both ladders, and deltas that would wipe the opposite side without replacement levels are ignored.
-- **Rate Limiter Module**: The limiter moved from `mm_toolbox.misc` to `mm_toolbox.rate_limiter` and exposes `RateLimitState` from the core module.
-- **Ringbuffer**: Integer-specific ringbuffers removed; use `NumericRingBuffer` instead. `BytesRingBufferFast` now rejects oversized inserts instead of truncating silently.
-- **API Unification**: Function signatures and parameter names were standardized across components.
-- **Numba Deprecation**: Previous Numba implementations are no longer included; migrate to the Cython/C equivalents.
+These notes compare this branch (`v1.0b`) against `master`.
+
+- **Top-level imports removed**: `mm_toolbox` no longer re-exports classes/functions; import from submodules instead (e.g., `mm_toolbox.orderbook`, `mm_toolbox.time`, `mm_toolbox.logging.standard`).
+- **Numba stack removed**: `mm_toolbox.numba` and all Numba-based implementations are gone (old orderbook, ringbuffers, rounding, and array helpers).
+- **Orderbook rewrite**: the Numba `Orderbook(size)` (arrays + `refresh`/`update_*`/`seq_id`) is replaced by standard/advanced orderbooks that require `tick_size` + `lot_size` and ingest `OrderbookLevel` objects via `consume_snapshot`, `consume_deltas`, and `consume_bbo(ask, bid)`.
+- **Candles redesign**: candle aggregation now uses `Trade`/`Candle` objects, async iteration, and a generic ringbuffer; `MultiTriggerCandles` is renamed to `MultiCandles` with `max_size`, and `PriceCandles` was added.
+- **Logging restructure**: `mm_toolbox.logging.Logger` and `FileLogConfig/DiscordLogConfig/TelegramLogConfig` were removed; use `mm_toolbox.logging.standard` or `mm_toolbox.logging.advanced` and pass handler objects directly.
+- **Ringbuffer API replaced**: `RingBufferSingleDim*`, `RingBufferTwoDim*`, and `RingBufferMultiDim` were removed; use `NumericRingBuffer`, `GenericRingBuffer`, `BytesRingBuffer`, `BytesRingBufferFast`, and IPC/SHM variants.
+- **Rounding API replaced**: `Round` was removed; use `Rounder` + `RounderConfig` (directional rounding is configurable).
+- **Websocket rewrite**: `SingleWsConnection`, `WsStandard`, `WsFast`, `WsPoolEvictionPolicy`, and `VerifyWsPayload` were removed; use `WsConnection`, `WsSingle`, `WsPool`, and their config/state types.
+- **Moving averages/time changes**: `HullMovingAverage` was removed; `SimpleMovingAverage` and `TimeExponentialMovingAverage` were added. Time helpers now return integers and `time_iso8601()` accepts an optional timestamp.
 
 ### Migration Guide
 
-Most code should work with minimal changes. Update the following if you rely on affected components:
-1. **Rate limiter imports**: Replace `mm_toolbox.misc.limiter` with `mm_toolbox.rate_limiter` and update any `RateLimiter`/`RateLimitState` imports accordingly.
-2. **Orderbook ingestion**: Swap parameter order to `asks, bids` for `consume_*` calls, and rename `update_bbo` to `consume_bbo`. Remove any optional flags for tick/lot computation.
-3. **Ringbuffer usage**: Replace integer-only ringbuffers with `NumericRingBuffer` and handle oversized inserts for `BytesRingBufferFast` explicitly.
-4. **Numba users**: Migrate any Numba-specific paths to the Cython implementations and rebuild extensions with `make build`.
+Follow these steps when moving from `master` to `v1.0b`.
 
-*Components not mentioned have either not incurred significant changes or maintain backward compatibility.*
+1. **Install/build changes (source installs)**:
+   - Poetry/requirements-based installs from `master` are replaced by `uv` + Cython builds.
+   ```bash
+   uv sync --all-groups
+   make build
+   ```
+
+2. **Update imports (top-level exports removed)**:
+   ```python
+   # master
+   from mm_toolbox import Orderbook, ExponentialMovingAverage, Round, time_s
+
+   # v1.0b
+   from mm_toolbox.orderbook import Orderbook
+   from mm_toolbox.moving_average import ExponentialMovingAverage
+   from mm_toolbox.rounding import Rounder, RounderConfig
+   from mm_toolbox.time import time_s
+   ```
+
+3. **Orderbook migration**:
+   - Old API used NumPy arrays + sequence IDs; new API uses `OrderbookLevel` objects and does not track `seq_id`.
+   - `refresh`/`update_bids`/`update_asks` -> `consume_snapshot`/`consume_deltas`; `update_bbo` -> `consume_bbo(ask, bid)`.
+   ```python
+   # master
+   ob = Orderbook(size=100)
+   ob.refresh(asks_np, bids_np, new_seq_id=42)
+   ob.update_bbo(bid_price, bid_size, ask_price, ask_size, new_seq_id=43)
+
+   # v1.0b
+   from mm_toolbox.orderbook import Orderbook, OrderbookLevel
+
+   ob = Orderbook(tick_size=0.01, lot_size=0.001, size=100)
+   asks = [
+       OrderbookLevel.from_values(p, s, norders=0, tick_size=0.01, lot_size=0.001)
+       for p, s in asks_np
+   ]
+   bids = [
+       OrderbookLevel.from_values(p, s, norders=0, tick_size=0.01, lot_size=0.001)
+       for p, s in bids_np
+   ]
+   ob.consume_snapshot(asks=asks, bids=bids)
+   ob.consume_bbo(
+       ask=OrderbookLevel.from_values(ask_price, ask_size, 0, 0.01, 0.001),
+       bid=OrderbookLevel.from_values(bid_price, bid_size, 0, 0.01, 0.001),
+   )
+   ```
+   - If you need the Cython implementation, import `AdvancedOrderbook` from `mm_toolbox.orderbook.advanced`.
+
+4. **Candles migration**:
+   - Trades are now passed as `Trade` objects and candles are stored as `Candle` objects.
+   - `MultiTriggerCandles` -> `MultiCandles` (`max_volume` -> `max_size`, `max_ticks` is now `int`).
+   ```python
+   from mm_toolbox.candles import TimeCandles, MultiCandles
+   from mm_toolbox.candles.base import Trade
+
+   candles = TimeCandles(secs_per_bucket=1.0, num_candles=1000)
+   candles.process_trade(Trade(time_ms=1700000000000, is_buy=True, price=100.0, size=0.5))
+   ```
+
+5. **Logging migration**:
+   - Standard logger lives in `mm_toolbox.logging.standard`, advanced logger in `mm_toolbox.logging.advanced`.
+   ```python
+   from mm_toolbox.logging.standard import Logger, LoggerConfig, LogLevel
+   from mm_toolbox.logging.standard.handlers import FileLogHandler
+
+   logger = Logger(
+       name="example",
+       config=LoggerConfig(base_level=LogLevel.INFO, do_stdout=True),
+       handlers=[FileLogHandler("logs.txt", create=True)],
+   )
+   ```
+
+6. **Ringbuffer migration**:
+   - `RingBufferSingleDimFloat/Int` -> `NumericRingBuffer(max_capacity=..., dtype=...)`
+   - `RingBufferTwoDim*`/`RingBufferMultiDim` -> `GenericRingBuffer` (store arrays/objects)
+   - `BytesRingBufferFast` now rejects inserts larger than its slot size.
+
+7. **Rounding migration**:
+   ```python
+   from mm_toolbox.rounding import Rounder, RounderConfig
+
+   rounder = Rounder(RounderConfig.default(tick_size=0.01, lot_size=0.001))
+   price = rounder.bid(100.1234)
+   ```
+
+8. **Websocket migration**:
+   ```python
+   from mm_toolbox.websocket import WsConnectionConfig, WsSingle
+
+   config = WsConnectionConfig.default("wss://example", on_connect=[b"SUBSCRIBE ..."])
+   ws = WsSingle(config)
+   await ws.start()
+   ```
+
+9. **Moving averages + time**:
+   - `HullMovingAverage` was removed; use `SimpleMovingAverage` or `TimeExponentialMovingAverage`.
+   - `time_s/time_ms/...` return integers now; `time_iso8601()` optionally formats a provided timestamp.
 
 ## Roadmap
 
 ### v1.1.0
+- **Websocket**: Move `WsPool` and `WsSingle` into Cython classes to eliminate `call_soon_threadsafe` overhead in hot paths.
+- **Logging**: Move more advanced logger components into C to unlock similar performance gains.
+- **Orderbook**: Add Cython helpers to build/consume levels from string pair lists (e.g., `[[price, size], ...]`) to avoid Python loops in depth snapshots/deltas.
+
+### v1.2.0
 **Parsers**: Introduction of high-performance parsing utilities including JSON parsers and crypto exchange-specific parsers (e.g., Binance top-of-book parser).
 
 ## License
