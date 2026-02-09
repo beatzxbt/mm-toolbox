@@ -91,6 +91,35 @@ class WsSingle:
         if self._ws_conn is not None:
             self._ws_conn.send_data(msg)
 
+    def _dispatch_message(self, msg: bytes) -> None:
+        """Dispatches one message to the configured callback.
+
+        Args:
+            msg (bytes): Message payload to pass to the callback.
+
+        Returns:
+            None: This method does not return a value.
+        """
+        try:
+            self._on_message(msg)
+        except Exception as exc:
+            print(f"Error in on_message callback: {exc}")
+
+    async def _consume_callbacks_fifo(self) -> None:
+        """Consumes ringbuffer messages and dispatches in arrival order.
+
+        Returns:
+            None: This coroutine runs until cancelled or an error occurs.
+        """
+        while True:
+            newest_msg = await self._ringbuffer.aconsume()
+            older_msgs: list[bytes] = []
+            if not self._ringbuffer.is_empty():
+                older_msgs = self._ringbuffer.consume_all()
+            for msg in older_msgs:
+                self._dispatch_message(msg)
+            self._dispatch_message(newest_msg)
+
     async def start(self) -> None:
         """Opens the WebSocket connection and sends any on_connect messages."""
         if self._config.auto_reconnect:
@@ -98,21 +127,13 @@ class WsSingle:
             async for conn in conn_iter:
                 self._ws_conn = conn
                 try:
-                    async for msg in self._ringbuffer.aconsume_iterable():
-                        try:
-                            self._on_message(msg)
-                        except Exception as exc:
-                            print(f"Error in on_message callback: {exc}")
+                    await self._consume_callbacks_fifo()
                 except Exception as exc:
                     print(f"Error consuming WebSocket messages: {exc}")
         else:
             self._ws_conn = await WsConnection.new(self._ringbuffer, self._config)
             try:
-                async for msg in self._ringbuffer.aconsume_iterable():
-                    try:
-                        self._on_message(msg)
-                    except Exception as exc:
-                        print(f"Error in on_message callback: {exc}")
+                await self._consume_callbacks_fifo()
             except Exception as exc:
                 print(f"Error consuming WebSocket messages: {exc}")
 
