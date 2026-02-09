@@ -105,20 +105,14 @@ class WsSingle:
         except Exception as exc:
             print(f"Error in on_message callback: {exc}")
 
-    async def _consume_callbacks_fifo(self) -> None:
+    async def _consume_callbacks(self) -> None:
         """Consumes ringbuffer messages and dispatches in arrival order.
 
         Returns:
             None: This coroutine runs until cancelled or an error occurs.
         """
         while True:
-            newest_msg = await self._ringbuffer.aconsume()
-            older_msgs: list[bytes] = []
-            if not self._ringbuffer.is_empty():
-                older_msgs = self._ringbuffer.consume_all()
-            for msg in older_msgs:
-                self._dispatch_message(msg)
-            self._dispatch_message(newest_msg)
+            self._dispatch_message(await self._ringbuffer.aconsume())
 
     async def start(self) -> None:
         """Opens the WebSocket connection and sends any on_connect messages."""
@@ -127,13 +121,13 @@ class WsSingle:
             async for conn in conn_iter:
                 self._ws_conn = conn
                 try:
-                    await self._consume_callbacks_fifo()
+                    await self._consume_callbacks()
                 except Exception as exc:
                     print(f"Error consuming WebSocket messages: {exc}")
         else:
             self._ws_conn = await WsConnection.new(self._ringbuffer, self._config)
             try:
-                await self._consume_callbacks_fifo()
+                await self._consume_callbacks()
             except Exception as exc:
                 print(f"Error consuming WebSocket messages: {exc}")
 
@@ -182,7 +176,7 @@ class WsSingle:
         return self
 
     async def __anext__(self) -> bytes:
-        """Returns the next message from the connection."""
+        """Returns the next message from the connection in arrival order."""
         return await self._ringbuffer.aconsume()
 
 

@@ -21,7 +21,7 @@ oldest entry on overflow. Writes advance `head`, reads advance `tail`.
  tail (oldest)
 
 insert()    -> writes at head, advances head
-consume()   -> pops most recent (head - 1)
+consume()   -> pops oldest (tail), FIFO
 unwrapped() -> oldest to newest
 ```
 
@@ -81,6 +81,7 @@ Producer                       Consumer
 - Stores `bytes` entries in a Python list.
 - Optional `only_insert_unique` avoids duplicate inserts (linear scan).
 - Async methods use an `asyncio.Event` (disable with `disable_async=True`).
+- Consumes in FIFO order (`consume()` returns the oldest queued item).
 - Best for moderate throughput with flexible message sizes.
 
 ### BytesRingBufferFast
@@ -126,8 +127,8 @@ rb = BytesRingBuffer(max_capacity=128)
 rb.insert(b"alpha")
 rb.insert(b"beta")
 
-latest = rb.consume()        # b"beta"
-all_items = rb.consume_all() # [b"alpha"]
+oldest = rb.consume()        # b"alpha"
+all_items = rb.consume_all() # [b"beta"]
 ```
 
 ### NumericRingBuffer
@@ -156,6 +157,7 @@ producer.stop()
 
 - Capacity rounds up to the next power of two for fast masking.
 - When full, inserts overwrite the oldest element.
-- `consume()` pops the most recent item; `unwrapped()` returns oldest to newest.
+- In-process buffers use FIFO consume semantics: `consume()` pops the oldest item.
+- `unwrapped()` returns items from oldest to newest.
 - Async helpers (`aconsume`, `aconsume_iterable`) block until new data arrives.
 - IPC buffers are transport-backed (ZMQ), not shared memory; use `shm` for SPSC.
