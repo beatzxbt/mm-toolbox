@@ -1,6 +1,6 @@
 .PHONY: help format typecheck fix test-py test-c test-all sync build-lib build-test build-all \
         remove-build-lib remove-build-tests rebuild-test remove-build-all rebuild-all wheel wheel-binary wheel-pep517 \
-        wheel-check remove-wheel sdist remove-sdist check-dist clean-dist upload-test upload-prod clean-caches %
+        wheel-check remove-wheel sdist remove-sdist check-dist clean-dist upload-test clean-caches %
 
 .DEFAULT_GOAL := help
 
@@ -104,16 +104,6 @@ wheel-check: ## Validate wheel contains native extensions
 upload-test: ## Upload to TestPyPI
 	uv run python -m twine upload --repository testpypi dist/*
 
-upload-prod: ## Upload to PyPI (PRODUCTION)
-	@echo "WARNING: This will upload to PRODUCTION PyPI!"
-	@echo "Make sure you have:"
-	@echo "  1. Updated version number"
-	@echo "  2. Built fresh wheel: make wheel"
-	@echo "  3. Tested the package thoroughly"
-	@echo ""
-	@read -p "Continue? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1
-	uv run python -m twine upload dist/*
-
 # Pattern rule so additional args do not trigger "No rule to make target"
 %:
 	@:
@@ -137,7 +127,7 @@ help: ## Display this help message
 	@grep -E '^(wheel|wheel-binary|wheel-pep517|wheel-check|remove-wheel|sdist|remove-sdist|check-dist|clean-dist):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 	@echo 'Deployment:'
-	@grep -E '^(upload-test|upload-prod):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(upload-test):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 	@echo 'Other:'
 	@grep -E '^(sync|help):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
