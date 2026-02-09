@@ -83,7 +83,7 @@ class Logger:
                 task = asyncio.create_task(handler.push(payload))
                 handler_tasks.append((handler, task))
             except Exception as exc:
-                handler._handle_exception(exc, "push")  # type: ignore[attr-defined]
+                handler._handle_exception(exc, "push")
 
         if handler_tasks:
             results = await asyncio.gather(
@@ -91,7 +91,34 @@ class Logger:
             )
             for (handler, _), res in zip(handler_tasks, results, strict=False):
                 if isinstance(res, Exception):
-                    handler._handle_exception(res, "push")  # type: ignore[attr-defined]
+                    handler._handle_exception(res, "push")
+
+        self._buffer_size = 0
+        self._buffer_start_time_ms = time_ms()
+
+    def _append_to_buffer(self, log_msg: str) -> None:
+        """Appends a formatted log message to the in-memory buffer."""
+        if self._buffer_size >= len(self._buffer):
+            # Expand buffer safely if user under-specified buffer_size
+            self._buffer.extend([""] * len(self._buffer))
+        self._buffer[self._buffer_size] = log_msg
+        self._buffer_size += 1
+
+    def _flush_buffer_sync(self) -> None:
+        """Flushes buffered messages without relying on a persistent event loop."""
+        if self._buffer_size == 0:
+            return
+
+        if self._config.do_stdout:
+            for msg in self._buffer[: self._buffer_size]:
+                print(msg)
+
+        payload = self._buffer[: self._buffer_size]
+        for handler in self._handlers:
+            try:
+                asyncio.run(handler.push(payload))
+            except Exception as exc:
+                handler._handle_exception(exc, "push")
 
         self._buffer_size = 0
         self._buffer_start_time_ms = time_ms()
@@ -108,20 +135,12 @@ class Logger:
         async def ingest_once() -> None:
             nonlocal loop
             # Drain as many messages as arrived
-            drained = 0
             while True:
                 try:
-                    log_msg, level = self._msg_queue.get_nowait()
+                    log_msg, _ = self._msg_queue.get_nowait()
                 except Empty:
                     break
-                try:
-                    if self._buffer_size >= len(self._buffer):
-                        # Expand buffer safely if user under-specified buffer_size
-                        self._buffer.extend([""] * len(self._buffer))
-                    self._buffer[self._buffer_size] = log_msg
-                    self._buffer_size += 1
-                finally:
-                    drained += 1
+                self._append_to_buffer(log_msg)
             # Time-based flush only
             if (time_ms() - self._buffer_start_time_ms) >= int(
                 self._config.flush_interval_s * 1000
@@ -130,19 +149,29 @@ class Logger:
 
         try:
             if loop is None:
-                # Fallback: simple polling loop without asyncio handlers support
+                # Fallback: polling loop that still flushes safely.
+                flush_interval_ms = int(self._config.flush_interval_s * 1000)
                 while self._is_running:
-                    # Drain queue
                     try:
+                        log_msg, _ = self._msg_queue.get(timeout=0.1)
+                        self._append_to_buffer(log_msg)
                         while True:
-                            log_msg, level = self._msg_queue.get(timeout=0.1)
-                            if self._buffer_size >= len(self._buffer):
-                                self._buffer.extend([""] * len(self._buffer))
-                            self._buffer[self._buffer_size] = log_msg
-                            self._buffer_size += 1
+                            log_msg, _ = self._msg_queue.get_nowait()
+                            self._append_to_buffer(log_msg)
                     except Empty:
                         pass
-                    # No async handlers possible in this mode; skip flush
+
+                    if (time_ms() - self._buffer_start_time_ms) >= flush_interval_ms:
+                        self._flush_buffer_sync()
+
+                # Final drain and flush to avoid dropping queued messages.
+                while True:
+                    try:
+                        log_msg, _ = self._msg_queue.get_nowait()
+                        self._append_to_buffer(log_msg)
+                    except Empty:
+                        break
+                self._flush_buffer_sync()
                 return
 
             # Normal async loop: run periodic ingestion

@@ -1,11 +1,19 @@
 import msgspec
 import numpy as np
 cimport numpy as cnp
+from decimal import Decimal
 from numpy cimport (
     ndarray as cndarray,
     PyArray_EMPTY as cPyArray_EMPTY,
 )
-from libc.math cimport ceil, floor, log10, pow, round as c_round
+from libc.math cimport ceil, floor, pow, round as c_round
+
+
+cdef inline double _rounding_factor(double size):
+    cdef int exponent = Decimal(str(size)).as_tuple().exponent
+    if exponent >= 0:
+        return 1.0
+    return pow(10.0, -exponent)
 
 class RounderConfig(msgspec.Struct):
     tick_size: float
@@ -45,8 +53,8 @@ cdef class Rounder:
         # Precompute frequently used values
         self._inverse_tick_size = 1.0 / self.tick_size
         self._inverse_lot_size = 1.0 / self.lot_size
-        self._tick_rounding_factor = pow(10.0, ceil(-log10(self.tick_size)))
-        self._lot_rounding_factor = pow(10.0, ceil(-log10(self.lot_size)))
+        self._tick_rounding_factor = _rounding_factor(self.tick_size)
+        self._lot_rounding_factor = _rounding_factor(self.lot_size)
 
     cdef inline double _round_to(self, double num, double factor) nogil:
         """Round a value to a specific decimal precision."""

@@ -109,6 +109,7 @@ cdef class WsConnection(WSListener):
         self._transport: Optional[WSTransport] = None
         self._reconnect_attempts: int = 0
         self._should_stop = False  # Lightweight stop signal
+        self._loop = None
 
         self._timed_operations_thread = threading.Thread(
             target=self._timed_operations,
@@ -146,7 +147,7 @@ cdef class WsConnection(WSListener):
         """
         Sets the on_connect list.
         """
-        self._on_connect = on_connect
+        self._config.on_connect = on_connect
 
     cpdef void send_ping(self, bytes msg=b""):
         """
@@ -155,6 +156,14 @@ cdef class WsConnection(WSListener):
         Args:
             msg (bytes, optional): Optional payload for the PING frame.
         """
+        if self._state.is_connected and self._transport is not None:
+            if self._loop is not None and self._loop.is_running():
+                self._loop.call_soon_threadsafe(self._send_ping_safe, msg)
+            else:
+                self._transport.send_ping(msg)
+
+    def _send_ping_safe(self, bytes msg):
+        """Send ping on the event loop thread to avoid cross-thread transport access."""
         if self._state.is_connected and self._transport is not None:
             self._transport.send_ping(msg)
 
@@ -209,6 +218,7 @@ cdef class WsConnection(WSListener):
         self._transport = transport
         self._reconnect_attempts = 0
         self._state.state = ConnectionState.CONNECTED
+        self._loop = asyncio.get_running_loop()
 
         for payload in self._config.on_connect:
             self.send_data(payload)
@@ -275,6 +285,7 @@ cdef class WsConnection(WSListener):
         self._should_stop = True
         self._state.state = ConnectionState.DISCONNECTED
         self._transport = None  # Clear transport reference
+        self._loop = None
 
     # ---------- Connection Management ---------- #
 
