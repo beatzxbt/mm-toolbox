@@ -19,12 +19,13 @@ cdef class SimpleMovingAverage(MovingAverage):
             int     i, n = values.shape[0]
             double  raw_value
     
-        if n < self._window:
+        if n != self._window:
             raise ValueError(
-                f"Input array must same length as window; expected {self._window} but got {n}"
+                f"Input array length must match window; expected {self._window} but got {n}"
             )
 
         self._values.fast_reset()
+        self._rolling_sum = 0.0
         
         for i in range(0, n):
             raw_value = values[i]
@@ -57,4 +58,3 @@ cdef class SimpleMovingAverage(MovingAverage):
         self._value = self._rolling_sum / self._window
         self.push_to_ringbuffer()
         return self._value
-

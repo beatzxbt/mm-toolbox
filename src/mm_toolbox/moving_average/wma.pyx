@@ -24,9 +24,9 @@ cdef class WeightedMovingAverage(MovingAverage):
             int i, n = values.shape[0]
             double val
 
-        if n < self._window:
+        if n != self._window:
             raise ValueError(
-                f"Input array must same length as window; expected {self._window} but got {n}"
+                f"Input array length must match window; expected {self._window} but got {n}"
             )
 
         self._values.fast_reset()

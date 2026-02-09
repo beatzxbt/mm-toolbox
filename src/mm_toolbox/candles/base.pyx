@@ -84,7 +84,7 @@ cdef class BaseCandles:
     def __cinit__(self):
         """Lightweight construction; full init happens in __init__."""
         self.latest_candle = Candle.empty()
-        self.candle_push_event = asyncio.Future[Candle]()
+        self.candle_push_event = None
 
         # Reserved for VWAP, do not modify
         self.__cum_volume = 0.0
@@ -110,13 +110,16 @@ cdef class BaseCandles:
 
     cdef inline void insert_and_reset_candle(self):
         """Insert the current candle into the ring buffer and reset attributes."""
-        self.ringbuffer.insert(self.latest_candle.copy())
-        
-        # Set result if Future is not already done
-        if not self.candle_push_event.done():
-            self.candle_push_event.set_result(self.latest_candle.copy())
-        
-        self.candle_push_event = asyncio.Future[Candle]()
+        cdef object closed_candle = self.latest_candle.copy()
+        self.ringbuffer.insert(closed_candle)
+
+        if isinstance(self.candle_push_event, asyncio.Future):
+            if not self.candle_push_event.done():
+                self.candle_push_event.set_result(closed_candle)
+            else:
+                self.candle_push_event = closed_candle
+        else:
+            self.candle_push_event = closed_candle
         
         self.latest_candle.reset()
         self.__cum_volume = 0.0
@@ -160,7 +163,19 @@ cdef class BaseCandles:
 
     async def __anext__(self) -> Candle:
         """Async next candle."""
-        await self.candle_push_event
-        new_candle = self.candle_push_event.result()
-        self.candle_push_event.set_result(None)
+        cdef object candle_event = self.candle_push_event
+        cdef object new_candle
+
+        if isinstance(candle_event, Candle):
+            self.candle_push_event = None
+            return candle_event
+
+        if candle_event is None:
+            candle_event = asyncio.get_running_loop().create_future()
+            self.candle_push_event = candle_event
+
+        await candle_event
+        new_candle = candle_event.result()
+        if self.candle_push_event is candle_event:
+            self.candle_push_event = None
         return new_candle

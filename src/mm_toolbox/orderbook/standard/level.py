@@ -49,7 +49,7 @@ class OrderbookLevel(Struct):
 
     def has_precision_info(self) -> bool:
         """Check if the orderbook level has precision info."""
-        return self.ticks < -1 and self.lots < -1
+        return self.ticks >= 0 and self.lots >= 0
 
     def reset(self) -> None:
         """Reset the orderbook level to an empty state."""
