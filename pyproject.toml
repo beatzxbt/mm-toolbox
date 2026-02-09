@@ -53,7 +53,7 @@ where = ["src"]
 
 [tool.cibuildwheel]
 build = "cp312-* cp313-*"
-skip = "*-win* *-manylinux_i686"
+skip = "*-manylinux_i686"
 test-command = "pytest {project}/tests"
 test-requires = ["pytest", "pytest-asyncio"]
 
@@ -62,10 +62,6 @@ before-all = "yum install -y gcc-c++ || apt-get update && apt-get install -y g++
 
 [tool.cibuildwheel.macos]
 environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
-
-[tool.cibuildwheel.windows]
-before-build = "pip install delvewheel"
-repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
 
 [dependency-groups]
 dev = [
