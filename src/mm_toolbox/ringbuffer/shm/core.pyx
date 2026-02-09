@@ -167,9 +167,18 @@ cdef class _SharedBytesRing:
             size_t total_len
             u64 capacity
             u64 mask
+            object backing_len
         fd = open(path_b, O_RDWR, 0o600)
         if fd < 0:
             raise OSError(errno, "open failed for shared ring")
+        try:
+            backing_len = os.fstat(fd).st_size
+        except Exception:
+            close(fd)
+            raise
+        if backing_len < _HEADER_SIZE:
+            close(fd)
+            raise RuntimeError("Shared ring backing file too small for header")
         base = mmap(NULL, _HEADER_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)
         if <long>base == -1:
             close(fd)
@@ -185,9 +194,24 @@ cdef class _SharedBytesRing:
             munmap(base, _HEADER_SIZE)
             close(fd)
             raise RuntimeError("Shared ring header invalid")
-        munmap(base, _HEADER_SIZE)
+        if capacity > <u64>((<size_t>-1) - _HEADER_SIZE):
+            munmap(base, _HEADER_SIZE)
+            close(fd)
+            raise RuntimeError("Shared ring header invalid")
 
         total_len = _HEADER_SIZE + <size_t>capacity
+        try:
+            backing_len = os.fstat(fd).st_size
+        except Exception:
+            munmap(base, _HEADER_SIZE)
+            close(fd)
+            raise
+        if backing_len < total_len:
+            munmap(base, _HEADER_SIZE)
+            close(fd)
+            raise RuntimeError("Shared ring backing file too small for header capacity")
+        munmap(base, _HEADER_SIZE)
+
         base = mmap(NULL, total_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)
         if <long>base == -1:
             close(fd)
@@ -201,7 +225,7 @@ cdef class _SharedBytesRing:
         self._unlink_on_close = False
         self._spin_wait = spin_wait if spin_wait > 0 else 1024
         self._capacity = capacity
-        self._mask = self._hdr.mask
+        self._mask = mask
         self._cached_read = self._hdr.read_pos
         self._cached_write = self._hdr.write_pos
 
@@ -435,22 +459,39 @@ cdef class SharedBytesRingBufferProducer(_SharedBytesRing):
 
     cpdef bint insert_packed(self, list[bytes] items):
         """Insert items packed into one message."""
-        cdef Py_ssize_t i, n = len(items)
-        cdef Py_ssize_t total = 0
-        cdef bytes it
+        cdef:
+            Py_ssize_t i, n = len(items)
+            bytes it
+            Py_ssize_t alloc_len
+            u64 total = 0
+            u64 L64
+            u64 capacity = self._capacity
+            bytearray buf
+            unsigned char* p
+            size_t off = 0
+            Py_ssize_t L
+            u64 py_ssize_max = <u64>((<size_t>-1) >> 1)
         if n == 0:
             return True
+        if capacity <= 8:
+            return False
         for i in range(n):
             it = items[i]
-            total += 4 + len(it)
+            L64 = <u64>len(it)
+            if L64 > 0xFFFFFFFF:
+                return False
+            if total > (<u64>-1) - <u64>4 - L64:
+                return False
+            total += <u64>4 + L64
         if total <= 0:
             return True
-        if <u64>(8 + total) > self._capacity:
+        if total > capacity - 8:
             return False
-        cdef bytearray buf = bytearray(<int>total)
-        cdef unsigned char* p = <unsigned char*>buf
-        cdef size_t off = 0
-        cdef Py_ssize_t L
+        if total > py_ssize_max:
+            return False
+        alloc_len = <Py_ssize_t>total
+        buf = bytearray(alloc_len)
+        p = <unsigned char*>buf
         for i in range(n):
             it = items[i]
             L = len(it)
