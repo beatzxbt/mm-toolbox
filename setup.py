@@ -28,7 +28,6 @@ COMPILER_DIRECTIVES = {
     "cpow": True,
 }
 EXTRA_COMPILE_ARGS = [
-    "-march=native",
     "-O3",
     "-Wno-sign-compare",
     "-Wno-unused-function",
