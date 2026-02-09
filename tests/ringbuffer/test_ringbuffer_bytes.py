@@ -80,14 +80,14 @@ class TestBytesRingBufferBasics:
         assert rb.peekleft() == b"first"
         assert rb.peekright() == b"third"
 
-        # Test consume (should return newest)
+        # Test consume (should return oldest)
         consumed = rb.consume()
-        assert consumed == b"third"
+        assert consumed == b"first"
         assert len(rb) == 2
 
         # Test consume_all
         remaining = rb.consume_all()
-        assert remaining == [b"first", b"second"]
+        assert remaining == [b"second", b"third"]
         assert rb.is_empty()
 
     def test_indexing_and_contains(self):
@@ -244,6 +244,15 @@ class TestBytesRingBufferAsyncFunctionality:
 class TestBytesRingBufferFast:
     """Test BytesRingBufferFast behavior."""
 
+    def test_consume_is_fifo(self):
+        """Consume should remove the oldest item first."""
+        rb = BytesRingBufferFast(max_capacity=4, disable_async=True)
+        rb.insert_batch([b"first", b"second", b"third"])
+
+        assert rb.consume() == b"first"
+        assert rb.consume() == b"second"
+        assert rb.consume() == b"third"
+
     def test_oversize_items_raise(self):
         """Oversized inserts should raise instead of truncating."""
         rb = BytesRingBufferFast(
@@ -274,7 +283,16 @@ class TestBytesRingBufferFast:
 
         # aconsume should immediately return without waiting
         result = await asyncio.wait_for(rb.aconsume(), timeout=0.1)
-        assert result == b"existing_2"  # Should get the newest item
+        assert result == b"existing_1"  # Should get the oldest item
+
+    @pytest.mark.asyncio
+    async def test_fast_async_consume_with_existing_data_fifo(self):
+        """Fast async consume should return oldest item first."""
+        rb = BytesRingBufferFast(max_capacity=4, disable_async=False)
+        rb.insert_batch([b"existing_1", b"existing_2"])
+
+        result = await asyncio.wait_for(rb.aconsume(), timeout=0.1)
+        assert result == b"existing_1"
 
 
 class TestBytesRingBufferEdgeCases:

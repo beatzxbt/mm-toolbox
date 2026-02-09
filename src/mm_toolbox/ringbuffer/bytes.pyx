@@ -146,10 +146,11 @@ cdef class BytesRingBuffer:
         return False
 
     cpdef bytes consume(self):
-        """Remove and return the last element from the buffer."""
+        """Remove and return the first (oldest) element from the buffer."""
         self.__enforce_ringbuffer_not_empty()
-        self._head = (self._head - 1) & self._mask
-        cdef bytes item = self._buffer[self._head]
+        cdef u64 tail = self._tail
+        cdef bytes item = self._buffer[tail]
+        self._tail = (tail + 1) & self._mask
         self._size -= 1
         if not self._disable_async and self.is_empty():
             self._buffer_not_empty_event.clear()
@@ -168,7 +169,7 @@ cdef class BytesRingBuffer:
             yield self.consume()
 
     async def aconsume(self):
-        """Remove and return the last element from the buffer."""
+        """Remove and return the first (oldest) element from the buffer."""
         self.__enforce_async_not_disabled()
         if self._size > 0:
             return self.consume()
@@ -176,7 +177,7 @@ cdef class BytesRingBuffer:
         return self.consume()
 
     async def aconsume_iterable(self) -> AsyncIterator[bytes]:
-        """Remove and return the last element from the buffer."""
+        """Yield and remove elements from the buffer in FIFO order."""
         self.__enforce_async_not_disabled()
         while True:
             if self._size > 0:
@@ -512,12 +513,13 @@ cdef class BytesRingBufferFast:
         return False
 
     cpdef bytes consume(self):
-        """Remove and return the last element from the buffer."""
+        """Remove and return the first (oldest) element from the buffer."""
         if self._size == 0:
             raise IndexError("Cannot pop from an empty RingBuffer;")
         
-        self._head = (self._head - 1) & self._mask
-        cdef bytes item = self._make_bytes(self._head)
+        cdef u64 tail = self._tail
+        cdef bytes item = self._make_bytes(tail)
+        self._tail = (tail + 1) & self._mask
         self._size -= 1
         if not self._disable_async and self._size == 0:
             self._buffer_not_empty_event.clear()
@@ -537,7 +539,7 @@ cdef class BytesRingBufferFast:
             yield self.consume()
 
     async def aconsume(self):
-        """Remove and return the last element from the buffer."""
+        """Remove and return the first (oldest) element from the buffer."""
         if self._disable_async:
             raise RuntimeError("Async operations are disabled for this buffer; use `disable_async=False` to enable.")
         if self._size > 0:
@@ -546,7 +548,7 @@ cdef class BytesRingBufferFast:
         return self.consume()
 
     async def aconsume_iterable(self) -> AsyncIterator[bytes]:
-        """Remove and return the last element from the buffer."""
+        """Yield and remove elements from the buffer in FIFO order."""
         if self._disable_async:
             raise RuntimeError("Async operations are disabled for this buffer; use `disable_async=False` to enable.")
         while True:
