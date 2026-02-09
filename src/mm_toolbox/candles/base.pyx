@@ -157,6 +157,12 @@ cdef class BaseCandles:
         """Access a specific candle by index."""
         return self.ringbuffer[index]
 
+    def __getattr__(self, name: str):
+        """Expose selected C-level attributes to Python callers."""
+        if name == "latest_candle":
+            return self.latest_candle
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
     def __aiter__(self) -> AsyncIterator[Candle]:
         """Async iterator over the candles."""
         return self
