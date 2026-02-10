@@ -168,19 +168,19 @@ cdef class NumericRingBuffer:
         return False
 
     cpdef object consume(self):
-        """Remove and return the last element from the buffer."""
+        """Remove and return the first element from the buffer."""
         self.__enforce_ringbuffer_not_empty()
         cdef:
-            u64 head = self._head
+            u64 tail = self._tail
             u64 mask = self._mask
-            u64 new_head = (head - 1) & mask
+            u64 new_tail = (tail + 1) & mask
             cnp.ndarray buf = self._buffer
 
-        self._head = new_head
+        self._tail = new_tail
         self._size -= 1
         if not self._disable_async and self.is_empty():
             self._buffer_not_empty_event.clear()
-        return buf[new_head]
+        return buf[tail]
 
     cpdef cnp.ndarray consume_all(self):
         """Remove and return all elements from the buffer."""
@@ -195,7 +195,7 @@ cdef class NumericRingBuffer:
             yield self.consume()
 
     async def aconsume(self):
-        """Remove and return the last element from the buffer (async)."""
+        """Remove and return the first element from the buffer (async)."""
         self.__enforce_async_not_disabled()
         if self._size > 0:
             return self.consume()

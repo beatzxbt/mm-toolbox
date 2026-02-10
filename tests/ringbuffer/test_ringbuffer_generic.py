@@ -95,15 +95,15 @@ class TestGenericRingBufferBasics:
         rb = GenericRingBuffer(4)
         rb.insert_batch(["a", "b", "c"])
 
-        # Test single consume (should return newest)
+        # Test single consume (should return oldest)
         consumed = rb.consume()
-        assert consumed == "c"
+        assert consumed == "a"
         assert len(rb) == 2
-        assert list(rb.unwrapped()) == ["a", "b"]
+        assert list(rb.unwrapped()) == ["b", "c"]
 
         # Test consume_all
         all_consumed = rb.consume_all()
-        assert all_consumed == ["a", "b"]
+        assert all_consumed == ["b", "c"]
         assert rb.is_empty()
 
     def test_indexing_operations(self):
@@ -266,10 +266,10 @@ class TestGenericRingBufferAsyncFunctionality:
         result2 = await rb.aconsume()
         result3 = await rb.aconsume()
 
-        # Should consume in LIFO order (newest first)
-        assert result1 == "item_3"
+        # Should consume in FIFO order (oldest first)
+        assert result1 == "item_1"
         assert result2 == "item_2"
-        assert result3 == "item_1"
+        assert result3 == "item_3"
 
         assert rb.is_empty()
 
@@ -334,11 +334,11 @@ class TestGenericRingBufferAsyncFunctionality:
 
         # aconsume should immediately return without waiting
         result = await asyncio.wait_for(rb.aconsume(), timeout=0.1)
-        assert result == "existing_2"  # Should get the newest item
+        assert result == "existing_1"  # Should get the oldest item
 
         # Buffer should now have one less item
         assert len(rb) == 1
-        assert rb.peekleft() == "existing_1"
+        assert rb.peekleft() == "existing_2"
 
 
 class TestGenericRingBufferDataTypes:

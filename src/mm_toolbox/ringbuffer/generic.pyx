@@ -158,19 +158,20 @@ cdef class GenericRingBuffer:
         return False
 
     cpdef object consume(self):
-        """Remove and return the last element from the buffer."""
+        """Remove and return the first element from the buffer."""
         self.__enforce_ringbuffer_not_empty()
         cdef:
+            u64     tail = self._tail
             u64     mask = self._mask
-            u64     new_head = (self._head - 1) & mask
+            u64     new_tail = (tail + 1) & mask
             list    buf = self._buffer
 
-        self._head = new_head
+        self._tail = new_tail
         self._size -= 1
         if not self._disable_async and self.is_empty():
             self._buffer_not_empty_event.clear()
 
-        return buf[new_head]
+        return buf[tail]
 
     cpdef list consume_all(self):
         """Remove and return all elements from the buffer."""
@@ -185,7 +186,7 @@ cdef class GenericRingBuffer:
             yield self.consume()
 
     async def aconsume(self):
-        """Remove and return the last element from the buffer."""
+        """Remove and return the first element from the buffer."""
         self.__enforce_async_not_disabled()
         if self._size > 0:
             return self.consume()
@@ -193,7 +194,7 @@ cdef class GenericRingBuffer:
         return self.consume()
 
     async def aconsume_iterable(self) -> AsyncIterator[object]:
-        """Remove and return the last element from the buffer."""
+        """Continuously yield the first element from the buffer."""
         self.__enforce_async_not_disabled()
         while True:
             if self._size > 0:

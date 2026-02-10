@@ -181,12 +181,12 @@ class TestNumericRingBufferBasics:
 
         # Test single consume
         consumed = rb.consume()
-        assert consumed == 7  # Should be the last (newest) element
+        assert consumed == 5  # Should be the first (oldest) element
         assert len(rb) == 2
 
         # Test consume_all
         remaining = rb.consume_all()
-        expected = np.array([5, 6], dtype=np.int32)
+        expected = np.array([6, 7], dtype=np.int32)
         np.testing.assert_array_equal(remaining, expected)
         assert rb.is_empty()
 
@@ -278,6 +278,22 @@ class TestNumericRingBufferAsyncFunctionality:
         assert result == 42.5
 
     @pytest.mark.asyncio
+    async def test_async_consume_iterable_fifo(self):
+        """Test async consume iterable follows FIFO order."""
+        rb = NumericRingBuffer(8, dtype="int64", disable_async=False)
+
+        rb.insert_batch(np.array([10, 20, 30], dtype=np.int64))
+        collected = []
+
+        async for item in rb.aconsume_iterable():
+            collected.append(item)
+            if len(collected) == 3:
+                break
+
+        assert collected == [10, 20, 30]
+        assert rb.is_empty()
+
+    @pytest.mark.asyncio
     async def test_async_disabled_mode(self):
         """Test that async functions are disabled when disable_async=True."""
         rb = NumericRingBuffer(5, dtype="float64", disable_async=True)
@@ -295,4 +311,4 @@ class TestNumericRingBufferAsyncFunctionality:
 
         # aconsume should immediately return without waiting
         result = await asyncio.wait_for(rb.aconsume(), timeout=0.1)
-        assert result == 200  # Should get the newest item
+        assert result == 100  # Should get the oldest item
