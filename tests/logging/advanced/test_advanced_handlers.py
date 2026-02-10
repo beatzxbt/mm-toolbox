@@ -116,11 +116,19 @@ class TestFileLogHandler:
         assert not os.path.exists(invalid_path)
 
     def test_permission_denied(self, temp_file):
-        os.chmod(temp_file, 0o444)  # Read-only
         handler = FileLogHandler(temp_file)
         config = LoggerConfig()
         handler.add_primary_config(config)
-        handler.push([PyLog(1, b"name", PyLogLevel.INFO, b"msg")])
+
+        orig_open = open
+
+        def deny_append(file: str, mode: str = "r", *args, **kwargs):
+            if file == temp_file and mode == "a":
+                raise PermissionError("permission denied")
+            return orig_open(file, mode, *args, **kwargs)
+
+        with patch("builtins.open", side_effect=deny_append):
+            handler.push([PyLog(1, b"name", PyLogLevel.INFO, b"msg")])
         # Should print error
         with open(temp_file) as f:
             assert f.read() == ""  # Nothing written
