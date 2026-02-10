@@ -125,6 +125,9 @@ jobs:
       uses: docker/setup-qemu-action@v3
 
     - name: Build wheels
+      env:
+        CIBW_BUILD_FRONTEND: "pip; args: --no-build-isolation --no-use-pep517"
+        CIBW_BEFORE_BUILD: "python -m pip install -U pip setuptools wheel Cython>=3.0.11 numpy>=1.26"
       run: |
         uv tool run cibuildwheel --output-dir wheelhouse
     
