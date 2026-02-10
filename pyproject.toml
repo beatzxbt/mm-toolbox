@@ -59,7 +59,6 @@ test-requires = ["pytest", "pytest-asyncio"]
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64", "aarch64"]
-environment = { CFLAGS = "-Wno-error=incompatible-pointer-types" }
 
 [tool.cibuildwheel.macos]
 archs = ["x86_64", "arm64"]
