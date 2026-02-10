@@ -1,0 +1,148 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Release environment'
+        required: true
+        default: 'testpypi'
+        type: choice
+        options:
+        - testpypi
+        - pypi
+
+jobs:
+  build-wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.12"
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+
+    - name: Install cibuildwheel
+      run: |
+        uv tool install cibuildwheel
+
+    - name: Set up QEMU (Linux cross-arch builds)
+      if: runner.os == 'Linux'
+      uses: docker/setup-qemu-action@v3
+
+    - name: Build wheels
+      run: |
+        uv tool run cibuildwheel --output-dir wheelhouse
+
+    - name: Upload wheel artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: wheels-${{ matrix.os }}
+        path: wheelhouse/*.whl
+
+  build-sdist:
+    name: Build sdist
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.12"
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+
+    - name: Install build dependencies
+      run: |
+        uv sync --group build
+
+    - name: Build sdist
+      run: |
+        uv run python -m build --sdist
+
+    - name: Check distribution
+      run: |
+        make check-dist
+
+    - name: Upload sdist artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: sdist
+        path: dist/*.tar.gz
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'testpypi'
+    needs: [build-wheels, build-sdist]
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/mm-toolbox
+    
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: wheels-*
+        merge-multiple: true
+        path: dist/
+
+    - name: Download sdist artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: sdist
+        path: dist/
+    
+    - name: Publish to TestPyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        repository-url: https://test.pypi.org/legacy/
+        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+
+  publish-pypi:
+    name: Publish to PyPI
+    if: github.event_name == 'release' || github.event.inputs.environment == 'pypi'
+    needs: [build-wheels, build-sdist]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/mm-toolbox
+    
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: wheels-*
+        merge-multiple: true
+        path: dist/
+
+    - name: Download sdist artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: sdist
+        path: dist/
+    
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}
