@@ -37,13 +37,12 @@ dependencies = [
 
 [build-system]
 requires = [
-    "uv_build>=0.8.0,<0.9",
     "setuptools>=75",
     "wheel",
     "Cython>=3.0.11",
     "numpy>=1.26",
 ]
-build-backend = "uv_build"
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 zip-safe = false
