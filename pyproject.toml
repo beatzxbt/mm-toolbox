@@ -55,7 +55,7 @@ where = ["src"]
 build = "cp312-* cp313-*"
 skip = "*-win* *-manylinux_i686"
 test-command = "pytest {project}/tests"
-test-requires = ["pytest", "pytest-asyncio"]
+test-requires = ["pytest", "pytest-asyncio", "websockets"]
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64", "aarch64"]
