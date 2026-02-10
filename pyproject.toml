@@ -1,6 +1,6 @@
 [project]
 name = "mm-toolbox"
-version = "1.0.0b2"
+version = "1.0.0b3"
 description = "High-performance Python tools for market making systems"
 readme = "README.md"
 authors = [

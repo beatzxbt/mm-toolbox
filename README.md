@@ -41,7 +41,7 @@ To try the beta without replacing a stable install, use a separate virtual envir
 ```bash
 python -m venv mm_toolbox_beta
 source mm_toolbox_beta/bin/activate
-pip install mm-toolbox==1.0.0b2
+pip install mm-toolbox==1.0.0b3
 ```
 
 To always pull the latest pre-release:
