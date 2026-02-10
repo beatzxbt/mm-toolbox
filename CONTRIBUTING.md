@@ -151,9 +151,8 @@ uv run cibuildwheel --platform auto
 
 The `pyproject.toml` is configured to build wheels for:
 - Python 3.12 and 3.13
-- Linux (x86_64, excluding musllinux)
+- Linux (x86_64 and aarch64)
 - macOS (x86_64 and arm64)
-- Windows (x86_64)
 
 ### Testing the Build
 
@@ -165,7 +164,7 @@ make check-dist
 
 # Test installation in a clean environment
 uv venv test-env
-source test-env/bin/activate  # or test-env\Scripts\activate on Windows
+source test-env/bin/activate
 pip install dist/*.whl
 python -c "import mm_toolbox; print('Import successful')"
 deactivate
@@ -268,7 +267,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     
     steps:
     - uses: actions/checkout@v4

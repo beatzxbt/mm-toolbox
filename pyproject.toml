@@ -53,14 +53,16 @@ where = ["src"]
 
 [tool.cibuildwheel]
 build = "cp312-* cp313-*"
-skip = "*-manylinux_i686"
+skip = "*-win* *-manylinux_i686"
 test-command = "pytest {project}/tests"
 test-requires = ["pytest", "pytest-asyncio"]
 
 [tool.cibuildwheel.linux]
+archs = ["x86_64", "aarch64"]
 before-all = "yum install -y gcc-c++ || apt-get update && apt-get install -y g++"
 
 [tool.cibuildwheel.macos]
+archs = ["x86_64", "arm64"]
 environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
 
 [dependency-groups]

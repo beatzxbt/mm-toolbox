@@ -40,6 +40,10 @@ jobs:
       run: |
         uv tool install cibuildwheel
 
+    - name: Set up QEMU (Linux cross-arch builds)
+      if: runner.os == 'Linux'
+      uses: docker/setup-qemu-action@v3
+
     - name: Build wheels
       run: |
         uv tool run cibuildwheel --output-dir wheelhouse
