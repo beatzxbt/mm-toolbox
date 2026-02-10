@@ -4,11 +4,12 @@ from libc.stdint cimport uint64_t as u64
 from ..level.level cimport OrderbookLevel
 
 
-cdef struct OrderbookLadderData:
-    u64 num_levels
-    u64 max_levels
-    OrderbookLevel* levels
-    bint is_price_ascending
+cdef extern from "c/orderbook_ladder.h":
+    ctypedef struct OrderbookLadderData:
+        u64 num_levels
+        u64 max_levels
+        OrderbookLevel* levels
+        int is_price_ascending
 
 
 cdef class OrderbookLadder:
