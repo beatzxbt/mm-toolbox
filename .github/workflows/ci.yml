@@ -30,7 +30,7 @@ jobs:
     
     - name: Install dependencies
       run: |
-        uv sync --all-groups
+        uv sync --all-groups --no-install-project
 
     - name: Build Cython extensions
       run: |
@@ -72,7 +72,7 @@ jobs:
     
     - name: Install build dependencies
       run: |
-        uv sync --group build
+        uv sync --group build --no-install-project
     
     - name: Build wheel
       run: |

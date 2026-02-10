@@ -74,7 +74,7 @@ jobs:
 
     - name: Install build dependencies
       run: |
-        uv sync --group build
+        uv sync --group build --no-install-project
 
     - name: Build sdist
       run: |
