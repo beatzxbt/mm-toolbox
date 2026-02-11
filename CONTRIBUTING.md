@@ -242,6 +242,75 @@ The following files are included in distributions via `MANIFEST.in`:
    - Ensure version number is updated
    - Verify all required metadata is present
 
+#### Beta Release Playbook (Used for 1.0.0b3)
+
+If you are shipping a beta and need Linux + macOS wheels quickly, this is the exact flow that worked:
+
+1. **Run a full local rebuild before tests**:
+   ```bash
+   make rebuild-all
+   make test-all
+   make fix
+   ```
+
+2. **Trigger release workflow on a non-default branch via CLI** (useful when Actions UI snaps back to `main`):
+   ```bash
+   gh workflow run release.yml --ref v1.0b2 -f environment=testpypi
+   gh run list --workflow release.yml --branch v1.0b2 --limit 10
+   gh run watch <run-id>
+   gh run view <run-id> --log-failed
+   ```
+
+3. **Known Linux CI hang pattern**:
+   - We observed Ubuntu wheel jobs hang/timeout in:
+     - `tests/logging/advanced/test_advanced_integration.py`
+     - commonly around `TestIntegration::test_multiple_workers` while waiting on `p.join()`
+   - This blocked Linux wheel publication from CI in some runs.
+
+4. **Local Linux wheel fallback with cibuildwheel** (manylinux x86_64):
+   ```bash
+   # Optional: remove stale local IPC sockets to reduce archive warnings
+   find .ipc -type s -delete 2>/dev/null || true
+
+   CIBW_TEST_COMMAND='python -c "import mm_toolbox"' \
+   uv tool run cibuildwheel --platform linux --archs x86_64 --output-dir wheelhouse-linux
+   ```
+   - The `CIBW_TEST_COMMAND` override keeps a smoke test (`import mm_toolbox`) and avoids full test-suite hangs during wheel build.
+
+5. **Upload wheels directly (skip existing files)**:
+   ```bash
+   set -a && source .env && set +a
+
+   # TestPyPI
+   uv run python -m twine upload \
+     --repository-url https://test.pypi.org/legacy/ \
+     -u __token__ -p "$TEST_PUBLISH_TOKEN" \
+     --skip-existing dist/* wheelhouse-linux/*.whl
+
+   # PyPI
+   uv run python -m twine upload \
+     --repository-url https://upload.pypi.org/legacy/ \
+     -u __token__ -p "$PUBLISH_TOKEN" \
+     --skip-existing dist/* wheelhouse-linux/*.whl
+   ```
+
+6. **Verify artifacts after upload**:
+   ```bash
+   uv run python - <<'PY'
+   import json, urllib.request
+   with urllib.request.urlopen("https://pypi.org/pypi/mm-toolbox/1.0.0b3/json", timeout=30) as r:
+       data = json.load(r)
+   for f in data["urls"]:
+       print(f["filename"])
+   PY
+   ```
+
+7. **Pre-release install note**:
+   ```bash
+   pip install --pre mm-toolbox==1.0.0b3
+   ```
+   - Pre-release versions are excluded by default unless `--pre` is provided.
+
 ### Environment Variables
 
 For automated builds, you can set:
