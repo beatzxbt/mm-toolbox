@@ -89,15 +89,17 @@ class Orderbook:
         for ask in asks:
             ask.add_precision_info(self._tick_size, self._lot_size, unsafe=True)
             ticks = ask.ticks
+            if ticks not in self._asks:
+                self._sorted_ask_ticks.append(ticks)
             self._asks[ticks] = ask
-            self._sorted_ask_ticks.append(ticks)
         self._sorted_ask_ticks.sort()
 
         for bid in bids:
             bid.add_precision_info(self._tick_size, self._lot_size, unsafe=True)
             ticks = bid.ticks
+            if ticks not in self._bids:
+                self._sorted_bid_ticks.append(ticks)
             self._bids[ticks] = bid
-            self._sorted_bid_ticks.append(ticks)
         self._sorted_bid_ticks.sort(reverse=True)
 
         self._is_populated = True

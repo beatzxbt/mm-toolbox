@@ -237,6 +237,60 @@ class TestOrderbookSnapshots:
         with pytest.raises(ValueError, match="Invalid asks with snapshot"):
             ob.consume_snapshot(asks=asks, bids=bids)
 
+    def test_snapshot_deduplicates_duplicate_ticks(self):
+        """Duplicate snapshot ticks should not create duplicate tick-list entries."""
+        ob = Orderbook(tick_size=0.01, lot_size=0.001, size=3)
+
+        bids = [
+            OrderbookLevel(price=100.00, size=1.0, norders=1),
+            OrderbookLevel(price=100.009, size=2.0, norders=2),  # same tick as 100.00
+            OrderbookLevel(price=99.99, size=3.0, norders=3),
+        ]
+        asks = [
+            OrderbookLevel(price=100.01, size=1.5, norders=1),
+            OrderbookLevel(price=100.019, size=2.5, norders=2),  # same tick as 100.01
+            OrderbookLevel(price=100.02, size=3.5, norders=3),
+        ]
+
+        ob.consume_snapshot(asks=asks, bids=bids)
+
+        assert len(ob._bids) == 2
+        assert len(ob._asks) == 2
+        assert ob._sorted_bid_ticks == [10000, 9999]
+        assert ob._sorted_ask_ticks == [10001, 10002]
+
+        # Duplicate ticks collapse to one level; latest level at that tick wins.
+        assert ob._bids[10000].size == 2.0
+        assert ob._asks[10001].size == 2.5
+
+    def test_deleting_deduplicated_snapshot_tick_keeps_state_consistent(self):
+        """Deleting a duplicate snapshot tick should not leave stale tick entries."""
+        ob = Orderbook(tick_size=0.01, lot_size=0.001, size=3)
+
+        bids = [
+            OrderbookLevel(price=100.00, size=1.0, norders=1),
+            OrderbookLevel(price=100.009, size=2.0, norders=2),  # same tick as 100.00
+            OrderbookLevel(price=99.99, size=3.0, norders=3),
+        ]
+        asks = [
+            OrderbookLevel(price=100.01, size=1.5, norders=1),
+            OrderbookLevel(price=100.019, size=2.5, norders=2),  # same tick as 100.01
+            OrderbookLevel(price=100.02, size=3.5, norders=3),
+        ]
+        ob.consume_snapshot(asks=asks, bids=bids)
+
+        ob.consume_deltas(
+            asks=[OrderbookLevel(price=100.019, size=0.0, norders=0)],
+            bids=[OrderbookLevel(price=100.009, size=0.0, norders=0)],
+        )
+
+        assert 10000 not in ob._bids
+        assert 10001 not in ob._asks
+        assert ob._sorted_bid_ticks == [9999]
+        assert ob._sorted_ask_ticks == [10002]
+        assert [level.ticks for level in ob.get_bids()] == [9999]
+        assert [level.ticks for level in ob.get_asks()] == [10002]
+
 
 class TestOrderbookIncrementalUpdates:
     """Test incremental update functionality."""
