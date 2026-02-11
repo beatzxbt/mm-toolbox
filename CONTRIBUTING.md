@@ -242,7 +242,7 @@ The following files are included in distributions via `MANIFEST.in`:
    - Ensure version number is updated
    - Verify all required metadata is present
 
-#### Beta Release Playbook (Used for 1.0.0b3)
+#### Beta Release Playbook (Used for 1.0.0b4)
 
 If you are shipping a beta and need Linux + macOS wheels quickly, this is the exact flow that worked:
 
@@ -273,9 +273,10 @@ If you are shipping a beta and need Linux + macOS wheels quickly, this is the ex
    find .ipc -type s -delete 2>/dev/null || true
 
    CIBW_TEST_COMMAND='python -c "import mm_toolbox"' \
-   uv tool run cibuildwheel --platform linux --archs x86_64 --output-dir wheelhouse-linux
+   uv tool run cibuildwheel --platform linux --archs x86_64 --output-dir dist
    ```
    - The `CIBW_TEST_COMMAND` override keeps a smoke test (`import mm_toolbox`) and avoids full test-suite hangs during wheel build.
+   - Keeping all artifacts in `dist/` avoids a second wheel staging directory.
 
 5. **Upload wheels directly (skip existing files)**:
    ```bash
@@ -285,20 +286,20 @@ If you are shipping a beta and need Linux + macOS wheels quickly, this is the ex
    uv run python -m twine upload \
      --repository-url https://test.pypi.org/legacy/ \
      -u __token__ -p "$TEST_PUBLISH_TOKEN" \
-     --skip-existing dist/* wheelhouse-linux/*.whl
+     --skip-existing dist/*
 
    # PyPI
    uv run python -m twine upload \
      --repository-url https://upload.pypi.org/legacy/ \
      -u __token__ -p "$PUBLISH_TOKEN" \
-     --skip-existing dist/* wheelhouse-linux/*.whl
+     --skip-existing dist/*
    ```
 
 6. **Verify artifacts after upload**:
    ```bash
    uv run python - <<'PY'
    import json, urllib.request
-   with urllib.request.urlopen("https://pypi.org/pypi/mm-toolbox/1.0.0b3/json", timeout=30) as r:
+   with urllib.request.urlopen("https://pypi.org/pypi/mm-toolbox/1.0.0b4/json", timeout=30) as r:
        data = json.load(r)
    for f in data["urls"]:
        print(f["filename"])
@@ -307,7 +308,7 @@ If you are shipping a beta and need Linux + macOS wheels quickly, this is the ex
 
 7. **Pre-release install note**:
    ```bash
-   pip install --pre mm-toolbox==1.0.0b3
+   pip install --pre mm-toolbox==1.0.0b4
    ```
    - Pre-release versions are excluded by default unless `--pre` is provided.
 
@@ -348,11 +349,11 @@ jobs:
       run: pip install uv
     
     - name: Build wheels
-      run: uv run cibuildwheel --output-dir wheelhouse
+      run: uv run cibuildwheel --output-dir dist
     
     - uses: actions/upload-artifact@v3
       with:
-        path: ./wheelhouse/*.whl
+        path: ./dist/*.whl
 ```
 
 ## 📋 Contribution Types

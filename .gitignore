@@ -20,7 +20,6 @@ __pycache__/
 build/
 develop-eggs/
 dist/
-wheelhouse-linux/
 downloads/
 eggs/
 .eggs/
