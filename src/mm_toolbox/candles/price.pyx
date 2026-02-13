@@ -7,9 +7,9 @@ cdef class PriceCandles(BaseCandles):
     
     A new candle is created when the price moves by a specified amount from the opening price.
     """
-    def __init__(self, double price_bucket, int num_candles=1000):
+    def __init__(self, double price_bucket, int num_candles=1000, bint store_trades=True):
         """Initialize the price-based candle aggregator."""
-        BaseCandles.__init__(self, num_candles)
+        BaseCandles.__init__(self, num_candles, store_trades)
         self.price_bucket = price_bucket
         self.upper_price_bound = 0.0
         self.lower_price_bound = 0.0
@@ -45,7 +45,8 @@ cdef class PriceCandles(BaseCandles):
             self.latest_candle.sell_volume += volume
 
         self.latest_candle.vwap = self.calculate_vwap(price, size)
-        self.latest_candle.trades.append(trade)
+        if self._store_trades:
+            self.latest_candle.trades.append(trade)
         self.latest_candle.num_trades += 1
         self.latest_candle.close_time_ms = time_ms
 

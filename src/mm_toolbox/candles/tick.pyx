@@ -7,9 +7,9 @@ cdef class TickCandles(BaseCandles):
     
     A new candle is created when the specified number of trades is reached.
     """
-    def __init__(self, int ticks_per_bucket, int num_candles=1000):
+    def __init__(self, int ticks_per_bucket, int num_candles=1000, bint store_trades=True):
         """Initialize the tick-based candle aggregator."""
-        BaseCandles.__init__(self, num_candles)
+        BaseCandles.__init__(self, num_candles, store_trades)
         self.ticks_per_bucket = ticks_per_bucket
 
     cpdef void process_trade(self, object trade):
@@ -45,7 +45,8 @@ cdef class TickCandles(BaseCandles):
             self.latest_candle.sell_volume += volume
 
         self.latest_candle.vwap = self.calculate_vwap(price, size)
-        self.latest_candle.trades.append(trade)
+        if self._store_trades:
+            self.latest_candle.trades.append(trade)
         self.latest_candle.num_trades += 1
         self.latest_candle.close_time_ms = time_ms
 

@@ -6,13 +6,13 @@ cdef class VolumeCandles(BaseCandles):
     """
     Candle aggregator that creates new candles based on a fixed volume threshold.
     """
-    def __init__(self, double volume_per_bucket, int num_candles=1000):
+    def __init__(self, double volume_per_bucket, int num_candles=1000, bint store_trades=True):
         """Initialize the volume-based candle aggregator."""
         if volume_per_bucket <= 0.0:
             raise ValueError(
                 f"Invalid volume_per_bucket; expected >0 but got {volume_per_bucket}"
             )
-        BaseCandles.__init__(self, num_candles)
+        BaseCandles.__init__(self, num_candles, store_trades)
         self.volume_per_bucket = volume_per_bucket
 
     cpdef void process_trade(self, object trade):
@@ -62,17 +62,18 @@ cdef class VolumeCandles(BaseCandles):
                 self.latest_candle.sell_volume += volume
 
             self.latest_candle.vwap = self.calculate_vwap(price, chunk_size)
-            if chunk_size == remaining_size:
-                self.latest_candle.trades.append(trade)
-            else:
-                self.latest_candle.trades.append(
-                    Trade(
-                        time_ms=trade.time_ms,
-                        is_buy=is_buy,
-                        price=price,
-                        size=chunk_size,
+            if self._store_trades:
+                if chunk_size == remaining_size:
+                    self.latest_candle.trades.append(trade)
+                else:
+                    self.latest_candle.trades.append(
+                        Trade(
+                            time_ms=trade.time_ms,
+                            is_buy=is_buy,
+                            price=price,
+                            size=chunk_size,
+                        )
                     )
-                )
             self.latest_candle.num_trades += 1
             self.latest_candle.close_time_ms = time_ms
 

@@ -5,6 +5,7 @@ cdef class BaseCandles:
         object latest_candle
         GenericRingBuffer ringbuffer
         object candle_push_event
+        bint _store_trades
 
         double __cum_volume
         double __total_size

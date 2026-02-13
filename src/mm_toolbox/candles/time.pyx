@@ -5,9 +5,9 @@ from mm_toolbox.candles.base cimport BaseCandles
 cdef class TimeCandles(BaseCandles):
     """Candle aggregator that creates new candles based on a fixed time interval."""
     
-    def __init__(self, double secs_per_bucket, int num_candles=1000):
+    def __init__(self, double secs_per_bucket, int num_candles=1000, bint store_trades=True):
         """Initialize the time-based candle aggregator."""
-        BaseCandles.__init__(self, num_candles)
+        BaseCandles.__init__(self, num_candles, store_trades)
         self.millis_per_bucket = secs_per_bucket * 1000.0
         self.next_candle_close_time = time_ms() + self.millis_per_bucket
 
@@ -52,6 +52,7 @@ cdef class TimeCandles(BaseCandles):
             self.latest_candle.sell_volume += volume
 
         self.latest_candle.vwap = self.calculate_vwap(price, size)
-        self.latest_candle.trades.append(trade)
+        if self._store_trades:
+            self.latest_candle.trades.append(trade)
         self.latest_candle.num_trades += 1
         self.latest_candle.close_time_ms = time_ms

@@ -54,9 +54,26 @@ class Candle(Struct):
         self.num_trades = 0
         self.trades.clear()
 
-    def copy(self) -> Self:
+    def copy(self, include_trades: bool = True) -> Self:
         """Create a copy of the candle."""
-        return copy.deepcopy(self)
+        if include_trades:
+            return copy.deepcopy(self)
+
+        return type(self)(
+            open_time_ms=self.open_time_ms,
+            close_time_ms=self.close_time_ms,
+            open_price=self.open_price,
+            high_price=self.high_price,
+            low_price=self.low_price,
+            close_price=self.close_price,
+            buy_size=self.buy_size,
+            buy_volume=self.buy_volume,
+            sell_size=self.sell_size,
+            sell_volume=self.sell_volume,
+            vwap=self.vwap,
+            num_trades=self.num_trades,
+            trades=[],
+        )
 
     @classmethod
     def empty(cls) -> Self:
@@ -90,11 +107,12 @@ cdef class BaseCandles:
         self.__cum_volume = 0.0
         self.__total_size = 0.0
 
-    def __init__(self, u64 num_candles=1000):
+    def __init__(self, u64 num_candles=1000, bint store_trades=True):
         """Initialize ring buffer capacity and validate settings."""
         if num_candles <= 0:
             raise ValueError(f"Invalid number of candles; expected >1 but got {num_candles}")
         self.ringbuffer = GenericRingBuffer(max_capacity=num_candles)
+        self._store_trades = store_trades
 
     cdef inline double calculate_vwap(self, double price, double size) noexcept nogil:
         """Calculate the current VWAP (Volume-Weighted Average Price)."""
@@ -110,7 +128,9 @@ cdef class BaseCandles:
 
     cdef inline void insert_and_reset_candle(self):
         """Insert the current candle into the ring buffer and reset attributes."""
-        cdef object closed_candle = self.latest_candle.copy()
+        cdef object closed_candle = self.latest_candle.copy(
+            include_trades=self._store_trades
+        )
         self.ringbuffer.insert(closed_candle)
 
         if isinstance(self.candle_push_event, asyncio.Future):
