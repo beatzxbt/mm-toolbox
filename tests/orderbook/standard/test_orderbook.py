@@ -189,7 +189,7 @@ class TestOrderbookSnapshots:
         assert len(ob._asks) == 3
 
         # Check internal tick sorting
-        assert ob._sorted_bid_ticks == [10000, 9999, 9998]  # Descending
+        assert ob._sorted_bid_ticks == [9998, 9999, 10000]  # Ascending
         assert ob._sorted_ask_ticks == [10001, 10002, 10003]  # Ascending
 
     def test_snapshot_without_precision_info(self):
@@ -256,7 +256,7 @@ class TestOrderbookSnapshots:
 
         assert len(ob._bids) == 2
         assert len(ob._asks) == 2
-        assert ob._sorted_bid_ticks == [10000, 9999]
+        assert ob._sorted_bid_ticks == [9999, 10000]
         assert ob._sorted_ask_ticks == [10001, 10002]
 
         # Duplicate ticks collapse to one level; latest level at that tick wins.
@@ -340,7 +340,7 @@ class TestOrderbookIncrementalUpdates:
 
         assert len(self.ob._bids) == 2
         assert 10000 not in self.ob._bids
-        assert self.ob._sorted_bid_ticks == [9999, 9998]
+        assert self.ob._sorted_bid_ticks == [9998, 9999]
 
         best_bid, _ = self.ob.get_bbo()
         assert best_bid.price == 99.99
@@ -462,6 +462,64 @@ class TestOrderbookAccessors:
 
         top3_ask_prices = [ask.price for ask in list(self.ob.iter_asks())[:3]]
         assert top3_ask_prices == [100.01, 100.02, 100.03]
+
+    def test_get_levels_with_depth(self):
+        """Test get_asks/get_bids depth argument behavior."""
+        expected_bid_prices = [100.00, 99.99, 99.98, 99.97, 99.96]
+        expected_ask_prices = [100.01, 100.02, 100.03, 100.04, 100.05]
+
+        assert [b.price for b in self.ob.get_bids(depth=None)] == expected_bid_prices
+        assert [a.price for a in self.ob.get_asks(depth=None)] == expected_ask_prices
+
+        assert self.ob.get_bids(depth=0) == []
+        assert self.ob.get_asks(depth=0) == []
+
+        assert [b.price for b in self.ob.get_bids(depth=1)] == [100.00]
+        assert [a.price for a in self.ob.get_asks(depth=1)] == [100.01]
+
+        depth_len = len(expected_bid_prices)
+        assert [
+            b.price for b in self.ob.get_bids(depth=depth_len)
+        ] == expected_bid_prices
+        assert [
+            a.price for a in self.ob.get_asks(depth=depth_len)
+        ] == expected_ask_prices
+
+        assert [
+            b.price for b in self.ob.get_bids(depth=depth_len + 5)
+        ] == expected_bid_prices
+        assert [
+            a.price for a in self.ob.get_asks(depth=depth_len + 5)
+        ] == expected_ask_prices
+
+    def test_iter_levels_with_depth(self):
+        """Test iter_asks/iter_bids depth argument behavior."""
+        expected_bid_prices = [100.00, 99.99, 99.98, 99.97, 99.96]
+        expected_ask_prices = [100.01, 100.02, 100.03, 100.04, 100.05]
+
+        assert [b.price for b in self.ob.iter_bids(depth=None)] == expected_bid_prices
+        assert [a.price for a in self.ob.iter_asks(depth=None)] == expected_ask_prices
+
+        assert list(self.ob.iter_bids(depth=0)) == []
+        assert list(self.ob.iter_asks(depth=0)) == []
+
+        assert [b.price for b in self.ob.iter_bids(depth=1)] == [100.00]
+        assert [a.price for a in self.ob.iter_asks(depth=1)] == [100.01]
+
+        depth_len = len(expected_bid_prices)
+        assert [
+            b.price for b in self.ob.iter_bids(depth=depth_len)
+        ] == expected_bid_prices
+        assert [
+            a.price for a in self.ob.iter_asks(depth=depth_len)
+        ] == expected_ask_prices
+
+        assert [
+            b.price for b in self.ob.iter_bids(depth=depth_len + 5)
+        ] == expected_bid_prices
+        assert [
+            a.price for a in self.ob.iter_asks(depth=depth_len + 5)
+        ] == expected_ask_prices
 
 
 class TestOrderbookCalculations:
@@ -665,7 +723,7 @@ class TestOrderbookIntegrationAndEdgeCases:
             assert best_bid.price <= best_ask.price
 
             # Verify internal tick ordering
-            assert ob._sorted_bid_ticks == sorted(ob._sorted_bid_ticks, reverse=True)
+            assert ob._sorted_bid_ticks == sorted(ob._sorted_bid_ticks)
             assert ob._sorted_ask_ticks == sorted(ob._sorted_ask_ticks)
 
     def test_floating_point_precision(self):
@@ -792,7 +850,7 @@ class TestPrecisionAndIntegerArithmetic:
         assert spread == 0.02
 
         # Verify using integer arithmetic
-        best_bid_ticks = ob._sorted_bid_ticks[0]
+        best_bid_ticks = ob._sorted_bid_ticks[-1]
         best_ask_ticks = ob._sorted_ask_ticks[0]
         spread_ticks = best_ask_ticks - best_bid_ticks
 

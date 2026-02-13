@@ -14,6 +14,16 @@ def size_to_lots(size: float, lot_size: float) -> int:
     return int(floor(size / lot_size))
 
 
+def price_to_ticks_fast(price: float, inv_tick_size: float) -> int:
+    """Convert a price to integer ticks using a pre-computed inverse tick size."""
+    return int(price * inv_tick_size)
+
+
+def size_to_lots_fast(size: float, inv_lot_size: float) -> int:
+    """Convert a size to integer lots using a pre-computed inverse lot size."""
+    return int(size * inv_lot_size)
+
+
 def price_from_ticks(ticks: int, tick_size: float) -> float:
     """Convert integer ticks to price."""
     return ticks * tick_size
@@ -60,7 +70,12 @@ class OrderbookLevel(Struct):
         self.lots = -1
 
     def add_precision_info(
-        self, tick_size: float, lot_size: float, unsafe: bool = False
+        self,
+        tick_size: float,
+        lot_size: float,
+        unsafe: bool = False,
+        inv_tick_size: float | None = None,
+        inv_lot_size: float | None = None,
     ) -> None:
         """Add precision information to the orderbook level.
 
@@ -71,9 +86,24 @@ class OrderbookLevel(Struct):
                 raise ValueError(f"Invalid tick_size; expected >0 but got {tick_size}")
             if lot_size <= 0.0:
                 raise ValueError(f"Invalid lot_size; expected >0 but got {lot_size}")
+            if inv_tick_size is not None and inv_tick_size <= 0.0:
+                raise ValueError(
+                    f"Invalid inv_tick_size; expected >0 but got {inv_tick_size}"
+                )
+            if inv_lot_size is not None and inv_lot_size <= 0.0:
+                raise ValueError(
+                    f"Invalid inv_lot_size; expected >0 but got {inv_lot_size}"
+                )
 
-        self.ticks = price_to_ticks(self.price, tick_size)
-        self.lots = size_to_lots(self.size, lot_size)
+        if inv_tick_size is None:
+            self.ticks = price_to_ticks(self.price, tick_size)
+        else:
+            self.ticks = price_to_ticks_fast(self.price, inv_tick_size)
+
+        if inv_lot_size is None:
+            self.lots = size_to_lots(self.size, lot_size)
+        else:
+            self.lots = size_to_lots_fast(self.size, inv_lot_size)
 
     @classmethod
     def from_values(
