@@ -1,4 +1,4 @@
-"""Threading and timed operation tests for WsConnection."""
+"""Latency task and timed operation tests for WsConnection."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pytest
 
 @pytest.mark.asyncio
 class TestWsConnectionThreading:
-    """Validate background timing behavior for WsConnection."""
+    """Validate background latency timing behavior for WsConnection."""
 
     async def test_ema_latency_tracking(
         self,
@@ -34,12 +34,12 @@ class TestWsConnectionThreading:
             assert conn.get_state().latency_ms < 1000.0
             conn.close()
 
-    async def test_timed_operations_thread_lifecycle(
+    async def test_latency_task_lifecycle(
         self,
         basic_server,
         connection_factory,
     ) -> None:
-        """Ensure timed operations thread starts and stops cleanly.
+        """Ensure latency task starts and stops cleanly.
 
         Args:
             basic_server: Fixture providing a basic echo server.
@@ -50,12 +50,12 @@ class TestWsConnectionThreading:
         """
         async with basic_server:
             conn = await connection_factory(basic_server)
-            thread = getattr(conn, "_timed_operations_thread", None)
-            assert thread is not None
-            assert thread.is_alive()
+            task = getattr(conn, "_latency_task", None)
+            assert task is not None
+            assert task.done() is False
             conn.close()
-            await asyncio.sleep(1.5)
-            assert thread.is_alive() is False
+            await asyncio.sleep(0.1)
+            assert task.done() is True
 
     async def test_ping_interval_timing(
         self,

@@ -699,6 +699,19 @@ async def running_server(
 
 
 @pytest.fixture
+def live_timeout_s(request: pytest.FixtureRequest) -> float:
+    """Live-test timeout from command line options.
+
+    Args:
+        request (pytest.FixtureRequest): Pytest fixture request.
+
+    Returns:
+        float: Timeout in seconds.
+    """
+    return float(request.config.getoption("--live-timeout"))
+
+
+@pytest.fixture
 def live_test_config() -> dict[str, Any]:
     """Configuration for live tests.
 
@@ -707,9 +720,10 @@ def live_test_config() -> dict[str, Any]:
     """
     return {
         "binance_futures_base": "wss://fstream.binance.com/ws",
-        "binance_spot_base": "wss://stream.binance.com:9443/ws",
-        "test_symbols": ["btcusdt", "ethusdt", "bnbusdt"],
-        "connection_timeout": 10,
-        "message_wait_time": 5,
-        "latency_timeout": 15,
+        "binance_futures_combined_base": "wss://fstream.binance.com/stream?streams=",
+        "test_symbols": ["btcusdt", "ethusdt", "solusdt"],
+        "stream_kinds": ["bookTicker", "trade"],
+        "connection_timeout": 10.0,
+        "freshness_budget_ms": 15_000,
+        "clock_future_drift_ms": 2_000,
     }

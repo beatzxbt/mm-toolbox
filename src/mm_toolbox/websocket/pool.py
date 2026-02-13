@@ -202,6 +202,8 @@ class WsPool:
                 safe_url,
                 on_connect=self._config.on_connect,
                 auto_reconnect=self._config.auto_reconnect,
+                max_frame_size=self._config.max_frame_size,
+                latency_ping_interval_ms=self._config.latency_ping_interval_ms,
             )
             if config.wss_url != base_url:
                 # Preserve ws:// URLs for local test servers after validation.

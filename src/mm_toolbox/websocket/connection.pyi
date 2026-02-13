@@ -18,6 +18,8 @@ class WsConnectionConfig(msgspec.Struct):
     wss_url: str
     on_connect: list[bytes]
     auto_reconnect: bool
+    max_frame_size: int
+    latency_ping_interval_ms: int
     @classmethod
     def default(
         cls,
@@ -25,6 +27,8 @@ class WsConnectionConfig(msgspec.Struct):
         conn_id: int | None = None,
         on_connect: list[bytes] | None = None,
         auto_reconnect: bool | None = None,
+        max_frame_size: int | None = None,
+        latency_ping_interval_ms: int | None = None,
     ) -> WsConnectionConfig: ...
 
 class LatencyTrackerState(msgspec.Struct):
@@ -50,9 +54,6 @@ class WsConnection(WSListener):
 
     def __init__(self, ringbuffer: BytesRingBuffer, config: WsConnectionConfig) -> None:
         """Initializes a new Websocket connection."""
-        ...
-    def _timed_operations(self) -> None:
-        """Performs timed operations for the connection."""
         ...
     def set_on_connect(self, on_connect: list[bytes]) -> None:
         """Sets the on_connect list."""

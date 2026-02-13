@@ -26,21 +26,21 @@ cdef class WsConnection(WSListener):
         double          _tracker_ping_sent_time_ms
         double          _tracker_pong_recv_time_ms
 
-        bytes           _unfin_msg_buffer
+        bytearray       _unfin_msg_buffer
         int             _unfin_msg_size
 
         WSTransport     _transport
         int             _reconnect_attempts
         bint            _should_stop
 
-        public object   _timed_operations_thread
+        public object   _latency_task
         object          _loop
 
-    cpdef void          _timed_operations(self)
     cpdef void          set_on_connect(self, list[bytes] on_connect)
     cpdef void          send_ping(self, bytes msg=*)
     cpdef void          send_pong(self, bytes msg=*)
     cpdef void          send_data(self, bytes msg)
+    cpdef void          send_data_bytearray(self, bytearray msg)
     cpdef void          close(self)
     cpdef object        get_config(self)
     cpdef object        get_state(self)

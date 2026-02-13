@@ -36,13 +36,12 @@ This directory contains comprehensive tests for the mm-toolbox WebSocket impleme
 - **Async iteration**: Message consumption from pool ringbuffer
 - **Error handling**: Connection failures, concurrent operations
 
-### 5. Live Binance Tests (`test_websocket_live_binance.py`)
-- **Real stream validation**: BookTicker, Trades, Depth streams
-- **Data structure validation**: JSON parsing, field validation, price/quantity checks
-- **Performance testing**: Message rates, latency measurements
-- **Pool testing**: Multiple connections, latency comparison
-- **Error handling**: Invalid streams, connection interruptions
-- **Multi-symbol testing**: Concurrent connections to different symbols
+### 5. Live Binance Tests (`integration/test_live_binance.py`)
+- **Smoke coverage**: BTC futures `@bookTicker` for both `WsSingle` and `WsPool`
+- **Load coverage**: Combined BTC/ETH/SOL futures streams for `@bookTicker` and raw `@trade`
+- **Strict decoding**: Typed `msgspec` decoders with strict parsing (no permissive fallback)
+- **Deterministic validation**: Schema, symbol/stream coverage, and event freshness checks
+- **Pool coverage**: Active connection checks plus combined-stream message validation
 
 **⚠️ Note**: Live tests require `--run-live` flag and internet connection
 
@@ -88,8 +87,11 @@ uv run pytest tests/websocket/test_websocket_integration.py -v
 
 ### Live Tests (Require Internet)
 ```bash
-# Run live tests with Binance streams
-uv run pytest tests/websocket/test_websocket_live_binance.py --run-live -v -s
+# Run futures smoke tests (live, non-stress)
+uv run pytest tests/websocket/integration/test_live_binance.py -m "live and not stress" --run-live -v -s
+
+# Run futures load/stress tests (BTC/ETH/SOL @bookTicker + @trade)
+uv run pytest tests/websocket/integration/test_live_binance.py -m "live and stress" --run-live --live-timeout 60 -v -s
 
 # Run all tests including live tests
 uv run pytest tests/websocket/ --run-live -v
@@ -108,8 +110,8 @@ uv run pytest tests/websocket/ --run-live -v
 # Run with timing information
 uv run pytest tests/websocket/ -v --durations=10
 
-# Run specific performance tests
-uv run pytest tests/websocket/test_websocket_live_binance.py::TestBinanceLivePerformance --run-live -v -s
+# Run only live load tests
+uv run pytest tests/websocket/integration/test_live_binance.py -m "live and stress" --run-live --live-timeout 60 -v -s
 ```
 
 ## Test Coverage
@@ -147,23 +149,22 @@ The test suite provides comprehensive coverage of:
 ## Live Test Details
 
 ### Binance Streams Tested
-- **BookTicker**: `btcusdt@bookTicker` - Real-time best bid/ask prices
-- **Trades**: `btcusdt@aggTrade` - Aggregated trade data  
-- **Depth**: `btcusdt@depth@100ms` - Order book updates (100ms)
-- **Multi-symbol**: Tests with BTC, ETH, BNB pairs
+- **Smoke stream**: `btcusdt@bookTicker` (futures)
+- **Load streams**: `btcusdt`, `ethusdt`, `solusdt` on `@bookTicker` and raw `@trade`
+- **Transport mode**: combined futures stream endpoint for load tests
 
 ### Validation Performed
-- JSON structure validation
-- Price/quantity range validation  
-- Timestamp and sequence validation
-- Message rate and latency measurement
-- Connection stability over time
+- Strict `msgspec` schema validation
+- Price/quantity numeric and invariant checks
+- Timestamp freshness and clock-sanity checks
+- Required stream coverage across all configured symbols
+- Connection stability for single and pool wrappers
 
-### Performance Benchmarks
-- **Message Rate**: >5 messages/second minimum
-- **Latency**: <500ms average, <1000ms maximum
-- **Connection Pool**: Latency improvement measurement
-- **Throughput**: 1000 operations <1 second
+### Deterministic Pass Criteria
+- No decode failures with strict typed decoders
+- All expected streams are observed within timeout
+- Event timestamps remain fresh relative to local receive time
+- Required field-level invariants remain valid per event type
 
 ## Troubleshooting
 
@@ -177,7 +178,7 @@ The test suite provides comprehensive coverage of:
 2. **Live Test Failures**: Check internet connection and Binance API status
    ```bash
    # Test with single connection first
-   uv run pytest tests/websocket/test_websocket_live_binance.py::TestBinanceLiveConnections::test_single_bookticker_connection --run-live -v -s
+   uv run pytest tests/websocket/integration/test_live_binance.py::test_single_btc_bookticker_smoke --run-live -v -s
    ```
 
 3. **Thread Cleanup Warnings**: Some tests may show thread cleanup warnings - this is normal for daemon threads

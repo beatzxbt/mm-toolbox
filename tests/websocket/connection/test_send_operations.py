@@ -39,6 +39,20 @@ class TestWsConnectionSendOperations:
             assert payload in basic_server.get_received_messages()
             conn.close()
 
+    async def test_send_data_bytearray_with_active_transport(
+        self,
+        basic_server,
+        connection_factory,
+    ) -> None:
+        """Ensure send_data_bytearray delivers payloads to the server."""
+        async with basic_server:
+            conn = await connection_factory(basic_server)
+            payload = bytearray(b"bytearray message")
+            conn.send_data_bytearray(payload)
+            await asyncio.sleep(0.1)
+            assert bytes(payload) in basic_server.get_received_messages()
+            conn.close()
+
     async def test_send_data_without_transport(
         self,
         basic_server,
