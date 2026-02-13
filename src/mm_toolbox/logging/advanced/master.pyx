@@ -2,6 +2,7 @@ import contextlib
 import threading
 import time
 
+from libc.string cimport memcpy
 from libc.stdint cimport (
     uint8_t as u8,
     uint32_t as u32,
@@ -65,34 +66,76 @@ cdef class MasterLogger:
         """Decode binary CLog messages from workers into PyLog objects."""
         cdef:
             BinaryReader reader = BinaryReader(serialized_message)
+            const unsigned char[:] buffer_view = serialized_message
+            object serialized_view = memoryview(serialized_message)
             u8 msg_type = reader.read_u8()  # Ignore if not needed
             u64 batch_ts = reader.read_u64()  # Ignore if not needed
             u32 data_len = reader.read_u32()
-            bytes data = reader.read_bytes(data_len)
+            u32 data_start = reader._pos
+            u32 data_end = data_start + data_len
 
-            BinaryReader data_reader = BinaryReader(data)
-            u32 worker_name_len = data_reader.read_u32()
-            bytes worker_name = data_reader.read_bytes(worker_name_len)  # Batch-level name; can use or ignore
-            u32 num_logs = data_reader.read_u32()
+            u32 cursor
+            u32 worker_name_len
+            u32 worker_name_start
+            u32 worker_name_end
+            bytes worker_name
+            u32 num_logs
 
             list decoded_logs = []
             u64 timestamp_ns
-            u32 name_len
-            bytes name
             u8 level_int
             object pylevel
             u32 message_len
-            bytes message
+            u32 message_start
+            u32 message_end
+            object message_view
 
             u32 i
 
+        if data_end > reader._len:
+            raise ValueError("Buffer underrun reading bytes")
+
+        cursor = data_start
+
+        if cursor + 4 > data_end:
+            raise ValueError("Buffer underrun reading worker name length")
+        memcpy(&worker_name_len, &buffer_view[cursor], sizeof(u32))
+        cursor += 4
+
+        worker_name_start = cursor
+        worker_name_end = worker_name_start + worker_name_len
+        if worker_name_end > data_end:
+            raise ValueError("Buffer underrun reading worker name")
+        worker_name = bytes(serialized_view[worker_name_start:worker_name_end])
+        cursor = worker_name_end
+
+        if cursor + 4 > data_end:
+            raise ValueError("Buffer underrun reading log count")
+        memcpy(&num_logs, &buffer_view[cursor], sizeof(u32))
+        cursor += 4
+
         for i in range(num_logs):
-            timestamp_ns = data_reader.read_u64()
-            name_len = data_reader.read_u32()
-            name = data_reader.read_bytes(name_len)
-            level_int = data_reader.read_u8()
-            message_len = data_reader.read_u32()
-            message = data_reader.read_bytes(message_len)
+            if cursor + 8 > data_end:
+                raise ValueError("Buffer underrun reading log timestamp")
+            memcpy(&timestamp_ns, &buffer_view[cursor], sizeof(u64))
+            cursor += 8
+
+            if cursor + 1 > data_end:
+                raise ValueError("Buffer underrun reading log level")
+            level_int = <u8>buffer_view[cursor]
+            cursor += 1
+
+            if cursor + 4 > data_end:
+                raise ValueError("Buffer underrun reading message length")
+            memcpy(&message_len, &buffer_view[cursor], sizeof(u32))
+            cursor += 4
+
+            message_start = cursor
+            message_end = message_start + message_len
+            if message_end > data_end:
+                raise ValueError("Buffer underrun reading log message")
+            message_view = serialized_view[message_start:message_end]
+            cursor = message_end
 
             # Convert CLogLevel int to PyLogLevel
             if level_int == 0:  # TRACE
@@ -110,9 +153,9 @@ cdef class MasterLogger:
             
             decoded_logs.append(PyLog(
                 timestamp_ns=timestamp_ns,
-                name=name,
+                name=worker_name,
                 level=pylevel,
-                message=message
+                message=message_view
             ))
 
         return decoded_logs

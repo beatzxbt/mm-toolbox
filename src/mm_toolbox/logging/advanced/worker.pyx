@@ -13,10 +13,7 @@ from mm_toolbox.ringbuffer.ipc import IPCRingBufferProducer, IPCRingBufferConfig
 from mm_toolbox.logging.advanced.log cimport CLogLevel
 from mm_toolbox.logging.advanced.protocol cimport (
     BinaryWriter, 
-    MessageType, 
-    InternalMessage, 
-    create_internal_message, 
-    internal_message_to_bytes
+    MessageType
 )
 
 from mm_toolbox.logging.advanced.config cimport LoggerConfig
@@ -73,24 +70,18 @@ cdef class WorkerLogger:
         """Flush pending logs."""
         if self._num_pending_logs == 0:
             return
-        
-        cdef BinaryWriter data_writer = BinaryWriter(8 + self._len_name + self._batch_writer.length())
-        data_writer.write_u32(self._len_name)
-        data_writer.write_chars(self._name_as_chars, self._len_name)
-        data_writer.write_u32(self._num_pending_logs)
-        data_writer.write_chars(self._batch_writer._buffer, self._batch_writer.length())
-        
-        cdef unsigned char* data_ptr
-        cdef u32 data_len
-        data_ptr, data_len = data_writer.finalize_to_chars()
 
-        cdef InternalMessage internal_message = create_internal_message(
-            type=MessageType.LOG, 
-            timestamp_ns=time_ns(),
-            len=data_len, 
-            data=data_ptr
-        )
-        self._transport.insert(internal_message_to_bytes(internal_message))
+        cdef u32 batch_len = self._batch_writer.length()
+        cdef u32 data_len = 4 + self._len_name + 4 + batch_len
+        cdef BinaryWriter writer = BinaryWriter(1 + 8 + 4 + data_len)
+        writer.write_u8(<u8>MessageType.LOG)
+        writer.write_u64(time_ns())
+        writer.write_u32(data_len)
+        writer.write_u32(self._len_name)
+        writer.write_chars(self._name_as_chars, self._len_name)
+        writer.write_u32(self._num_pending_logs)
+        writer.write_chars(self._batch_writer._buffer, batch_len)
+        self._transport.insert(writer.finalize())
 
         self._batch_writer.reset()
         self._num_pending_logs = 0
@@ -99,22 +90,16 @@ cdef class WorkerLogger:
         """Add a log to the batch."""
         cdef u64 time_now_ns = time_ns()
         self._batch_writer.write_u64(time_now_ns)
-        
-        self._batch_writer.write_u32(self._len_name)
-        self._batch_writer.write_chars(self._name_as_chars, self._len_name)
-        
         self._batch_writer.write_u8(<u8>clevel)
-        
         self._batch_writer.write_u32(message_len)
         self._batch_writer.write_chars(message, message_len)
-        
         self._num_pending_logs += 1
 
     cpdef void trace(self, str msg_str=None, bytes msg_bytes=b""):
         """Send a trace-level log message."""
         if msg_str is not None and msg_bytes:
             raise TypeError("Provide only one of msg_str or msg_bytes")
-        if self._is_running:
+        if self._is_running and CLogLevel.TRACE >= self._config.base_level:
             message = msg_str.encode('utf-8') if msg_str else msg_bytes
             self._add_log_to_batch(CLogLevel.TRACE, len(message), <unsigned char*>message)
 
@@ -122,7 +107,7 @@ cdef class WorkerLogger:
         """Send a debug-level log message."""
         if msg_str is not None and msg_bytes:
             raise TypeError("Provide only one of msg_str or msg_bytes")
-        if self._is_running:
+        if self._is_running and CLogLevel.DEBUG >= self._config.base_level:
             message = msg_str.encode('utf-8') if msg_str else msg_bytes
             self._add_log_to_batch(CLogLevel.DEBUG, len(message), <unsigned char*>message)
     
@@ -130,7 +115,7 @@ cdef class WorkerLogger:
         """Send an info-level log message."""
         if msg_str is not None and msg_bytes:
             raise TypeError("Provide only one of msg_str or msg_bytes")
-        if self._is_running:
+        if self._is_running and CLogLevel.INFO >= self._config.base_level:
             message = msg_str.encode('utf-8') if msg_str else msg_bytes
             self._add_log_to_batch(CLogLevel.INFO, len(message), <unsigned char*>message)
     
@@ -138,7 +123,7 @@ cdef class WorkerLogger:
         """Send a warning-level log message."""
         if msg_str is not None and msg_bytes:
             raise TypeError("Provide only one of msg_str or msg_bytes")
-        if self._is_running:
+        if self._is_running and CLogLevel.WARNING >= self._config.base_level:
             message = msg_str.encode('utf-8') if msg_str else msg_bytes
             self._add_log_to_batch(CLogLevel.WARNING, len(message), <unsigned char*>message)
     
@@ -146,7 +131,7 @@ cdef class WorkerLogger:
         """Send an error-level log message."""
         if msg_str is not None and msg_bytes:
             raise TypeError("Provide only one of msg_str or msg_bytes")
-        if self._is_running:
+        if self._is_running and CLogLevel.ERROR >= self._config.base_level:
             message = msg_str.encode('utf-8') if msg_str else msg_bytes
             self._add_log_to_batch(CLogLevel.ERROR, len(message), <unsigned char*>message)
 

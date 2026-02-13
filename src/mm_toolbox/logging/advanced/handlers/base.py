@@ -197,6 +197,19 @@ class BaseLogHandler(ABC):
             "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
         )
 
+    @staticmethod
+    def _normalize_log_bytes(field: object) -> bytes:
+        """Normalize bytes-like log fields to immutable bytes."""
+        if isinstance(field, bytes):
+            return field
+        if isinstance(field, memoryview):
+            return field.tobytes()
+        if isinstance(field, bytearray):
+            return bytes(field)
+        raise TypeError(
+            f"Invalid log field type; expected bytes-like but got {type(field)}"
+        )
+
     def format_log(self, log: PyLog) -> str:
         """Format a log message to a string.
 
@@ -207,11 +220,13 @@ class BaseLogHandler(ABC):
             str: Formatted log message.
         """
         if self._primary_config:
+            name = self._normalize_log_bytes(log.name).decode()
+            message = self._normalize_log_bytes(log.message).decode()
             formatted_str = self._primary_config.str_format % {
                 "asctime": time_iso8601(float(log.timestamp_ns) / 1_000_000_000.0),
                 "levelname": log.level.name,
-                "name": log.name.decode(),
-                "message": log.message.decode(),
+                "name": name,
+                "message": message,
             }
             return formatted_str
         else:

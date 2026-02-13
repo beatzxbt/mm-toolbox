@@ -96,8 +96,14 @@ def ipc_path():
     return _make
 
 
-def worker_process(path, name, num_logs, level=PyLogLevel.INFO):
-    config = LoggerConfig(path=path)
+def worker_process(
+    path,
+    name,
+    num_logs,
+    level=PyLogLevel.INFO,
+    base_level=PyLogLevel.INFO,
+):
+    config = LoggerConfig(path=path, base_level=base_level)
     logger = WorkerLogger(config=config, name=name)
     for i in range(num_logs):
         log_func = {
@@ -120,7 +126,7 @@ def worker_large_msg(path, name, msg_size):
 
 
 def worker_mixed_levels(path, name):
-    config = LoggerConfig(path=path)
+    config = LoggerConfig(path=path, base_level=PyLogLevel.TRACE)
     logger = WorkerLogger(config=config, name=name)
     logger.trace("Trace msg")
     logger.debug("Debug msg")
@@ -222,7 +228,8 @@ class TestIntegration:
         mock_handler.add_primary_config(config)
 
         p = multiprocessing.Process(
-            target=worker_process, args=(path, "Worker", 5, level)
+            target=worker_process,
+            args=(path, "Worker", 5, level, PyLogLevel.TRACE),
         )
         p.start()
         p.join()

@@ -25,6 +25,18 @@ class TestBaseLogHandler:
         with pytest.raises(RuntimeError):
             handler.format_log(PyLog(1234567890, b"name", PyLogLevel.INFO, b"msg"))
 
+    def test_format_log_accepts_memoryview_fields(self):
+        handler = FileLogHandler("test.txt")
+        config = LoggerConfig(str_format="%(name)s %(message)s")
+        handler.add_primary_config(config)
+        log = PyLog(
+            1234567890,
+            memoryview(b"name"),
+            PyLogLevel.INFO,
+            memoryview(b"msg"),
+        )
+        assert handler.format_log(log) == "name msg"
+
     def test_lazy_encode_json(self):
         handler = FileLogHandler("test.txt")
         assert handler._encode_json is None
