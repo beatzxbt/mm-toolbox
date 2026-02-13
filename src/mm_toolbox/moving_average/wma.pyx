@@ -23,6 +23,7 @@ cdef class WeightedMovingAverage(MovingAverage):
         cdef:
             int i, n = values.shape[0]
             double val
+            double[:] values_view = values
 
         if n != self._window:
             raise ValueError(
@@ -35,7 +36,7 @@ cdef class WeightedMovingAverage(MovingAverage):
         self._rolling_wsum = 0.0
 
         for i in range(n):
-            val = values[i]
+            val = values_view[i]
             self._rolling_sum += val
             self._rolling_wsum += (i + 1) * val
             self._raw_values.append(val)

@@ -42,7 +42,11 @@ cdef class MovingAverage:
         self._is_fast = is_fast
         self._is_warm = False
         self._value = 0.0
-        self._values = NumericRingBuffer(window, dtype=np.dtype(np.float64))
+        self._values = NumericRingBuffer(
+            window,
+            dtype=np.dtype(np.float64),
+            disable_async=is_fast,
+        )
 
     cpdef double initialize(self, cnp.ndarray values):
         """Initialize the moving average with the given values.

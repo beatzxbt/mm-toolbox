@@ -16,8 +16,10 @@ cdef class SimpleMovingAverage(MovingAverage):
 
     cpdef double initialize(self, cnp.ndarray values):
         cdef:
-            int     i, n = values.shape[0]
-            double  raw_value
+            int i
+            int n = values.shape[0]
+            double raw_value
+            double[:] values_view = values
     
         if n != self._window:
             raise ValueError(
@@ -27,8 +29,8 @@ cdef class SimpleMovingAverage(MovingAverage):
         self._values.fast_reset()
         self._rolling_sum = 0.0
         
-        for i in range(0, n):
-            raw_value = values[i]
+        for i in range(n):
+            raw_value = values_view[i]
             self._rolling_sum += raw_value
             self._raw_values.append(raw_value)
         

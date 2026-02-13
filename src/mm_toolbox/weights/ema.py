@@ -25,10 +25,8 @@ def ema_weights(
 
     alpha = alpha if alpha is not None else 2.0 / float(window + 1)
 
-    weights = np.array(
-        [alpha * (1.0 - alpha) ** i for i in range(window - 1, -1, -1)],
-        dtype=np.float64,
-    )
+    exponents = np.arange(window - 1, -1, -1, dtype=np.float64)
+    weights = alpha * np.power(1.0 - alpha, exponents)
     if normalized:
         return weights / weights.sum()
     return weights
