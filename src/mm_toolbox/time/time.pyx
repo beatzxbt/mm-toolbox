@@ -3,6 +3,8 @@
 # distutils: include_dirs = src/mm_toolbox/time
 
 import ciso8601
+from cpython.unicode cimport PyUnicode_DecodeASCII
+from libc.string cimport strlen
 from libc.stdint cimport int64_t as i64
 
 cdef extern from "ctime_impl.h":
@@ -90,6 +92,7 @@ cpdef str time_iso8601(double timestamp = 0.0):
         str: The formatted timestamp as 'YYYY-MM-DDTHH:MM:SS.fffZ'.
     """
     cdef char* c_result
+    cdef Py_ssize_t c_result_len
     cdef str result
 
     c_result = c_time_iso8601(timestamp)
@@ -97,7 +100,8 @@ cpdef str time_iso8601(double timestamp = 0.0):
         raise MemoryError("Failed to allocate memory for timestamp formatting")
     
     try:
-        result = bytes(c_result).decode('ascii')
+        c_result_len = <Py_ssize_t>strlen(c_result)
+        result = <str>PyUnicode_DecodeASCII(c_result, c_result_len, NULL)
         return result
     finally:
         c_free_string(c_result)

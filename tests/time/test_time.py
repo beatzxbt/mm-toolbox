@@ -106,6 +106,29 @@ class TestTimeISO8601:
         parsed = iso8601_to_unix(text)
         assert abs(parsed - test_timestamp) < 1.0
 
+    def test_iso8601_with_millisecond_timestamp(self):
+        """Test ISO 8601 formatting with millisecond unix timestamps."""
+        test_timestamp_ms = 1672531200123.0  # 2023-01-01 00:00:00.123 UTC
+        text = time_iso8601(test_timestamp_ms)
+        assert text == "2023-01-01T00:00:00.123Z"
+
+    def test_iso8601_with_microsecond_timestamp(self):
+        """Test ISO 8601 formatting with microsecond unix timestamps."""
+        test_timestamp_us = 1672531200123456.0  # 2023-01-01 00:00:00.123456 UTC
+        text = time_iso8601(test_timestamp_us)
+        assert text == "2023-01-01T00:00:00.123456Z"
+
+    def test_iso8601_with_nanosecond_timestamp(self):
+        """Test ISO 8601 formatting with nanosecond unix timestamps."""
+        test_timestamp_ns = 1672531200123456789.0
+        text = time_iso8601(test_timestamp_ns)
+
+        assert text.startswith("2023-01-01T00:00:00.")
+        assert text.endswith("Z")
+        fractional = text.split(".")[1][:-1]
+        assert len(fractional) == 9
+        assert fractional.isdigit()
+
     def test_iso8601_millisecond_precision(self):
         """Test that ISO 8601 formatting includes millisecond precision."""
         text = time_iso8601()
