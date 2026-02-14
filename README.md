@@ -10,8 +10,9 @@ mm-toolbox/
 │       ├── logging/            # Lightweight logger + Discord/Telegram support
 │       │   ├── standard/       # Standard logger implementation
 │       │   └── advanced/       # Distributed HFT logger (worker/master)
-│       ├── misc/               # Filtering helpers
+│       ├── misc/               # Filtering + parser helpers
 │       │   └── filter/         # Bounds-based change filter
+│       │   └── parser/         # Strict Binance parser modules (@bookTicker/@trade)
 │       ├── moving_average/     # Various moving averages (EMA/SMA/WMA/TEMA)
 │       ├── orderbook/          # Multiple orderbook implementations & tools
 │       │   ├── standard/       # Python-based orderbook
@@ -103,6 +104,8 @@ that covers API details, architecture notes, and usage examples.
 **Candles** (`mm_toolbox.candles`): High-performance candle aggregation with time, tick, volume, price, and multi-trigger buckets. Maintains a live `latest_candle`, stores completed candles in a ring buffer, and supports async iteration for stream processing.
 
 **Misc** (`mm_toolbox.misc`): Utility helpers including `DataBoundsFilter` for bounds-based change detection.
+
+**Parsers** (`mm_toolbox.misc.parser`, introduced in `v1.1`): Strict, high-performance Binance parser modules for `@bookTicker` and `@trade`, with shared low-level Cython utilities.
 
 **Rate Limiter** (`mm_toolbox.rate_limiter`): Token-bucket rate limiting with optional burst policies and per-second sub-buckets, plus explicit state tracking via `RateLimitState`.
 
