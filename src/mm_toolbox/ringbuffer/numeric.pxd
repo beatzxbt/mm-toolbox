@@ -57,3 +57,7 @@ cdef class NumericRingBuffer:
     # def __getitem__(self, int idx)
     cdef inline bint __enforce_ringbuffer_not_empty(self)
     cdef inline bint __enforce_async_not_disabled(self)
+
+
+cpdef bint _contains_u64(NumericRingBuffer ringbuffer, cnp.uint64_t item)
+cpdef void _insert_u64(NumericRingBuffer ringbuffer, cnp.uint64_t item)

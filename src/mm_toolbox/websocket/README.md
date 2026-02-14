@@ -38,12 +38,14 @@ bytes via async iteration or callbacks.
 ┌──────────────────┐    ┌──────────────────┐       ┌──────────────────┐
 │ WsSingle         │    │ WsPool           │       │ Latency Tracker  │
 │ one connection   │    │ many connections │       │ per connection   │
-│ no dedup         │    │ ringbuffer dedup │       │ choose fastest   │
+│ no hash filter   │    │ hash-history filter│     │ choose fastest   │
 └──────────────────┘    └──────────────────┘       └──────────────────┘
 ```
 
-Pool connections share a ring buffer configured with `only_insert_unique=True`
-to avoid duplicate frames from overlapping subscriptions.
+Pool connections share a payload ring buffer and apply duplicate filtering
+through a separate bounded hash-history window (`xxhash64`). This keeps hash
+state independent from payload consumption, so duplicates are suppressed even
+if the first copy has already been consumed by downstream code.
 
 ## Configuration
 

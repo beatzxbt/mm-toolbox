@@ -5,10 +5,13 @@ import inspect
 from collections.abc import Callable
 from typing import Any, Self, get_type_hints
 
+import xxhash
+import numpy as np
 from msgspec import Struct
 from msgspec.json import decode as json_decode
 
 from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
+from mm_toolbox.ringbuffer.numeric import NumericRingBuffer, _contains_u64, _insert_u64
 from mm_toolbox.time.time import time_s
 from mm_toolbox.websocket.connection import (
     ConnectionState,
@@ -16,12 +19,15 @@ from mm_toolbox.websocket.connection import (
     WsConnectionConfig,
 )
 
+UINT64_MASK = (1 << 64) - 1
+
 
 class WsPoolConfig(Struct):
     """Configuration for WebSocket connection pool."""
 
     num_connections: int
     evict_interval_s: int
+    hash_capacity: int = 16_384
 
     def __post_init__(self) -> None:
         """Validate pool configuration parameters."""
@@ -34,6 +40,11 @@ class WsPoolConfig(Struct):
                 f"Invalid eviction interval; expected >0 but got "
                 f"{self.evict_interval_s}s"
             )
+        if self.hash_capacity <= 0:
+            raise ValueError(
+                "Invalid hash_capacity; expected >0 but got "
+                f"{self.hash_capacity}"
+            )
 
     @classmethod
     def default(cls) -> "WsPoolConfig":
@@ -41,6 +52,7 @@ class WsPoolConfig(Struct):
         return cls(
             num_connections=5,
             evict_interval_s=60,
+            hash_capacity=16_384,
         )
 
 
@@ -55,10 +67,15 @@ class WsPool:
     ) -> None:
         """Initialize WebSocket pool with configuration and message handler."""
         self._config: WsConnectionConfig = config
-        self._ringbuffer: BytesRingBuffer = BytesRingBuffer(
-            max_capacity=128, only_insert_unique=True
-        )
         self._pool_config: WsPoolConfig = pool_config or WsPoolConfig.default()
+        self._ringbuffer: BytesRingBuffer = BytesRingBuffer(
+            max_capacity=128, only_insert_unique=False
+        )
+        self._hashes: NumericRingBuffer = NumericRingBuffer(
+            max_capacity=self._pool_config.hash_capacity,
+            dtype=np.uint64,
+            disable_async=True,
+        )
 
         # Verify the signature of the on_message, must be a single bytes arg
         if on_message is not None:
@@ -173,6 +190,28 @@ class WsPool:
         """
         asyncio.create_task(self._open_new_conn())
 
+    @staticmethod
+    def _hash_payload(msg: bytes) -> int:
+        """Build a stable 64-bit hash key for a payload."""
+        return (xxhash.xxh64_intdigest(msg) ^ (len(msg) << 1)) & UINT64_MASK
+
+    def _is_seen_hash(self, msg: bytes) -> bool:
+        """Check and update hash history for an incoming payload.
+
+        We intentionally use the internal uint64 helper APIs from
+        ``ringbuffer.numeric`` instead of fused-type ``contains/insert`` calls.
+        This avoids Python-side fused dispatch edge cases and gives a stable
+        typed path for high-frequency hash-history checks.
+
+        Returns:
+            bool: True when msg hash already exists in history, else False.
+        """
+        key = self._hash_payload(msg)
+        if _contains_u64(self._hashes, key):
+            return True
+        _insert_u64(self._hashes, key)
+        return False
+
     def _send_data_now(self, msg: bytes, only_fastest: bool) -> None:
         """Send data using the current pool snapshot.
 
@@ -279,6 +318,8 @@ class WsPool:
         conns_snapshot = list(self._conns.values())
         self._conns.clear()
         self._fast_conn = None
+        self._ringbuffer.clear()
+        self._hashes.clear()
         for conn in conns_snapshot:
             conn.close()
 
@@ -308,8 +349,12 @@ class WsPool:
         return self
 
     async def __anext__(self) -> bytes:
-        """Returns the next message from the pool's ringbuffer."""
-        return await self._ringbuffer.aconsume()
+        """Returns the next hash-filtered message from the pool ringbuffer."""
+        while True:
+            msg = await self._ringbuffer.aconsume()
+            if self._is_seen_hash(msg):
+                continue
+            return msg
 
 
 if __name__ == "__main__":

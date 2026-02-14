@@ -39,6 +39,7 @@ This directory contains comprehensive tests for the mm-toolbox WebSocket impleme
 ### 5. Live Binance Tests (`integration/test_live_binance.py`)
 - **Smoke coverage**: BTC futures `@bookTicker` for both `WsSingle` and `WsPool`
 - **Load coverage**: Combined BTC/ETH/SOL futures streams for `@bookTicker` and raw `@trade`
+- **Latency coverage**: Side-by-side `WsSingle` vs `WsPool` latency stats over the same live stream window
 - **Strict decoding**: Typed `msgspec` decoders with strict parsing (no permissive fallback)
 - **Deterministic validation**: Schema, symbol/stream coverage, and event freshness checks
 - **Pool coverage**: Active connection checks plus combined-stream message validation
@@ -92,6 +93,9 @@ uv run pytest tests/websocket/integration/test_live_binance.py -m "live and not 
 
 # Run futures load/stress tests (BTC/ETH/SOL @bookTicker + @trade)
 uv run pytest tests/websocket/integration/test_live_binance.py -m "live and stress" --run-live --live-timeout 60 -v -s
+
+# Run side-by-side latency comparison only (single vs pool, same live window)
+uv run pytest tests/websocket/integration/test_live_binance.py::test_side_by_side_latency_stats_single_vs_pool --run-live --live-timeout 30 -v -s
 
 # Run all tests including live tests
 uv run pytest tests/websocket/ --run-live -v
@@ -159,6 +163,7 @@ The test suite provides comprehensive coverage of:
 - Timestamp freshness and clock-sanity checks
 - Required stream coverage across all configured symbols
 - Connection stability for single and pool wrappers
+- Side-by-side latency summary stats (`mean`, `p50`, `p90`, `p99`, `min`, `max`)
 
 ### Deterministic Pass Criteria
 - No decode failures with strict typed decoders

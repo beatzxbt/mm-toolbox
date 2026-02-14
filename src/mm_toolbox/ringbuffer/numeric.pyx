@@ -11,6 +11,8 @@ from libc.stdint cimport uint64_t as u64
 
 from .numeric cimport numeric_t
 
+_UINT64_DTYPE = np.dtype(np.uint64)
+
 
 cpdef object resolve_numeric_dtype(object dtype):
     """Resolve and validate numeric dtype to a NumPy dtype supported by numeric_t."""
@@ -292,3 +294,62 @@ cdef class NumericRingBuffer:
     cdef inline bint __enforce_async_not_disabled(self):
         if self._disable_async:
             raise RuntimeError("Async operations are disabled for this buffer; use `disable_async=False` to enable.")
+
+
+cdef inline void _enforce_u64_dtype(NumericRingBuffer ringbuffer):
+    """Ensure helper fast-paths only run on uint64-backed buffers."""
+    if ringbuffer._dtype != _UINT64_DTYPE:
+        raise TypeError(
+            "uint64 fast-path requires NumericRingBuffer(dtype=np.uint64), "
+            f"but got {ringbuffer._dtype!r}"
+        )
+
+
+cpdef bint _contains_u64(NumericRingBuffer ringbuffer, cnp.uint64_t item):
+    """Internal fast-path membership check for uint64 ringbuffers.
+
+    This helper exists to provide a stable typed path for Python callers that
+    need uint64 checks without relying on fused-type cpdef dispatch.
+    """
+    _enforce_u64_dtype(ringbuffer)
+    if ringbuffer._size == 0:
+        return False
+
+    cdef:
+        u64 idx = (ringbuffer._head - 1) & ringbuffer._mask
+        u64 remaining = ringbuffer._size
+        cnp.uint64_t[::1] buf = ringbuffer._buffer
+
+    while remaining:
+        if buf[idx] == item:
+            return True
+        idx = (idx - 1) & ringbuffer._mask
+        remaining -= 1
+    return False
+
+
+cpdef void _insert_u64(NumericRingBuffer ringbuffer, cnp.uint64_t item):
+    """Internal fast-path insert for uint64 ringbuffers.
+
+    This helper exists to provide a stable typed path for Python callers that
+    need uint64 inserts without relying on fused-type cpdef dispatch.
+    """
+    _enforce_u64_dtype(ringbuffer)
+
+    cdef:
+        u64 head = ringbuffer._head
+        u64 tail = ringbuffer._tail
+        u64 mask = ringbuffer._mask
+        bint was_empty = ringbuffer._size == 0
+        bint is_full = ringbuffer._size == ringbuffer._max_capacity
+        cnp.uint64_t[::1] buf = ringbuffer._buffer
+
+    buf[head] = item
+    if is_full:
+        ringbuffer._tail = (tail + 1) & mask
+    else:
+        ringbuffer._size += 1
+    ringbuffer._head = (head + 1) & mask
+
+    if not ringbuffer._disable_async and was_empty:
+        ringbuffer._buffer_not_empty_event.set()
