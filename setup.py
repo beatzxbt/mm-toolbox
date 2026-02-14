@@ -322,6 +322,22 @@ def get_misc_extensions():
             sources=["src/mm_toolbox/misc/filter/core.pyx"],
             include_dirs=["src", "src/mm_toolbox/misc/filter"],
         ),
+        get_extension(
+            name="mm_toolbox.misc.parser.binance_bookticker_parser",
+            sources=["src/mm_toolbox/misc/parser/binance_bookticker_parser.pyx"],
+            include_dirs=[
+                "src",
+                "src/mm_toolbox/misc/parser",
+            ],
+        ),
+        get_extension(
+            name="mm_toolbox.misc.parser.binance_trade_parser",
+            sources=["src/mm_toolbox/misc/parser/binance_trade_parser.pyx"],
+            include_dirs=[
+                "src",
+                "src/mm_toolbox/misc/parser",
+            ],
+        ),
     ]
 
 
@@ -401,6 +417,7 @@ setup(
         include_path=[
             "src",
             "src/mm_toolbox/misc/filter",
+            "src/mm_toolbox/misc/parser",
             "src/mm_toolbox/rate_limiter",
         ],
     ),

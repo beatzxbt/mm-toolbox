@@ -13,4 +13,6 @@ Import submodules explicitly, e.g.:
 - mm_toolbox.time
 - mm_toolbox.websocket
 - mm_toolbox.weights
+- mm_toolbox.misc.filter
+- mm_toolbox.misc.parser
 """
