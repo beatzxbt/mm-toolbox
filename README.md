@@ -58,6 +58,11 @@ uv sync --all-groups
 make build  # Compile Cython extensions
 ```
 
+## v1.1 Roadmap Note
+
+Parser modules are being introduced in **v1.1**. They are intentionally not
+included in the current `v1.0b5` release branch.
+
 ## Usage
 
 After installation, you can start using MM Toolbox by importing the necessary modules:
@@ -102,7 +107,7 @@ that covers API details, architecture notes, and usage examples.
 
 **Candles** (`mm_toolbox.candles`): High-performance candle aggregation with time, tick, volume, price, and multi-trigger buckets. Maintains a live `latest_candle`, stores completed candles in a ring buffer, and supports async iteration for stream processing.
 
-**Misc** (`mm_toolbox.misc`): Utility helpers including `DataBoundsFilter` for bounds-based change detection.
+**Misc** (`mm_toolbox.misc`): Utility helpers including `DataBoundsFilter` for bounds-based change detection. Parser modules are introduced in `v1.1` (not in this `v1.0b5` branch).
 
 **Rate Limiter** (`mm_toolbox.rate_limiter`): Token-bucket rate limiting with optional burst policies and per-second sub-buckets, plus explicit state tracking via `RateLimitState`.
 
