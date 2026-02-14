@@ -24,7 +24,7 @@ def geometric_weights(
         raise ValueError(f"Invalid number of weights; expected > 1 but got {num}.")
 
     r = r if r is not None else 0.75
-    weights = np.array([r**i for i in range(num)], dtype=np.float64)
+    weights = np.power(np.float64(r), np.arange(num, dtype=np.float64))
     if normalized:
         return weights / weights.sum()
     return weights

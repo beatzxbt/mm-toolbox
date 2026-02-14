@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+import mm_toolbox.weights.geometric as geometric_module
 from mm_toolbox.weights import geometric_weights
 
 
@@ -41,6 +42,37 @@ class TestGeometricWeightsBasic:
         # Geometric weights should be in descending order
         for i in range(len(result) - 1):
             assert result[i] >= result[i + 1]
+
+    def test_non_normalized_series(self):
+        """Test that normalized=False returns the raw geometric series."""
+        result = geometric_weights(5, r=0.5, normalized=False)
+        expected = np.array([1.0, 0.5, 0.25, 0.125, 0.0625], dtype=np.float64)
+        np.testing.assert_allclose(result, expected, rtol=0.0, atol=0.0)
+        assert result.dtype == np.float64
+
+    def test_vectorized_construction_uses_numpy(self, monkeypatch):
+        """Test that geometric weight generation uses NumPy vectorized ops."""
+        calls: dict[str, int] = {"arange": 0, "power": 0}
+        original_arange = geometric_module.np.arange
+        original_power = geometric_module.np.power
+
+        def tracked_arange(*args, **kwargs):
+            calls["arange"] += 1
+            return original_arange(*args, **kwargs)
+
+        def tracked_power(*args, **kwargs):
+            calls["power"] += 1
+            return original_power(*args, **kwargs)
+
+        monkeypatch.setattr(geometric_module.np, "arange", tracked_arange)
+        monkeypatch.setattr(geometric_module.np, "power", tracked_power)
+
+        result = geometric_weights(8, r=0.4, normalized=False)
+        expected = original_power(np.float64(0.4), original_arange(8, dtype=np.float64))
+
+        np.testing.assert_allclose(result, expected)
+        assert calls["arange"] == 1
+        assert calls["power"] == 1
 
 
 class TestGeometricWeightsCustomParameters:
