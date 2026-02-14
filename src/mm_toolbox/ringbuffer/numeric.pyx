@@ -65,13 +65,14 @@ cdef class NumericRingBuffer:
             u64 size = self._size
             u64 tail = self._tail
             u64 capacity = self._max_capacity
+            u64 mask = self._mask
             cnp.ndarray buf = self._buffer
 
         if size == 0:
             return np.empty((0,), dtype=self._dtype)
         if tail + size <= capacity:
             return buf[tail:tail + size].copy()
-        return np.concatenate((buf[tail:], buf[:(tail + size) % capacity]))
+        return np.concatenate((buf[tail:], buf[:(tail + size) & mask]))
 
     cpdef void overwrite_latest(self, numeric_t item, bint increment_count=False):
         """Overwrite the latest element in the buffer. Optionally increment count."""
@@ -217,19 +218,18 @@ cdef class NumericRingBuffer:
         """Return the last element from the buffer without removing it."""
         cdef:
             u64 head = self._head
-            u64 max_capacity = self._max_capacity
+            u64 mask = self._mask
             cnp.ndarray buf = self._buffer
 
-        return buf[(head - 1 + max_capacity) % max_capacity]
+        return buf[(head - 1) & mask]
 
     cpdef object peekleft(self):
         """Return the first element from the buffer without removing it."""
         cdef:
             u64 tail = self._tail
-            u64 max_capacity = self._max_capacity
             cnp.ndarray buf = self._buffer
 
-        return buf[(tail + max_capacity) % max_capacity]
+        return buf[tail]
 
     cpdef void clear(self):
         """Clear the buffer and reset it to its initial state."""
@@ -276,7 +276,7 @@ cdef class NumericRingBuffer:
         cdef:
             u64 size = self._size
             u64 tail = self._tail
-            u64 capacity = self._max_capacity
+            u64 mask = self._mask
             cnp.ndarray buf = self._buffer
 
         if idx < 0:
@@ -284,7 +284,7 @@ cdef class NumericRingBuffer:
         if idx < 0 or <u64>idx >= size:
             raise IndexError(f"Index out of range; expected within ({-size} <= {idx} <= {size - 1}) but got {idx}")
 
-        fixed_idx = (tail + <u64>idx) % capacity
+        fixed_idx = (tail + <u64>idx) & mask
         return buf[fixed_idx]
 
     cdef inline bint __enforce_ringbuffer_not_empty(self):
