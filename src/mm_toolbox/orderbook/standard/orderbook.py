@@ -1,4 +1,4 @@
-from bisect import bisect_left, insort
+from bisect import insort
 from collections.abc import Iterator
 
 from .level import OrderbookLevel, price_from_ticks, price_to_ticks_fast
@@ -16,9 +16,20 @@ class Orderbook:
         size: int = 500,
         initial_bids: list[OrderbookLevel] | None = None,
         initial_asks: list[OrderbookLevel] | None = None,
+        trust_input_precision: bool = False,
     ) -> None:
         """Initialize orderbook with tick size, lot size, and optional
-        initial levels."""
+        initial levels.
+
+        Args:
+            tick_size: Minimum price increment.
+            lot_size: Minimum size increment.
+            size: Minimum snapshot depth required by consume_snapshot.
+            initial_bids: Optional initial bid levels.
+            initial_asks: Optional initial ask levels.
+            trust_input_precision: If True, reuse existing level ticks/lots
+                when present instead of recomputing from price/size.
+        """
         if tick_size <= 0.0:
             raise ValueError(f"Invalid tick_size; expected >0 but got {tick_size}")
         if lot_size <= 0.0:
@@ -29,6 +40,7 @@ class Orderbook:
         self._inv_tick_size = 1.0 / tick_size
         self._inv_lot_size = 1.0 / lot_size
         self._size = size
+        self._trust_input_precision = trust_input_precision
 
         # {ticks: OrderbookLevel}
         self._asks: dict[int, OrderbookLevel] = {}
@@ -65,27 +77,44 @@ class Orderbook:
         self._sorted_bid_ticks.clear()
         self._is_populated = False
 
-    def _maybe_remove_ask(self, ticks: int) -> None:
-        """Remove an ask level if it exists."""
-        if ticks in self._asks:
-            del self._asks[ticks]
-            index = bisect_left(self._sorted_ask_ticks, ticks)
-            if (
-                index < len(self._sorted_ask_ticks)
-                and self._sorted_ask_ticks[index] == ticks
-            ):
-                self._sorted_ask_ticks.pop(index)
+    def _ensure_level_precision(self, level: OrderbookLevel) -> None:
+        """Populate ticks/lots unless trusted pre-computed values can be reused."""
+        level.add_precision_info(
+            self._tick_size,
+            self._lot_size,
+            unsafe=True,
+            inv_tick_size=self._inv_tick_size,
+            inv_lot_size=self._inv_lot_size,
+            trust_existing=self._trust_input_precision,
+        )
 
-    def _maybe_remove_bid(self, ticks: int) -> None:
-        """Remove a bid level if it exists."""
-        if ticks in self._bids:
-            del self._bids[ticks]
-            index = bisect_left(self._sorted_bid_ticks, ticks)
-            if (
-                index < len(self._sorted_bid_ticks)
-                and self._sorted_bid_ticks[index] == ticks
-            ):
-                self._sorted_bid_ticks.pop(index)
+    @staticmethod
+    def _resort_ticks(
+        levels: dict[int, OrderbookLevel],
+        sorted_ticks: list[int],
+    ) -> None:
+        """Rebuild sorted tick cache from the side dictionary."""
+        sorted_ticks[:] = sorted(levels)
+
+    def _consume_side_deltas(
+        self,
+        levels: list[OrderbookLevel],
+        side_levels: dict[int, OrderbookLevel],
+        sorted_ticks: list[int],
+    ) -> None:
+        """Apply a delta batch to one side and rebuild sorted ticks once."""
+        if not levels:
+            return
+
+        for level in levels:
+            self._ensure_level_precision(level)
+            ticks = level.ticks
+            if level.lots == 0:
+                side_levels.pop(ticks, None)
+            else:
+                side_levels[ticks] = level
+
+        self._resort_ticks(side_levels, sorted_ticks)
 
     def consume_snapshot(
         self,
@@ -110,32 +139,14 @@ class Orderbook:
         self.reset()
 
         for ask in asks:
-            ask.add_precision_info(
-                self._tick_size,
-                self._lot_size,
-                unsafe=True,
-                inv_tick_size=self._inv_tick_size,
-                inv_lot_size=self._inv_lot_size,
-            )
-            ticks = ask.ticks
-            if ticks not in self._asks:
-                self._sorted_ask_ticks.append(ticks)
-            self._asks[ticks] = ask
-        self._sorted_ask_ticks.sort()
+            self._ensure_level_precision(ask)
+            self._asks[ask.ticks] = ask
+        self._resort_ticks(self._asks, self._sorted_ask_ticks)
 
         for bid in bids:
-            bid.add_precision_info(
-                self._tick_size,
-                self._lot_size,
-                unsafe=True,
-                inv_tick_size=self._inv_tick_size,
-                inv_lot_size=self._inv_lot_size,
-            )
-            ticks = bid.ticks
-            if ticks not in self._bids:
-                self._sorted_bid_ticks.append(ticks)
-            self._bids[ticks] = bid
-        self._sorted_bid_ticks.sort()
+            self._ensure_level_precision(bid)
+            self._bids[bid.ticks] = bid
+        self._resort_ticks(self._bids, self._sorted_bid_ticks)
 
         self._is_populated = True
 
@@ -150,37 +161,8 @@ class Orderbook:
             asks: List of ask levels.
             bids: List of bid levels.
         """
-        for ask in asks:
-            ask.add_precision_info(
-                self._tick_size,
-                self._lot_size,
-                unsafe=True,
-                inv_tick_size=self._inv_tick_size,
-                inv_lot_size=self._inv_lot_size,
-            )
-            if ask.lots == 0:
-                self._maybe_remove_ask(ask.ticks)
-            else:
-                ticks = ask.ticks
-                if ticks not in self._asks:
-                    insort(self._sorted_ask_ticks, ticks)
-                self._asks[ticks] = ask
-
-        for bid in bids:
-            bid.add_precision_info(
-                self._tick_size,
-                self._lot_size,
-                unsafe=True,
-                inv_tick_size=self._inv_tick_size,
-                inv_lot_size=self._inv_lot_size,
-            )
-            if bid.lots == 0:
-                self._maybe_remove_bid(bid.ticks)
-            else:
-                ticks = bid.ticks
-                if ticks not in self._bids:
-                    insort(self._sorted_bid_ticks, ticks)
-                self._bids[ticks] = bid
+        self._consume_side_deltas(asks, self._asks, self._sorted_ask_ticks)
+        self._consume_side_deltas(bids, self._bids, self._sorted_bid_ticks)
 
     def consume_bbo(
         self,
@@ -197,20 +179,8 @@ class Orderbook:
             ask: Ask level.
             bid: Bid level.
         """
-        bid.add_precision_info(
-            self._tick_size,
-            self._lot_size,
-            unsafe=True,
-            inv_tick_size=self._inv_tick_size,
-            inv_lot_size=self._inv_lot_size,
-        )
-        ask.add_precision_info(
-            self._tick_size,
-            self._lot_size,
-            unsafe=True,
-            inv_tick_size=self._inv_tick_size,
-            inv_lot_size=self._inv_lot_size,
-        )
+        self._ensure_level_precision(bid)
+        self._ensure_level_precision(ask)
 
         bid_ticks, bid_lots = bid.ticks, bid.lots
         ask_ticks, ask_lots = ask.ticks, ask.lots

@@ -76,10 +76,13 @@ class OrderbookLevel(Struct):
         unsafe: bool = False,
         inv_tick_size: float | None = None,
         inv_lot_size: float | None = None,
+        trust_existing: bool = False,
     ) -> None:
         """Add precision information to the orderbook level.
 
         The unsafe flag is used to bypass validation in favor of performance.
+        If trust_existing is True and precision info is already present,
+        existing ticks/lots are reused.
         """
         if not unsafe:
             if tick_size <= 0.0:
@@ -94,6 +97,9 @@ class OrderbookLevel(Struct):
                 raise ValueError(
                     f"Invalid inv_lot_size; expected >0 but got {inv_lot_size}"
                 )
+
+        if trust_existing and self.has_precision_info():
+            return
 
         if inv_tick_size is None:
             self.ticks = price_to_ticks(self.price, tick_size)

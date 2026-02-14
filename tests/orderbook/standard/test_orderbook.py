@@ -135,6 +135,7 @@ class TestOrderbookInitialization:
         assert len(ob._sorted_ask_ticks) == 0
         assert len(ob._sorted_bid_ticks) == 0
         assert not ob._is_populated
+        assert not ob._trust_input_precision
 
     def test_initialization_validation(self):
         """Test that invalid initialization parameters raise errors."""
@@ -214,6 +215,51 @@ class TestOrderbookSnapshots:
         for ask in asks:
             assert ask.ticks is not None
             assert ask.lots is not None
+
+    def test_snapshot_recomputes_existing_precision_by_default(self):
+        """Default mode should recompute precision info for integrity."""
+        ob = Orderbook(tick_size=0.01, lot_size=0.001, size=2)
+
+        bids = [
+            OrderbookLevel(price=100.00, size=1.0, norders=1, ticks=1, lots=1),
+            OrderbookLevel(price=99.99, size=2.0, norders=2, ticks=2, lots=2),
+        ]
+        asks = [
+            OrderbookLevel(price=100.01, size=1.5, norders=1, ticks=3, lots=3),
+            OrderbookLevel(price=100.02, size=2.5, norders=2, ticks=4, lots=4),
+        ]
+
+        ob.consume_snapshot(asks=asks, bids=bids)
+
+        assert ob._sorted_bid_ticks == [9999, 10000]
+        assert ob._sorted_ask_ticks == [10001, 10002]
+        assert bids[0].ticks == 10000
+        assert asks[0].ticks == 10001
+
+    def test_snapshot_trusts_existing_precision_when_enabled(self):
+        """Trusted mode should reuse existing precision info."""
+        ob = Orderbook(
+            tick_size=0.01,
+            lot_size=0.001,
+            size=2,
+            trust_input_precision=True,
+        )
+
+        bids = [
+            OrderbookLevel(price=100.00, size=1.0, norders=1, ticks=49999, lots=1000),
+            OrderbookLevel(price=99.99, size=2.0, norders=2, ticks=50000, lots=2000),
+        ]
+        asks = [
+            OrderbookLevel(price=100.01, size=1.5, norders=1, ticks=50001, lots=1500),
+            OrderbookLevel(price=100.02, size=2.5, norders=2, ticks=50002, lots=2500),
+        ]
+
+        ob.consume_snapshot(asks=asks, bids=bids)
+
+        assert ob._sorted_bid_ticks == [49999, 50000]
+        assert ob._sorted_ask_ticks == [50001, 50002]
+        assert 10000 not in ob._bids
+        assert 10001 not in ob._asks
 
     def test_snapshot_validation(self):
         """Test snapshot validation for minimum size requirements."""
@@ -344,6 +390,31 @@ class TestOrderbookIncrementalUpdates:
 
         best_bid, _ = self.ob.get_bbo()
         assert best_bid.price == 99.99
+
+    def test_batched_deltas_last_update_wins(self):
+        """Repeated tick updates in one batch should use final update state."""
+        asks = [
+            OrderbookLevel.from_values(100.04, 1.0, 1, 0.01, 0.001),
+            OrderbookLevel.from_values(100.04, 2.0, 2, 0.01, 0.001),
+            OrderbookLevel.from_values(100.02, 0.0, 0, 0.01, 0.001),
+            OrderbookLevel.from_values(100.02, 4.0, 4, 0.01, 0.001),
+            OrderbookLevel.from_values(100.01, 0.0, 0, 0.01, 0.001),
+        ]
+        bids = [
+            OrderbookLevel.from_values(99.97, 0.0, 0, 0.01, 0.001),
+            OrderbookLevel.from_values(99.98, 0.0, 0, 0.01, 0.001),
+            OrderbookLevel.from_values(99.98, 1.2, 1, 0.01, 0.001),
+            OrderbookLevel.from_values(100.00, 0.0, 0, 0.01, 0.001),
+        ]
+
+        self.ob.consume_deltas(asks=asks, bids=bids)
+
+        assert self.ob._sorted_ask_ticks == [10002, 10003, 10004]
+        assert self.ob._sorted_bid_ticks == [9998, 9999]
+        assert self.ob._asks[10004].size == 2.0
+        assert self.ob._asks[10002].size == 4.0
+        assert self.ob._bids[9998].size == 1.2
+        assert 10000 not in self.ob._bids
 
 
 class TestOrderbookBBOUpdates:
