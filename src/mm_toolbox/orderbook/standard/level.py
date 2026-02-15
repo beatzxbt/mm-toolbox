@@ -71,45 +71,30 @@ class OrderbookLevel(Struct):
 
     def add_precision_info(
         self,
-        tick_size: float,
-        lot_size: float,
+        inv_tick_size: float,
+        inv_lot_size: float,
         unsafe: bool = False,
-        inv_tick_size: float | None = None,
-        inv_lot_size: float | None = None,
-        trust_existing: bool = False,
     ) -> None:
         """Add precision information to the orderbook level.
 
-        The unsafe flag is used to bypass validation in favor of performance.
-        If trust_existing is True and precision info is already present,
-        existing ticks/lots are reused.
+        The unsafe flag is used to bypass validation in favor of performance
+        and trust existing precision info when present.
         """
+        if unsafe and self.has_precision_info():
+            return
+
         if not unsafe:
-            if tick_size <= 0.0:
-                raise ValueError(f"Invalid tick_size; expected >0 but got {tick_size}")
-            if lot_size <= 0.0:
-                raise ValueError(f"Invalid lot_size; expected >0 but got {lot_size}")
-            if inv_tick_size is not None and inv_tick_size <= 0.0:
+            if inv_tick_size <= 0.0:
                 raise ValueError(
                     f"Invalid inv_tick_size; expected >0 but got {inv_tick_size}"
                 )
-            if inv_lot_size is not None and inv_lot_size <= 0.0:
+            if inv_lot_size <= 0.0:
                 raise ValueError(
                     f"Invalid inv_lot_size; expected >0 but got {inv_lot_size}"
                 )
 
-        if trust_existing and self.has_precision_info():
-            return
-
-        if inv_tick_size is None:
-            self.ticks = price_to_ticks(self.price, tick_size)
-        else:
-            self.ticks = price_to_ticks_fast(self.price, inv_tick_size)
-
-        if inv_lot_size is None:
-            self.lots = size_to_lots(self.size, lot_size)
-        else:
-            self.lots = size_to_lots_fast(self.size, inv_lot_size)
+        self.ticks = price_to_ticks_fast(self.price, inv_tick_size)
+        self.lots = size_to_lots_fast(self.size, inv_lot_size)
 
     @classmethod
     def from_values(

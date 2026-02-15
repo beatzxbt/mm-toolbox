@@ -35,19 +35,28 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     Returns:
         None: This function does not return a value.
     """
-    parser.addoption(
-        "--run-live",
-        action="store_true",
-        default=False,
-        help="Run live tests that require internet connection (Binance streams)",
-    )
-    parser.addoption(
-        "--live-timeout",
-        action="store",
-        default=30,
-        type=int,
-        help="Timeout for live tests in seconds",
-    )
+    try:
+        parser.addoption(
+            "--run-live",
+            action="store_true",
+            default=False,
+            help="Run live tests that require internet connection (Binance streams)",
+        )
+    except ValueError:
+        # Option may already be registered by the root conftest.
+        pass
+
+    try:
+        parser.addoption(
+            "--live-timeout",
+            action="store",
+            default=30,
+            type=int,
+            help="Timeout for live tests in seconds",
+        )
+    except ValueError:
+        # Option may already be registered by the root conftest.
+        pass
 
 
 def pytest_configure(config: pytest.Config) -> None:

@@ -96,7 +96,7 @@ Both implementations provide matching read-side helpers:
 - `get_asks()`, `get_bids()`
 - `iter_asks()`, `iter_bids()`
 - `get_bbo()`, `get_bbo_spread()`, `get_mid_price()`, `get_wmid_price()`
-- `get_volume_average_mid_price(size, is_base_currency=True)`
+- `get_volume_weighted_mid_price(size, is_base_currency=True)`
 - `get_price_impact(size, is_buy, is_base_currency=True)`
 - `does_bbo_price_change(bid_price, ask_price)`
 - `does_bbo_cross(bid_price, ask_price)`

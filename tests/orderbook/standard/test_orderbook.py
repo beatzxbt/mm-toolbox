@@ -79,20 +79,20 @@ class TestOrderbookLevel:
     def test_precision_info_addition(self):
         """Test adding precision information to a level."""
         level = OrderbookLevel(price=100.01, size=1.5, norders=2)
-        level.add_precision_info(tick_size=0.01, lot_size=0.001)
+        level.add_precision_info(inv_tick_size=100.0, inv_lot_size=1000.0)
 
         assert level.ticks == 10001
         assert level.lots == 1500
 
     def test_precision_info_validation(self):
-        """Test validation of tick_size and lot_size."""
+        """Test validation of inverse precision values."""
         level = OrderbookLevel(price=100.0, size=1.0, norders=1)
 
-        with pytest.raises(ValueError, match="Invalid tick_size"):
-            level.add_precision_info(tick_size=-0.01, lot_size=0.001)
+        with pytest.raises(ValueError, match="Invalid inv_tick_size"):
+            level.add_precision_info(inv_tick_size=-100.0, inv_lot_size=1000.0)
 
-        with pytest.raises(ValueError, match="Invalid lot_size"):
-            level.add_precision_info(tick_size=0.01, lot_size=-0.001)
+        with pytest.raises(ValueError, match="Invalid inv_lot_size"):
+            level.add_precision_info(inv_tick_size=100.0, inv_lot_size=-1000.0)
 
     def test_from_values_class_method(self):
         """Test the from_values class method."""
@@ -135,6 +135,8 @@ class TestOrderbookInitialization:
         assert len(ob._sorted_ask_ticks) == 0
         assert len(ob._sorted_bid_ticks) == 0
         assert not ob._is_populated
+        assert not ob.is_initialized()
+        assert not ob.is_populated()
         assert not ob._trust_input_precision
 
     def test_initialization_validation(self):
@@ -144,6 +146,9 @@ class TestOrderbookInitialization:
 
         with pytest.raises(ValueError, match="Invalid lot_size"):
             Orderbook(tick_size=0.01, lot_size=-0.001)
+
+        with pytest.raises(ValueError, match="Invalid size"):
+            Orderbook(tick_size=0.01, lot_size=0.001, size=0)
 
     def test_initialization_with_initial_data(self):
         """Test initialization with initial bids and asks."""
@@ -161,6 +166,8 @@ class TestOrderbookInitialization:
         )
 
         assert ob._is_populated
+        assert ob.is_initialized()
+        assert ob.is_populated()
         assert len(ob._bids) == 2
         assert len(ob._asks) == 2
 
@@ -458,6 +465,21 @@ class TestOrderbookBBOUpdates:
         best_bid, best_ask = self.ob.get_bbo()
         assert best_bid.price == 99.99
         assert best_ask.price == 100.02
+
+    def test_bbo_prunes_stale_better_levels_when_incoming_exists_deeper(self):
+        """Incoming authoritative BBO should prune stale top levels."""
+        self.ob.consume_bbo(
+            ask=OrderbookLevel.from_values(100.02, 1.1, 1, 0.01, 0.001),
+            bid=OrderbookLevel.from_values(99.99, 1.1, 1, 0.01, 0.001),
+        )
+
+        best_bid, best_ask = self.ob.get_bbo()
+        assert best_bid.price == 99.99
+        assert best_ask.price == 100.02
+        assert self.ob._sorted_bid_ticks == [9998, 9999]
+        assert self.ob._sorted_ask_ticks == [10002, 10003]
+        assert 10000 not in self.ob._bids
+        assert 10001 not in self.ob._asks
 
 
 class TestOrderbookAccessors:
@@ -837,6 +859,54 @@ class TestOrderbookIntegrationAndEdgeCases:
 
         with pytest.raises(ValueError, match="Orderbook is not populated"):
             ob.get_bbo_spread()
+
+    def test_side_empty_state_raises_clear_domain_error(self):
+        """If one side is empty, BBO accessors should raise a clear error."""
+        ob = Orderbook(tick_size=0.01, lot_size=0.001, size=1)
+        ob.consume_snapshot(
+            asks=[OrderbookLevel.from_values(100.01, 1.0, 1, 0.01, 0.001)],
+            bids=[OrderbookLevel.from_values(100.00, 1.0, 1, 0.01, 0.001)],
+        )
+
+        ob.consume_deltas(
+            asks=[OrderbookLevel.from_values(100.01, 0.0, 0, 0.01, 0.001)],
+            bids=[],
+        )
+
+        assert not ob._is_populated
+        assert ob.is_initialized()
+        assert not ob.is_populated()
+        assert ob.get_asks() == []
+        assert len(ob.get_bids()) == 1
+        with pytest.raises(ValueError, match="Orderbook side unavailable"):
+            ob.get_bbo()
+        with pytest.raises(ValueError, match="Orderbook side unavailable"):
+            ob.get_bbo_spread()
+        with pytest.raises(ValueError, match="Orderbook side unavailable"):
+            ob.does_bbo_cross(100.00, 100.01)
+
+    def test_side_repopulation_restores_two_sided_state(self):
+        """When a missing side is replenished, two-sided state should recover."""
+        ob = Orderbook(tick_size=0.01, lot_size=0.001, size=1)
+        ob.consume_snapshot(
+            asks=[OrderbookLevel.from_values(100.01, 1.0, 1, 0.01, 0.001)],
+            bids=[OrderbookLevel.from_values(100.00, 1.0, 1, 0.01, 0.001)],
+        )
+
+        ob.consume_deltas(
+            asks=[OrderbookLevel.from_values(100.01, 0.0, 0, 0.01, 0.001)],
+            bids=[],
+        )
+        assert not ob._is_populated
+
+        ob.consume_deltas(
+            asks=[OrderbookLevel.from_values(100.02, 2.0, 1, 0.01, 0.001)],
+            bids=[],
+        )
+        assert ob._is_populated
+        best_bid, best_ask = ob.get_bbo()
+        assert best_bid.price == 100.00
+        assert best_ask.price == 100.02
 
     def test_reset_functionality(self):
         """Test orderbook reset functionality."""
