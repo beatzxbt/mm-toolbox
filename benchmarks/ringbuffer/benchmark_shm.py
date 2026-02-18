@@ -1,7 +1,11 @@
 """Performance benchmark for SHM ring buffer.
 
-Measures insert/consume latency and throughput for the shared memory
-ring buffer implementation. Used to validate C optimization improvements.
+Usage:
+    uv run python benchmarks/ringbuffer/benchmark_shm.py [--size SIZE]
+    uv run python benchmarks/ringbuffer/benchmark_shm.py --multi-size
+
+Measures insert/consume latency and producer/consumer throughput for the
+shared memory ring buffer implementation.
 """
 
 from __future__ import annotations
@@ -9,15 +13,45 @@ from __future__ import annotations
 import multiprocessing
 import os
 import time
+from dataclasses import dataclass, field
 from multiprocessing import Queue
 from pathlib import Path
 
 import numpy as np
 
+try:
+    from benchmarks.core import (
+        BaseBenchmarkConfig,
+        BenchmarkCLI,
+        BenchmarkReporter,
+        BenchmarkRunner,
+    )
+except ModuleNotFoundError:
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from benchmarks.core import (
+        BaseBenchmarkConfig,
+        BenchmarkCLI,
+        BenchmarkReporter,
+        BenchmarkRunner,
+    )
 from mm_toolbox.ringbuffer.shm import (
     SharedBytesRingBufferConsumer,
     SharedBytesRingBufferProducer,
 )
+
+
+@dataclass
+class SHMBenchmarkConfig(BaseBenchmarkConfig):
+    """Configuration for SHM ringbuffer benchmark."""
+
+    capacity_bytes: int = 2**20
+    payload_sizes: list[int] = field(default_factory=lambda: [32, 128, 512, 2048, 8192])
+    latency_iterations: int = 100_000
+    throughput_duration_sec: float = 3.0
+    run_latency: bool = True
+    run_throughput: bool = True
 
 
 def latency_benchmark_insert(
@@ -26,33 +60,20 @@ def latency_benchmark_insert(
     num_iterations: int,
     path: str,
 ) -> np.ndarray:
-    """Benchmark insert latency (producer only, no consumer pressure).
-
-    Args:
-        capacity_bytes: Ring buffer capacity in bytes.
-        payload_size: Size of each message payload.
-        num_iterations: Number of insert operations to time.
-        path: Shared memory path.
-
-    Returns:
-        Array of latency measurements in nanoseconds.
-    """
+    """Benchmark insert latency (producer only, no consumer pressure)."""
     producer = SharedBytesRingBufferProducer(
         path, capacity_bytes, create=True, unlink_on_close=True
     )
     payload = b"x" * payload_size
     latencies = np.zeros(num_iterations, dtype=np.int64)
 
-    # Warmup
     for _ in range(min(1000, num_iterations // 10)):
         producer.insert(payload)
 
-    # Reset buffer
     producer = SharedBytesRingBufferProducer(
         path, capacity_bytes, create=True, unlink_on_close=True
     )
 
-    # Timed iterations
     for i in range(num_iterations):
         start = time.perf_counter_ns()
         producer.insert(payload)
@@ -67,32 +88,18 @@ def latency_benchmark_consume(
     num_iterations: int,
     path: str,
 ) -> np.ndarray:
-    """Benchmark consume latency (pre-filled buffer).
-
-    Args:
-        capacity_bytes: Ring buffer capacity in bytes.
-        payload_size: Size of each message payload.
-        num_iterations: Number of consume operations to time.
-        path: Shared memory path.
-
-    Returns:
-        Array of latency measurements in nanoseconds.
-    """
+    """Benchmark consume latency (pre-filled buffer)."""
     producer = SharedBytesRingBufferProducer(
         path, capacity_bytes, create=True, unlink_on_close=True
     )
     payload = b"x" * payload_size
 
-    # Pre-fill buffer
     for _ in range(num_iterations):
         producer.insert(payload)
 
-    # Create consumer (attaches to existing shared memory)
     consumer = SharedBytesRingBufferConsumer(path)
-
     latencies = np.zeros(num_iterations, dtype=np.int64)
 
-    # Timed iterations (buffer is pre-filled, so consume() won't block)
     for i in range(num_iterations):
         start = time.perf_counter_ns()
         consumer.consume()
@@ -116,7 +123,7 @@ def _producer_process(
     payload = b"x" * payload_size
 
     barrier.wait()
-    time.sleep(0.05)  # Small delay to let consumer start
+    time.sleep(0.05)
 
     start_ns = time.perf_counter_ns()
     end_time_ns = start_ns + int(duration_sec * 1e9)
@@ -138,7 +145,6 @@ def _consumer_process(
     barrier: multiprocessing.Barrier,
 ) -> None:
     """Consumer process for throughput benchmark."""
-    # Wait for producer to create the shared memory
     barrier.wait()
 
     consumer = SharedBytesRingBufferConsumer(path)
@@ -150,10 +156,10 @@ def _consumer_process(
     while time.perf_counter_ns() < end_time_ns:
         msg = consumer.peekleft()
         if msg is not None:
-            consumer.consume()  # Actually consume it
+            consumer.consume()
             count += 1
         else:
-            time.sleep(0.00001)  # 10us backoff when empty
+            time.sleep(0.00001)
 
     actual_end_ns = time.perf_counter_ns()
     result_queue.put((actual_end_ns - start_ns, count))
@@ -165,17 +171,7 @@ def throughput_benchmark(
     duration_sec: float,
     path: str,
 ) -> tuple[int, int, int, int]:
-    """Benchmark producer-consumer throughput across processes.
-
-    Args:
-        capacity_bytes: Ring buffer capacity in bytes.
-        payload_size: Size of each message payload.
-        duration_sec: Duration of benchmark in seconds.
-        path: Shared memory path.
-
-    Returns:
-        Tuple of (producer_ns, consumer_ns, producer_count, consumer_count).
-    """
+    """Benchmark producer-consumer throughput across processes."""
     result_queue: Queue = Queue()
     barrier = multiprocessing.Barrier(2)
 
@@ -188,7 +184,6 @@ def throughput_benchmark(
         args=(path, capacity_bytes, duration_sec, result_queue, barrier),
     )
 
-    # Start consumer first so it's ready
     cons_proc.start()
     prod_proc.start()
 
@@ -201,141 +196,200 @@ def throughput_benchmark(
     return prod_ns, cons_ns, prod_count, cons_count
 
 
-def print_latency_stats(name: str, latencies: np.ndarray, payload_size: int) -> None:
-    """Print latency statistics."""
-    count = len(latencies)
-    mean = np.mean(latencies)
-    p50 = np.percentile(latencies, 50)
-    p95 = np.percentile(latencies, 95)
-    p99 = np.percentile(latencies, 99)
-    p999 = np.percentile(latencies, 99.9)
-    ops_per_sec = 1e9 / mean if mean > 0 else 0
+class SHMRingBufferBenchmark(BenchmarkRunner[SHMBenchmarkConfig]):
+    """Benchmark runner for SHM ring buffer."""
 
-    print(f"\n{name} (payload={payload_size} bytes, n={count:,})")
-    print(f"  Mean: {mean:,.0f} ns")
-    print(f"  P50:  {p50:,.0f} ns")
-    print(f"  P95:  {p95:,.0f} ns")
-    print(f"  P99:  {p99:,.0f} ns")
-    print(f"  P99.9: {p999:,.0f} ns")
-    print(f"  Throughput: {ops_per_sec:,.0f} ops/sec")
+    def _create_subject(self) -> None:
+        """No persistent subject is required for SHM benchmarks."""
+        return None
+
+    def _record_latency_series(
+        self,
+        operation_name: str,
+        payload_size: int,
+        latencies: np.ndarray,
+    ) -> None:
+        """Record all latency samples into shared benchmark stats."""
+        metrics = self.stats.add_operation(operation_name)
+        for latency in latencies:
+            metrics.add_latency(int(latency), payload_size=payload_size)
+
+    def _record_throughput_sample(
+        self,
+        operation_name: str,
+        payload_size: int,
+        duration_ns: int,
+        count: int,
+    ) -> None:
+        """Record ns-per-message latency sample derived from throughput run."""
+        metrics = self.stats.add_operation(operation_name)
+        ns_per_message = int(duration_ns / count) if count > 0 else int(duration_ns)
+        metrics.add_latency(
+            ns_per_message,
+            payload_size=payload_size,
+            duration_ns=duration_ns,
+            total_messages=count,
+        )
+
+    def _cleanup_path(self, path: str) -> None:
+        """Remove stale shared-memory backing file if present."""
+        p = Path(path)
+        if p.exists():
+            p.unlink()
+
+    def _run_benchmark_suite(self, _subject: None) -> None:
+        """Run configured SHM benchmark suite."""
+        base_path = f"/tmp/shm_bench_{os.getpid()}"
+
+        for payload_size in self.config.payload_sizes:
+            if self.config.run_latency:
+                lat_path = f"{base_path}_lat_{payload_size}"
+                self._cleanup_path(lat_path)
+
+                try:
+                    insert_latencies = latency_benchmark_insert(
+                        self.config.capacity_bytes,
+                        payload_size,
+                        self.config.latency_iterations,
+                        lat_path,
+                    )
+                    self._record_latency_series(
+                        f"insert(payload={payload_size})",
+                        payload_size,
+                        insert_latencies,
+                    )
+                finally:
+                    self._cleanup_path(lat_path)
+
+                try:
+                    consume_latencies = latency_benchmark_consume(
+                        self.config.capacity_bytes,
+                        payload_size,
+                        self.config.latency_iterations,
+                        lat_path,
+                    )
+                    self._record_latency_series(
+                        f"consume(payload={payload_size})",
+                        payload_size,
+                        consume_latencies,
+                    )
+                finally:
+                    self._cleanup_path(lat_path)
+
+            if self.config.run_throughput:
+                tp_path = f"{base_path}_tp_{payload_size}"
+                self._cleanup_path(tp_path)
+
+                try:
+                    prod_ns, cons_ns, prod_count, cons_count = throughput_benchmark(
+                        self.config.capacity_bytes,
+                        payload_size,
+                        self.config.throughput_duration_sec,
+                        tp_path,
+                    )
+                    self._record_throughput_sample(
+                        f"throughput_producer(payload={payload_size})",
+                        payload_size,
+                        prod_ns,
+                        prod_count,
+                    )
+                    self._record_throughput_sample(
+                        f"throughput_consumer(payload={payload_size})",
+                        payload_size,
+                        cons_ns,
+                        cons_count,
+                    )
+                finally:
+                    self._cleanup_path(tp_path)
 
 
-def print_throughput_stats(
-    payload_size: int,
-    producer_ns: int,
-    consumer_ns: int,
-    prod_count: int,
-    cons_count: int,
-) -> None:
-    """Print throughput benchmark results."""
-    producer_time = producer_ns / 1e9
-    consumer_time = consumer_ns / 1e9
+def _parse_payload_sizes(raw: str) -> list[int]:
+    """Parse comma-separated payload sizes."""
+    values = [token.strip() for token in raw.split(",")]
+    sizes = [int(token) for token in values if token]
+    if not sizes:
+        raise ValueError("At least one payload size is required")
+    return sizes
 
-    prod_ns_per_msg = producer_ns / prod_count if prod_count > 0 else 0
-    cons_ns_per_msg = consumer_ns / cons_count if cons_count > 0 else 0
 
-    prod_msg_per_sec = prod_count / producer_time if producer_time > 0 else 0
-    cons_msg_per_sec = cons_count / consumer_time if consumer_time > 0 else 0
-    prod_mb_per_sec = (
-        (prod_count * payload_size) / (producer_time * 1024 * 1024)
-        if producer_time > 0
-        else 0
+def main() -> None:
+    """Main entry point."""
+    cli = BenchmarkCLI("Benchmark SHM ring buffer performance").add_size_arg(
+        default=512,
+        help_text="Payload size in bytes for single-size runs (default: 512)",
     )
-    cons_mb_per_sec = (
-        (cons_count * payload_size) / (consumer_time * 1024 * 1024)
-        if consumer_time > 0
-        else 0
+    cli.parser.add_argument(
+        "--payload-sizes",
+        default="32,128,512,2048,8192",
+        help=(
+            "Comma-separated payload sizes used with --multi-size "
+            "(default: 32,128,512,2048,8192)"
+        ),
+    )
+    cli.parser.add_argument(
+        "--capacity-bytes",
+        type=int,
+        default=2**20,
+        help="Ring buffer capacity in bytes (default: 1048576)",
+    )
+    cli.parser.add_argument(
+        "--latency-iterations",
+        type=int,
+        default=100_000,
+        help="Number of iterations per latency test (default: 100000)",
+    )
+    cli.parser.add_argument(
+        "--duration",
+        type=float,
+        default=3.0,
+        help="Throughput benchmark duration in seconds (default: 3.0)",
+    )
+    cli.parser.add_argument(
+        "--latency-only",
+        action="store_true",
+        help="Run only latency benchmarks",
+    )
+    cli.parser.add_argument(
+        "--throughput-only",
+        action="store_true",
+        help="Run only throughput benchmarks",
     )
 
-    print(f"\nThroughput - Payload: {payload_size} bytes")
-    print(
-        f"  Duration: {producer_time:.2f}s (producer), {consumer_time:.2f}s (consumer)"
+    args = cli.parse()
+
+    if args.latency_only and args.throughput_only:
+        raise ValueError("--latency-only and --throughput-only are mutually exclusive")
+
+    if args.multi_size:
+        payload_sizes = _parse_payload_sizes(args.payload_sizes)
+    else:
+        payload_sizes = [args.size]
+
+    config = SHMBenchmarkConfig(
+        num_operations=args.operations,
+        warmup_operations=args.warmup,
+        capacity_bytes=args.capacity_bytes,
+        payload_sizes=payload_sizes,
+        latency_iterations=args.latency_iterations,
+        throughput_duration_sec=args.duration,
+        run_latency=not args.throughput_only,
+        run_throughput=not args.latency_only,
     )
-    print(f"  Messages: {prod_count:,} sent, {cons_count:,} received")
-    print(
-        f"  Producer: {prod_msg_per_sec:,.0f} msg/s, {prod_mb_per_sec:.2f} MB/s, {prod_ns_per_msg:,.0f} ns/msg"
+
+    benchmark = SHMRingBufferBenchmark(config)
+    stats = benchmark.run()
+
+    reporter = BenchmarkReporter(
+        "SHM Ring Buffer Benchmark Results",
+        {
+            "Capacity bytes": config.capacity_bytes,
+            "Payload sizes": ", ".join(str(size) for size in payload_sizes),
+            "Latency iterations": config.latency_iterations,
+            "Throughput duration": config.throughput_duration_sec,
+        },
     )
-    print(
-        f"  Consumer: {cons_msg_per_sec:,.0f} msg/s, {cons_mb_per_sec:.2f} MB/s, {cons_ns_per_msg:,.0f} ns/msg"
-    )
-
-
-def run_benchmarks() -> None:
-    """Run all SHM ring buffer benchmarks."""
-    PAYLOAD_SIZES = [32, 128, 512, 2048, 8192]
-    CAPACITY_BYTES = 2**20  # 1MB
-    LATENCY_ITERATIONS = 100_000
-    THROUGHPUT_DURATION = 3.0
-
-    base_path = f"/tmp/shm_bench_{os.getpid()}"
-
-    print("=" * 80)
-    print("SHM Ring Buffer Performance Benchmark")
-    print("=" * 80)
-    print(f"Capacity: {CAPACITY_BYTES:,} bytes ({CAPACITY_BYTES // 1024} KB)")
-    print(f"Latency iterations: {LATENCY_ITERATIONS:,}")
-    print(f"Throughput duration: {THROUGHPUT_DURATION}s per test")
-    print(f"Payload sizes: {PAYLOAD_SIZES} bytes")
-
-    # Latency benchmarks
-    print("\n" + "-" * 40)
-    print("LATENCY BENCHMARKS (single-threaded)")
-    print("-" * 40)
-
-    for payload_size in PAYLOAD_SIZES:
-        path = f"{base_path}_lat_{payload_size}"
-
-        # Clean up any existing file
-        if Path(path).exists():
-            Path(path).unlink()
-
-        try:
-            # Insert latency
-            latencies = latency_benchmark_insert(
-                CAPACITY_BYTES, payload_size, LATENCY_ITERATIONS, path
-            )
-            print_latency_stats("Insert", latencies, payload_size)
-        finally:
-            if Path(path).exists():
-                Path(path).unlink()
-
-        try:
-            # Consume latency
-            latencies = latency_benchmark_consume(
-                CAPACITY_BYTES, payload_size, LATENCY_ITERATIONS, path
-            )
-            print_latency_stats("Consume", latencies, payload_size)
-        finally:
-            if Path(path).exists():
-                Path(path).unlink()
-
-    # Throughput benchmarks
-    print("\n" + "-" * 40)
-    print("THROUGHPUT BENCHMARKS (multi-process)")
-    print("-" * 40)
-
-    for payload_size in PAYLOAD_SIZES:
-        path = f"{base_path}_tp_{payload_size}"
-
-        # Clean up any existing file
-        if Path(path).exists():
-            Path(path).unlink()
-
-        try:
-            prod_ns, cons_ns, prod_count, cons_count = throughput_benchmark(
-                CAPACITY_BYTES, payload_size, THROUGHPUT_DURATION, path
-            )
-            print_throughput_stats(
-                payload_size, prod_ns, cons_ns, prod_count, cons_count
-            )
-        finally:
-            if Path(path).exists():
-                Path(path).unlink()
-
-    print("\n" + "=" * 80)
-    print("Benchmark complete")
-    print("=" * 80)
+    reporter.print_full_report(stats)
 
 
 if __name__ == "__main__":
-    run_benchmarks()
+    main()
