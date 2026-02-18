@@ -38,11 +38,10 @@ This directory contains comprehensive tests for the mm-toolbox WebSocket impleme
 
 ### 5. Live Binance Tests (`integration/test_live_binance.py`)
 - **Smoke coverage**: BTC futures `@bookTicker` for both `WsSingle` and `WsPool`
-- **Load coverage**: Combined BTC/ETH/SOL futures streams for `@bookTicker` and raw `@trade`
-- **Latency coverage**: Side-by-side `WsSingle` vs `WsPool` latency stats over the same live stream window
 - **Strict decoding**: Typed `msgspec` decoders with strict parsing (no permissive fallback)
-- **Deterministic validation**: Schema, symbol/stream coverage, and event freshness checks
-- **Pool coverage**: Active connection checks plus combined-stream message validation
+- **Deterministic validation**: Schema and event freshness checks
+- **Pool coverage**: Active connection checks plus strict message validation
+- **Benchmark handoff**: Live load/latency benchmarks moved to `benchmarks/websocket/benchmark_live_binance.py`
 
 **⚠️ Note**: Live tests require `--run-live` flag and internet connection
 
@@ -88,17 +87,20 @@ uv run pytest tests/websocket/test_websocket_integration.py -v
 
 ### Live Tests (Require Internet)
 ```bash
-# Run futures smoke tests (live, non-stress)
-uv run pytest tests/websocket/integration/test_live_binance.py -m "live and not stress" --run-live -v -s
-
-# Run futures load/stress tests (BTC/ETH/SOL @bookTicker + @trade)
-uv run pytest tests/websocket/integration/test_live_binance.py -m "live and stress" --run-live --live-timeout 60 -v -s
-
-# Run side-by-side latency comparison only (single vs pool, same live window)
-uv run pytest tests/websocket/integration/test_live_binance.py::test_side_by_side_latency_stats_single_vs_pool --run-live --live-timeout 30 -v -s
+# Run futures smoke tests
+uv run pytest tests/websocket/integration/test_live_binance.py --run-live -v -s
 
 # Run all tests including live tests
 uv run pytest tests/websocket/ --run-live -v
+```
+
+### Live Benchmarks (Require Internet)
+```bash
+# Run websocket incoming-throughput + latency benchmark
+uv run python benchmarks/websocket/benchmark_live_binance.py
+
+# Run a longer sampling window
+uv run python benchmarks/websocket/benchmark_live_binance.py --sample-window-s 30
 ```
 
 ### Test Options
@@ -114,8 +116,8 @@ uv run pytest tests/websocket/ --run-live -v
 # Run with timing information
 uv run pytest tests/websocket/ -v --durations=10
 
-# Run only live load tests
-uv run pytest tests/websocket/integration/test_live_binance.py -m "live and stress" --run-live --live-timeout 60 -v -s
+# Run live websocket benchmarks
+uv run python benchmarks/websocket/benchmark_live_binance.py
 ```
 
 ## Test Coverage
@@ -154,22 +156,22 @@ The test suite provides comprehensive coverage of:
 
 ### Binance Streams Tested
 - **Smoke stream**: `btcusdt@bookTicker` (futures)
-- **Load streams**: `btcusdt`, `ethusdt`, `solusdt` on `@bookTicker` and raw `@trade`
-- **Transport mode**: combined futures stream endpoint for load tests
 
 ### Validation Performed
 - Strict `msgspec` schema validation
 - Price/quantity numeric and invariant checks
 - Timestamp freshness and clock-sanity checks
-- Required stream coverage across all configured symbols
 - Connection stability for single and pool wrappers
-- Side-by-side latency summary stats (`mean`, `p50`, `p90`, `p99`, `min`, `max`)
 
 ### Deterministic Pass Criteria
 - No decode failures with strict typed decoders
-- All expected streams are observed within timeout
 - Event timestamps remain fresh relative to local receive time
-- Required field-level invariants remain valid per event type
+- Required field-level invariants remain valid
+
+### Live Benchmark Details
+- **Benchmark script**: `benchmarks/websocket/benchmark_live_binance.py`
+- **Combined load streams**: `btcusdt`, `ethusdt`, `solusdt` on `@bookTicker` and raw `@trade`
+- **Metrics**: incoming data throughput-per-second percentiles and side-by-side event-latency stats for `WsSingle`, `WsPool`, and `single_vs_pool`
 
 ## Troubleshooting
 
