@@ -21,12 +21,24 @@ import numpy as np
 
 from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
 
-from benchmarks.core import (
-    BaseBenchmarkConfig,
-    BenchmarkCLI,
-    BenchmarkReporter,
-    BenchmarkRunner,
-)
+try:
+    from benchmarks.core import (
+        BaseBenchmarkConfig,
+        BenchmarkCLI,
+        BenchmarkReporter,
+        BenchmarkRunner,
+    )
+except ModuleNotFoundError:
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from benchmarks.core import (
+        BaseBenchmarkConfig,
+        BenchmarkCLI,
+        BenchmarkReporter,
+        BenchmarkRunner,
+    )
 
 
 @dataclass
