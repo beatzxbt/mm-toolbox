@@ -23,6 +23,7 @@ make fix            # Format + typecheck
 ## 💡 Making Changes
 
 ### Development Workflow
+
 ```bash
 # Create feature branch
 git checkout -b feature/your-feature-name
@@ -42,17 +43,20 @@ git push origin feature/your-feature-name
 **Performance First**: This is a high-frequency trading library. Optimize for speed and memory efficiency.
 
 **Code Style**:
+
 - **Ruff formatting**: `make format` (automatic)
 - **Type hints required**: Use strict typing for ty compliance
 - **Docstrings**: Compact Google style, one-liner for simple functions
 - **Dependencies**: Avoid adding new ones unless absolutely necessary
 
 **Testing**:
+
 - **Comprehensive coverage**: Add tests for all new functionality
 - **Performance tests**: Include benchmarks for performance-critical code
 - **Edge cases**: Test boundary conditions and error handling
 
 ### File Structure
+
 ```
 src/mm_toolbox/
 ├── module_name/         # New modules here
@@ -67,6 +71,7 @@ tests/module_name/       # Comprehensive test coverage
 ## 🛠️ Development Tips
 
 ### Cython Development
+
 ```bash
 # Fast iteration during development
 make build-lib  # Rebuilds only changed files
@@ -76,6 +81,7 @@ make build-lib  # Rebuilds only changed files
 ```
 
 ### Running Tests
+
 ```bash
 make test-all                     # C + Python tests
 make test-py                      # Python-only tests
@@ -85,6 +91,7 @@ uv run pytest -k "test_name" -s    # Specific test with output
 ```
 
 ### Performance Guidelines
+
 - **Cython first** for computational code (see existing `.pyx` files)
 - **Memory efficiency**: Use ringbuffers, avoid unnecessary allocations
 - **Type everything**: Helps both performance and maintainability
@@ -149,7 +156,10 @@ uv add --group build cibuildwheel
 uv run cibuildwheel --platform auto
 ```
 
+For Linux builds, run `x86_64` and `aarch64` wheel jobs in parallel (separate CI matrix jobs).
+
 The `pyproject.toml` is configured to build wheels for:
+
 - Python 3.12 and 3.13
 - Linux (x86_64 and aarch64)
 - macOS (x86_64 and arm64)
@@ -224,62 +234,55 @@ The following files are included in distributions via `MANIFEST.in`:
 #### Common Issues
 
 1. **Build fails on missing dependencies**:
-   ```bash
+  ```bash
    uv sync --all-groups
-   ```
-
+  ```
 2. **Cython compilation errors**:
-   - Check that Cython version is >=3.0.11
-   - Ensure numpy is installed
-   - Try cleaning: `make remove-build-lib && make build-lib`
-
+  - Check that Cython version is >=3.0.11
+  - Ensure numpy is installed
+  - Try cleaning: `make remove-build-lib && make build-lib`
 3. **Wheel contains wrong files**:
-   - Check `MANIFEST.in`
-   - Clean and rebuild: `make remove-wheel && make wheel`
-
+  - Check `MANIFEST.in`
+  - Clean and rebuild: `make remove-wheel && make wheel`
 4. **Upload fails**:
-   - Check PyPI credentials
-   - Ensure version number is updated
-   - Verify all required metadata is present
+  - Check PyPI credentials
+  - Ensure version number is updated
+  - Verify all required metadata is present
 
 #### Beta Release Playbook (Used for 1.0.0b4)
 
 If you are shipping a beta and need Linux + macOS wheels quickly, this is the exact flow that worked:
 
 1. **Run a full local rebuild before tests**:
-   ```bash
+  ```bash
    make rebuild-all
    make test-all
    make fix
-   ```
-
+  ```
 2. **Trigger release workflow on a non-default branch via CLI** (useful when Actions UI snaps back to `main`):
-   ```bash
+  ```bash
    gh workflow run release.yml --ref v1.0b2 -f environment=testpypi
    gh run list --workflow release.yml --branch v1.0b2 --limit 10
    gh run watch <run-id>
    gh run view <run-id> --log-failed
-   ```
-
+  ```
 3. **Known Linux CI hang pattern**:
-   - We observed Ubuntu wheel jobs hang/timeout in:
-     - `tests/logging/advanced/test_advanced_integration.py`
-     - commonly around `TestIntegration::test_multiple_workers` while waiting on `p.join()`
-   - This blocked Linux wheel publication from CI in some runs.
-
+  - We observed Ubuntu wheel jobs hang/timeout in:
+    - `tests/logging/advanced/test_advanced_integration.py`
+    - commonly around `TestIntegration::test_multiple_workers` while waiting on `p.join()`
+  - This blocked Linux wheel publication from CI in some runs.
 4. **Local Linux wheel fallback with cibuildwheel** (manylinux x86_64):
-   ```bash
+  ```bash
    # Optional: remove stale local IPC sockets to reduce archive warnings
    find .ipc -type s -delete 2>/dev/null || true
 
    CIBW_TEST_COMMAND='python -c "import mm_toolbox"' \
    uv tool run cibuildwheel --platform linux --archs x86_64 --output-dir dist
-   ```
-   - The `CIBW_TEST_COMMAND` override keeps a smoke test (`import mm_toolbox`) and avoids full test-suite hangs during wheel build.
-   - Keeping all artifacts in `dist/` avoids a second wheel staging directory.
-
+  ```
+  - The `CIBW_TEST_COMMAND` override keeps a smoke test (`import mm_toolbox`) and avoids full test-suite hangs during wheel build.
+  - Keeping all artifacts in `dist/` avoids a second wheel staging directory.
 5. **Upload wheels directly (skip existing files)**:
-   ```bash
+  ```bash
    set -a && source .env && set +a
 
    # TestPyPI
@@ -293,10 +296,9 @@ If you are shipping a beta and need Linux + macOS wheels quickly, this is the ex
      --repository-url https://upload.pypi.org/legacy/ \
      -u __token__ -p "$PUBLISH_TOKEN" \
      --skip-existing dist/*
-   ```
-
+  ```
 6. **Verify artifacts after upload**:
-   ```bash
+  ```bash
    uv run python - <<'PY'
    import json, urllib.request
    with urllib.request.urlopen("https://pypi.org/pypi/mm-toolbox/1.0.0b4/json", timeout=30) as r:
@@ -304,13 +306,12 @@ If you are shipping a beta and need Linux + macOS wheels quickly, this is the ex
    for f in data["urls"]:
        print(f["filename"])
    PY
-   ```
-
+  ```
 7. **Pre-release install note**:
-   ```bash
+  ```bash
    pip install --pre mm-toolbox==1.0.0b4
-   ```
-   - Pre-release versions are excluded by default unless `--pre` is provided.
+  ```
+  - Pre-release versions are excluded by default unless `--pre` is provided.
 
 ### Environment Variables
 
@@ -361,12 +362,14 @@ jobs:
 **🐛 Bug Fixes**: Include reproduction steps and tests that fail before your fix.
 
 **✨ New Features**: 
+
 - Open an issue first to discuss the approach
 - Include comprehensive tests and benchmarks
 - Update type stubs (`.pyi` files) manually
 - Add examples in docstrings
 
 **⚡ Performance Improvements**: 
+
 - Include benchmarks showing improvement
 - Maintain backward compatibility
 - Consider memory usage, not just speed
@@ -383,6 +386,7 @@ jobs:
 ## 📝 Commit Guidelines
 
 Use conventional commits:
+
 ```bash
 feat: add exponential moving average implementation
 fix: resolve memory leak in ringbuffer
