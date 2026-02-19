@@ -700,32 +700,85 @@ cdef class CoreAdvancedOrderbook:
         return convert_price_from_tick((final_buy_ticks + final_sell_ticks) // 2, self._tick_size)
 
     cdef inline double get_price_impact(self, double size, bint is_buy, bint is_base_currency):
-        """Calculate price impact of executing a trade of given size."""
+        """Calculate terminal touch-relative impact for a trade of given size."""
         self._ensure_not_empty()
         if size <= 0.0:
             return 0.0
         cdef:
-            double mid_price = self.get_mid_price()
-            double target_base = size if is_base_currency else (size / mid_price)
-            u64 target_lots = convert_size_to_lot(target_base, self._lot_size)
             OrderbookLadderData* side_data = self._asks_data if is_buy else self._bids_data
+            u64 touch_anchor_ticks = side_data.levels[0].ticks
+            double touch_anchor_price = convert_price_from_tick(
+                touch_anchor_ticks,
+                self._tick_size,
+            )
+            double target_base = size if is_base_currency else (size / touch_anchor_price)
+            u64 target_lots = convert_size_to_lot(target_base, self._lot_size)
             u64 remaining_lots = target_lots
             u64 consumed_lots, available_lots
-            u64 total_ticks_times_lots = 0
+            u64 last_touched_ticks = touch_anchor_ticks
             u64 i
         if target_lots == 0:
             return 0.0
         for i in range(side_data.num_levels):
             available_lots = side_data.levels[i].lots
             consumed_lots = available_lots if available_lots < remaining_lots else remaining_lots
-            total_ticks_times_lots += consumed_lots * side_data.levels[i].ticks
+            if consumed_lots > 0:
+                last_touched_ticks = side_data.levels[i].ticks
             remaining_lots -= consumed_lots
             if remaining_lots == 0:
                 break
         if remaining_lots > 0:
             return INFINITY_DOUBLE
-        cdef double avg_px = (self._tick_size * <double> total_ticks_times_lots) / <double> target_lots
-        return abs(avg_px - mid_price)
+        return abs(
+            convert_price_from_tick(last_touched_ticks, self._tick_size) - touch_anchor_price
+        )
+
+    cdef inline double get_size_for_price_impact_bps(
+        self,
+        double impact_bps,
+        bint is_buy,
+        bint is_base_currency,
+    ):
+        """Get cumulative size available within a touch-anchored impact band."""
+        self._ensure_not_empty()
+        if impact_bps <= 0.0:
+            return 0.0
+        cdef:
+            OrderbookLadderData* side_data = self._asks_data if is_buy else self._bids_data
+            u64 touch_anchor_ticks = side_data.levels[0].ticks
+            double touch_anchor_price = convert_price_from_tick(touch_anchor_ticks, self._tick_size)
+            double limit_price
+            u64 limit_ticks
+            u64 ticks
+            u64 lots
+            u64 total_lots = 0
+            u64 total_ticks_times_lots = 0
+            u64 i
+        if is_buy:
+            limit_price = touch_anchor_price * (1.0 + impact_bps / 10_000.0)
+            limit_ticks = convert_price_to_tick_fast(limit_price, self._tick_size_recip)
+            for i in range(side_data.num_levels):
+                ticks = side_data.levels[i].ticks
+                if ticks > limit_ticks:
+                    break
+                lots = side_data.levels[i].lots
+                total_lots += lots
+                total_ticks_times_lots += ticks * lots
+        else:
+            limit_price = touch_anchor_price * (1.0 - impact_bps / 10_000.0)
+            limit_ticks = convert_price_to_tick_fast(limit_price, self._tick_size_recip)
+            if convert_price_from_tick(limit_ticks, self._tick_size) < limit_price:
+                limit_ticks += 1
+            for i in range(side_data.num_levels):
+                ticks = side_data.levels[i].ticks
+                if ticks < limit_ticks:
+                    break
+                lots = side_data.levels[i].lots
+                total_lots += lots
+                total_ticks_times_lots += ticks * lots
+        if is_base_currency:
+            return convert_size_from_lot(total_lots, self._lot_size)
+        return (self._tick_size * self._lot_size) * <double> total_ticks_times_lots
 
     cdef inline bint is_bbo_crossed(self, double other_bid_price, double other_ask_price):
         """Check if this orderbook's BBO crosses with another orderbook's BBO."""

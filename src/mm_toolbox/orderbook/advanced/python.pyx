@@ -183,16 +183,41 @@ cdef class PyAdvancedOrderbook:
         
         Args:
             size: Trade size
-            is_buy: If True, calculate impact for buying; if False, for selling
-            is_base_currency: If True, size is in base currency; if False, in quote currency
+            is_buy: If True, anchor at best ask and consume asks upward; if False, anchor at best bid and consume bids downward
+            is_base_currency: If True, size is in base currency; if False, convert quote size to base using the same touch anchor price
         
         Returns:
-            Price impact (absolute difference from mid price), or infinity if size cannot be filled
+            Absolute terminal impact from touch anchor to last consumed level, or infinity if size cannot be filled
         
         Raises:
             RuntimeError: If orderbook is empty
         """
         return self._core.get_price_impact(size, is_buy, is_base_currency)
+
+    cpdef double get_size_for_price_impact_bps(
+        self,
+        double impact_bps,
+        bint is_buy,
+        bint is_base_currency=True,
+    ):
+        """Calculate cumulative size available within a basis-point depth band.
+        
+        Args:
+            impact_bps: Price depth in basis points from touch
+            is_buy: If True, aggregate asks up to best_ask * (1 + impact_bps/10000); if False, bids down to best_bid * (1 - impact_bps/10000)
+            is_base_currency: If True, return base size; if False, return quote notional
+        
+        Returns:
+            Cumulative available size within the band
+        
+        Raises:
+            RuntimeError: If orderbook is empty
+        """
+        return self._core.get_size_for_price_impact_bps(
+            impact_bps,
+            is_buy,
+            is_base_currency,
+        )
 
     cpdef bint is_bbo_crossed(self, double bid_price, double ask_price):
         """Check if this orderbook's BBO crosses with another orderbook's BBO.

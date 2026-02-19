@@ -272,7 +272,9 @@ def test_wrapper_price_calculations():
     assert _approx_eq(book.get_bbo_spread(), 0.01)
     assert book.get_wmid_price() > 0
     assert book.get_volume_weighted_mid_price(0.5, True) > 0
-    assert book.get_price_impact(0.5, True, True) >= 0
+    assert _approx_eq(book.get_price_impact(0.5, True, True), 0.0)
+    assert _approx_eq(book.get_price_impact(2.0, True, True), 0.01)
+    assert _approx_eq(book.get_size_for_price_impact_bps(1.0, True, True), 4.0)
 
 
 def test_wrapper_crossing_and_change():
@@ -303,5 +305,3 @@ def test_wrapper_crossing_and_change():
     assert book.is_bbo_crossed(99.99, 100.02) == False
     assert book.does_bbo_price_change(100.00, 100.01) == False
     assert book.does_bbo_price_change(99.99, 100.01) == True
-
-

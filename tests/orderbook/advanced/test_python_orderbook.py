@@ -404,19 +404,104 @@ class TestCalculations:
         assert vwmid_zero == self.ob.get_mid_price()
 
     def test_get_price_impact(self):
-        buy_impact = self.ob.get_price_impact(
+        buy_touch_only = self.ob.get_price_impact(
             size=1.0, is_buy=True, is_base_currency=True
         )
-        sell_impact = self.ob.get_price_impact(
+        sell_touch_only = self.ob.get_price_impact(
             size=1.0, is_buy=False, is_base_currency=True
         )
-        assert buy_impact >= 0.0
-        assert sell_impact >= 0.0
+        assert buy_touch_only == pytest.approx(0.0)
+        assert sell_touch_only == pytest.approx(0.0)
+
+        buy_multi_level = self.ob.get_price_impact(
+            size=2.0, is_buy=True, is_base_currency=True
+        )
+        sell_multi_level = self.ob.get_price_impact(
+            size=2.0, is_buy=False, is_base_currency=True
+        )
+        assert buy_multi_level == pytest.approx(0.01)
+        assert sell_multi_level == pytest.approx(0.01)
 
         zero_impact = self.ob.get_price_impact(
             size=0.0, is_buy=True, is_base_currency=True
         )
         assert zero_impact == 0.0
+
+    def test_get_price_impact_quote_size_uses_touch_anchor(self):
+        ob = _mk_book(num_levels=64)
+        bids, _ = _make_levels(
+            prices=[100.0, 99.0],
+            sizes=[1.0, 1.0],
+            norders=[1, 1],
+            with_precision=True,
+        )
+        asks, _ = _make_levels(
+            prices=[200.0, 201.0],
+            sizes=[0.7, 1.0],
+            norders=[1, 1],
+            with_precision=True,
+        )
+        ob.consume_snapshot(asks, bids)
+
+        buy_impact_quote = ob.get_price_impact(
+            size=140.0, is_buy=True, is_base_currency=False
+        )
+        assert buy_impact_quote == pytest.approx(0.0)
+
+    def test_get_price_impact_insufficient_liquidity_returns_infinity_marker(self):
+        buy_impact = self.ob.get_price_impact(size=8.0, is_buy=True, is_base_currency=True)
+        assert buy_impact == np.finfo(float).max
+
+    def test_get_size_for_price_impact_bps(self):
+        buy_base = self.ob.get_size_for_price_impact_bps(
+            impact_bps=1.0, is_buy=True, is_base_currency=True
+        )
+        assert buy_base == pytest.approx(4.0)
+
+        sell_base = self.ob.get_size_for_price_impact_bps(
+            impact_bps=1.0, is_buy=False, is_base_currency=True
+        )
+        assert sell_base == pytest.approx(3.0)
+
+        buy_quote = self.ob.get_size_for_price_impact_bps(
+            impact_bps=2.0, is_buy=True, is_base_currency=False
+        )
+        assert buy_quote == pytest.approx(750.17)
+
+        zero_bps = self.ob.get_size_for_price_impact_bps(
+            impact_bps=0.0, is_buy=True, is_base_currency=True
+        )
+        assert zero_bps == 0.0
+
+        negative_bps = self.ob.get_size_for_price_impact_bps(
+            impact_bps=-1.0, is_buy=False, is_base_currency=True
+        )
+        assert negative_bps == 0.0
+
+    def test_get_size_for_price_impact_bps_includes_boundary_levels(self):
+        ob = _mk_book(num_levels=64)
+        bids, _ = _make_levels(
+            prices=[99.0, 98.01],
+            sizes=[1.0, 2.0],
+            norders=[1, 1],
+            with_precision=True,
+        )
+        asks, _ = _make_levels(
+            prices=[100.0, 101.0],
+            sizes=[1.5, 2.5],
+            norders=[1, 1],
+            with_precision=True,
+        )
+        ob.consume_snapshot(asks, bids)
+
+        buy_base = ob.get_size_for_price_impact_bps(
+            impact_bps=100.0, is_buy=True, is_base_currency=True
+        )
+        sell_base = ob.get_size_for_price_impact_bps(
+            impact_bps=100.0, is_buy=False, is_base_currency=True
+        )
+        assert buy_base == pytest.approx(4.0)
+        assert sell_base == pytest.approx(3.0)
 
     def test_does_bbo_price_change(self):
         assert not self.ob.does_bbo_price_change(100.00, 100.01)

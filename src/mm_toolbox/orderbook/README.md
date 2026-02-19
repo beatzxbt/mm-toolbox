@@ -98,6 +98,7 @@ Both implementations provide matching read-side helpers:
 - `get_bbo()`, `get_bbo_spread()`, `get_mid_price()`, `get_wmid_price()`
 - `get_volume_weighted_mid_price(size, is_base_currency=True)`
 - `get_price_impact(size, is_buy, is_base_currency=True)`
+- `get_size_for_price_impact_bps(impact_bps, is_buy, is_base_currency=True)`
 - `does_bbo_price_change(bid_price, ask_price)`
 - `does_bbo_cross(bid_price, ask_price)`
 
@@ -139,6 +140,11 @@ best_bid, best_ask = ob.get_bbo()
 - Ticks/lots are always computed on ingest; pre-filled values are overwritten.
 - Snapshots replace state without validation; callers must supply non-crossed data.
 - BBO updates assume non-crossing inputs; no validation is performed.
+- Advanced `get_price_impact(size, is_buy, is_base_currency)` is touch-anchored and
+  returns terminal impact: `abs(last_touched_price - touch_anchor_price)`.
+- Advanced `get_size_for_price_impact_bps(impact_bps, is_buy, is_base_currency)`
+  measures depth from touch (`best_ask` for buys, `best_bid` for sells) and includes
+  boundary levels.
 - Advanced deltas ignore a special edge case: if a delta would wipe the entire
   opposite side and provides no replacement levels, the delta is ignored.
 

@@ -42,7 +42,7 @@ cdef class PyAdvancedOrderbook:
     cpdef double get_wmid_price(self)
     cpdef double get_volume_weighted_mid_price(self, double size, bint is_base_currency=?)
     cpdef double get_price_impact(self, double size, bint is_buy, bint is_base_currency=?)
+    cpdef double get_size_for_price_impact_bps(self, double impact_bps, bint is_buy, bint is_base_currency=?)
     cpdef bint is_bbo_crossed(self, double bid_price, double ask_price)
     cpdef bint does_bbo_price_change(self, double bid_price, double ask_price)
-
 
