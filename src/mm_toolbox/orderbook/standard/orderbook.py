@@ -381,40 +381,77 @@ class Orderbook:
         """Get the direct price impact if a theoretical size were to be
         executed on the book."""
         self._ensure_bbo_available()
-        if size == 0.0:
+        if size <= 0.0:
             return 0.0
 
-        mid_price = self.get_mid_price()
+        if is_buy:
+            touch_anchor_price = self._asks[self._best_ask_ticks].price
+            levels = (self._asks[tick] for tick in self._sorted_ask_ticks)
+        else:
+            touch_anchor_price = self._bids[self._best_bid_ticks].price
+            levels = (self._bids[tick] for tick in reversed(self._sorted_bid_ticks))
+
         if not is_base_currency:
-            size = size / mid_price
+            size = size / touch_anchor_price
 
         remaining_size = size
-        total_cost = 0.0
+        last_touched_price = touch_anchor_price
 
-        if is_buy:
-            for tick in self._sorted_ask_ticks:
-                level = self._asks[tick]
-                consumed_size = min(remaining_size, level.size)
-                total_cost += consumed_size * level.price
-                remaining_size -= consumed_size
-
-                if remaining_size <= 0.0:
-                    break
-        else:
-            for tick in reversed(self._sorted_bid_ticks):
-                level = self._bids[tick]
-                consumed_size = min(remaining_size, level.size)
-                total_cost += consumed_size * level.price
-                remaining_size -= consumed_size
-
-                if remaining_size <= 0.0:
-                    break
+        for level in levels:
+            consumed_size = min(remaining_size, level.size)
+            remaining_size -= consumed_size
+            if consumed_size > 0.0:
+                last_touched_price = level.price
+            if remaining_size <= 0.0:
+                break
 
         if remaining_size > 0.0:
             return float("inf")
 
-        avg_execution_price = total_cost / size
-        return abs(avg_execution_price - mid_price)
+        return abs(last_touched_price - touch_anchor_price)
+
+    def get_size_for_price_impact_bps(
+        self, impact_bps: float, is_buy: bool, is_base_currency: bool = True
+    ) -> float:
+        """Get cumulative size available within an impact band from touch.
+
+        Args:
+            impact_bps: Price depth in basis points from touch price.
+            is_buy: If True, aggregate ask-side depth up to touch + band.
+                If False, aggregate bid-side depth down to touch - band.
+            is_base_currency: If True return base size, else quote notional.
+        """
+        self._ensure_bbo_available()
+        if impact_bps <= 0.0:
+            return 0.0
+
+        total_base = 0.0
+        total_quote = 0.0
+
+        if is_buy:
+            best_ask_ticks = self._best_ask_ticks
+            max_price = self._asks[best_ask_ticks].price * (1.0 + impact_bps / 10_000.0)
+            max_ticks = price_to_ticks_fast(max_price, self._inv_tick_size)
+            for tick in self._sorted_ask_ticks:
+                if tick > max_ticks:
+                    break
+                level = self._asks[tick]
+                total_base += level.size
+                total_quote += level.size * level.price
+        else:
+            best_bid_ticks = self._best_bid_ticks
+            min_price = self._bids[best_bid_ticks].price * (1.0 - impact_bps / 10_000.0)
+            min_ticks = price_to_ticks_fast(min_price, self._inv_tick_size)
+            if price_from_ticks(min_ticks, self._tick_size) < min_price:
+                min_ticks += 1
+            for tick in reversed(self._sorted_bid_ticks):
+                if tick < min_ticks:
+                    break
+                level = self._bids[tick]
+                total_base += level.size
+                total_quote += level.size * level.price
+
+        return total_base if is_base_currency else total_quote
 
     def does_bbo_price_change(self, bid_price: float, ask_price: float) -> bool:
         """Check if the best bid/ask price will change."""

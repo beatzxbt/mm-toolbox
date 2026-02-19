@@ -669,22 +669,67 @@ class TestOrderbookCalculations:
         assert vwmid_zero == self.ob.get_mid_price()
 
     def test_get_price_impact(self):
-        """Test price impact calculation."""
-        # Buy impact
-        buy_impact = self.ob.get_price_impact(
+        """Test touch-anchored terminal price impact semantics."""
+        # Single-level fills stay at touch.
+        buy_single = self.ob.get_price_impact(
             size=1.0, is_buy=True, is_base_currency=True
         )
-        assert buy_impact >= 0.0
-
-        # Sell impact
-        sell_impact = self.ob.get_price_impact(
+        sell_single = self.ob.get_price_impact(
             size=1.0, is_buy=False, is_base_currency=True
         )
-        assert sell_impact >= 0.0
+        assert buy_single == pytest.approx(0.0)
+        assert sell_single == pytest.approx(0.0)
 
-        # Zero size should have zero impact
-        zero_impact = self.ob.get_price_impact(size=0.0, is_buy=True)
-        assert zero_impact == 0.0
+        # Multi-level fills use terminal touched level vs touch anchor.
+        buy_multi = self.ob.get_price_impact(
+            size=2.0, is_buy=True, is_base_currency=True
+        )
+        sell_multi = self.ob.get_price_impact(
+            size=2.0, is_buy=False, is_base_currency=True
+        )
+        assert buy_multi == pytest.approx(0.01)
+        assert sell_multi == pytest.approx(0.01)
+
+        # Quote->base conversion must use the touch anchor consistently.
+        buy_quote_at_touch_boundary = self.ob.get_price_impact(
+            size=1.5 * 100.01, is_buy=True, is_base_currency=False
+        )
+        assert buy_quote_at_touch_boundary == pytest.approx(0.0)
+
+        # Non-positive sizes have zero impact.
+        assert self.ob.get_price_impact(size=0.0, is_buy=True) == pytest.approx(0.0)
+        assert self.ob.get_price_impact(size=-1.0, is_buy=False) == pytest.approx(0.0)
+
+        # If size exceeds available side liquidity, impact is infinite.
+        assert self.ob.get_price_impact(size=100.0, is_buy=True) == float("inf")
+        assert self.ob.get_price_impact(size=100.0, is_buy=False) == float("inf")
+
+    def test_get_size_for_price_impact_bps(self):
+        """Test cumulative depth size within a touch-anchored impact band."""
+        buy_base = self.ob.get_size_for_price_impact_bps(
+            impact_bps=1.0, is_buy=True, is_base_currency=True
+        )
+        assert buy_base == pytest.approx(4.0)
+
+        sell_base = self.ob.get_size_for_price_impact_bps(
+            impact_bps=1.0, is_buy=False, is_base_currency=True
+        )
+        assert sell_base == pytest.approx(3.0)
+
+        buy_quote = self.ob.get_size_for_price_impact_bps(
+            impact_bps=2.0, is_buy=True, is_base_currency=False
+        )
+        assert buy_quote == pytest.approx(750.17)
+
+        zero_bps = self.ob.get_size_for_price_impact_bps(
+            impact_bps=0.0, is_buy=True, is_base_currency=True
+        )
+        assert zero_bps == 0.0
+
+        negative_bps = self.ob.get_size_for_price_impact_bps(
+            impact_bps=-1.0, is_buy=False, is_base_currency=True
+        )
+        assert negative_bps == 0.0
 
     def test_does_bbo_price_change(self):
         """Test BBO price change detection."""
