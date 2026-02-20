@@ -7,6 +7,11 @@
 AGENTS.md
 CLAUDE.md
 
+# Local wheel build artifacts
+.cibw-cache/
+.python-pkgs/
+wheelhouse/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

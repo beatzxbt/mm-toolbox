@@ -62,7 +62,7 @@ test-requires = ["pytest", "pytest-asyncio", "pytest-timeout", "websockets"]
 archs = ["x86_64", "aarch64"]
 
 [tool.cibuildwheel.macos]
-archs = ["x86_64", "arm64"]
+archs = ["arm64"]
 environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
 
 [dependency-groups]

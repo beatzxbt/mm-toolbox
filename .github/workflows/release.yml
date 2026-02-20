@@ -25,6 +25,7 @@ jobs:
       CIBW_BUILD: "cp312-* cp313-*"
       CIBW_SKIP: "*-win* *-manylinux_i686"
       CIBW_ARCHS_LINUX: "x86_64 aarch64"
+      CIBW_ARCHS_MACOS: "arm64"
 
     steps:
     - name: Checkout code
