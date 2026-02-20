@@ -21,6 +21,10 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
+    env:
+      CIBW_BUILD: "cp312-* cp313-*"
+      CIBW_SKIP: "*-win* *-manylinux_i686"
+      CIBW_ARCHS_LINUX: "x86_64 aarch64"
 
     steps:
     - name: Checkout code
@@ -43,6 +47,16 @@ jobs:
     - name: Set up QEMU (Linux cross-arch builds)
       if: runner.os == 'Linux'
       uses: docker/setup-qemu-action@v3
+
+    - name: Print Linux wheel targets
+      if: runner.os == 'Linux'
+      run: |
+        uv tool run cibuildwheel --platform linux --print-build-identifiers
+
+    - name: Print macOS wheel targets
+      if: runner.os == 'macOS'
+      run: |
+        uv tool run cibuildwheel --platform macos --print-build-identifiers
 
     - name: Build wheels
       run: |
@@ -112,12 +126,20 @@ jobs:
       with:
         name: sdist
         path: dist/
+
+    - name: Validate release artifacts
+      run: |
+        ls -lah dist/
+        ls dist/*.whl >/dev/null 2>&1 || { echo "No wheel artifacts found in dist/."; exit 1; }
+        ls dist/*.tar.gz >/dev/null 2>&1 || { echo "No sdist artifact found in dist/."; exit 1; }
+        ls dist/*manylinux*aarch64*.whl >/dev/null 2>&1 || { echo "Missing Linux aarch64 manylinux wheel."; exit 1; }
     
     - name: Publish to TestPyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         repository-url: https://test.pypi.org/legacy/
         password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        skip-existing: true
 
   publish-pypi:
     name: Publish to PyPI
@@ -141,8 +163,16 @@ jobs:
       with:
         name: sdist
         path: dist/
+
+    - name: Validate release artifacts
+      run: |
+        ls -lah dist/
+        ls dist/*.whl >/dev/null 2>&1 || { echo "No wheel artifacts found in dist/."; exit 1; }
+        ls dist/*.tar.gz >/dev/null 2>&1 || { echo "No sdist artifact found in dist/."; exit 1; }
+        ls dist/*manylinux*aarch64*.whl >/dev/null 2>&1 || { echo "Missing Linux aarch64 manylinux wheel."; exit 1; }
     
     - name: Publish to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         password: ${{ secrets.PYPI_API_TOKEN }}
+        skip-existing: true
