@@ -71,10 +71,14 @@ async def _fetch_exchange_filters(
         payload = await resp.json()
 
     symbols = payload.get("symbols", [])
-    assert len(symbols) == 1, f"Expected one exchangeInfo symbol entry, got {len(symbols)}"
+    assert len(symbols) == 1, (
+        f"Expected one exchangeInfo symbol entry, got {len(symbols)}"
+    )
 
     filters = symbols[0].get("filters", [])
-    price_filter = next((f for f in filters if f.get("filterType") == "PRICE_FILTER"), None)
+    price_filter = next(
+        (f for f in filters if f.get("filterType") == "PRICE_FILTER"), None
+    )
     lot_filter = next((f for f in filters if f.get("filterType") == "LOT_SIZE"), None)
     assert price_filter is not None, "Missing PRICE_FILTER"
     assert lot_filter is not None, "Missing LOT_SIZE"
@@ -161,16 +165,13 @@ async def _capture_events(
                         seq += 1
                         continue
 
-                    if (
-                        stream.endswith("@bookTicker")
-                        or (
-                            "u" in data
-                            and "b" in data
-                            and "B" in data
-                            and "a" in data
-                            and "A" in data
-                            and "U" not in data
-                        )
+                    if stream.endswith("@bookTicker") or (
+                        "u" in data
+                        and "b" in data
+                        and "B" in data
+                        and "a" in data
+                        and "A" in data
+                        and "U" not in data
                     ):
                         evt = BookTickerEvent(
                             seq=seq,
@@ -210,16 +211,25 @@ async def _capture_events_with_retries(
     for attempt in range(max_attempts):
         try:
             return await _capture_events(symbol, duration_s, snapshot_limit)
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError, RuntimeError) as exc:
+        except (
+            aiohttp.ClientError,
+            asyncio.TimeoutError,
+            OSError,
+            RuntimeError,
+        ) as exc:
             last_exc = exc
             if attempt + 1 == max_attempts:
                 break
             await asyncio.sleep(1.0 + attempt)
 
-    raise AssertionError(f"Unable to capture live Binance events after retries: {last_exc}")
+    raise AssertionError(
+        f"Unable to capture live Binance events after retries: {last_exc}"
+    )
 
 
-def _snapshot_levels(snapshot: dict[str, Any]) -> tuple[list[OrderbookLevel], list[OrderbookLevel]]:
+def _snapshot_levels(
+    snapshot: dict[str, Any],
+) -> tuple[list[OrderbookLevel], list[OrderbookLevel]]:
     bids = [
         OrderbookLevel(price=float(price), size=float(size), norders=0)
         for price, size in snapshot["bids"]
@@ -347,7 +357,9 @@ def _replay_depth_with_reference(
             try:
                 best_bid, best_ask = ob.get_bbo()
             except Exception as exc:
-                record_error(f"{context}: get_bbo raised unexpectedly: {type(exc).__name__}")
+                record_error(
+                    f"{context}: get_bbo raised unexpectedly: {type(exc).__name__}"
+                )
                 return
             if best_bid.ticks != expected_bid or best_ask.ticks != expected_ask:
                 record_error(f"{context}: bbo mismatch")
@@ -386,14 +398,18 @@ def _replay_depth_with_reference(
                 break
 
         try:
-            _apply_depth_to_reference(event, ref_bids, ref_asks, inv_tick_size, inv_lot_size)
+            _apply_depth_to_reference(
+                event, ref_bids, ref_asks, inv_tick_size, inv_lot_size
+            )
             _apply_depth_to_orderbook(ob, event)
             stats.applied_depth_events += 1
             last_update_id = event.u
             validate_state(f"depth seq={event.seq}")
         except Exception as exc:
             stats.raised_errors += 1
-            record_error(f"depth apply failed at seq={event.seq}: {type(exc).__name__}: {exc}")
+            record_error(
+                f"depth apply failed at seq={event.seq}: {type(exc).__name__}: {exc}"
+            )
             break
 
     return stats, errors

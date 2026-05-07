@@ -20,12 +20,22 @@ import msgspec
 import numpy as np
 
 try:
-    from benchmarks.core import BaseBenchmarkConfig, BenchmarkCLI, BenchmarkRunner, BenchmarkStatistics
+    from benchmarks.core import (
+        BaseBenchmarkConfig,
+        BenchmarkCLI,
+        BenchmarkRunner,
+        BenchmarkStatistics,
+    )
 except ModuleNotFoundError:
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from benchmarks.core import BaseBenchmarkConfig, BenchmarkCLI, BenchmarkRunner, BenchmarkStatistics
+    from benchmarks.core import (
+        BaseBenchmarkConfig,
+        BenchmarkCLI,
+        BenchmarkRunner,
+        BenchmarkStatistics,
+    )
 
 from mm_toolbox.orderbook.standard import Orderbook, OrderbookLevel
 
@@ -163,12 +173,16 @@ def _print_detailed_report(
                     continue
 
                 latencies_in_range = [lat for lat, _ in range_data]
-                ns_per_level_in_range = [lat / lvl for lat, lvl in range_data if lvl > 0]
+                ns_per_level_in_range = [
+                    lat / lvl for lat, lvl in range_data if lvl > 0
+                ]
 
                 count = len(latencies_in_range)
                 mean_ns = float(np.mean(latencies_in_range))
                 mean_ns_per_level = (
-                    float(np.mean(ns_per_level_in_range)) if ns_per_level_in_range else 0.0
+                    float(np.mean(ns_per_level_in_range))
+                    if ns_per_level_in_range
+                    else 0.0
                 )
 
                 range_str = (
@@ -233,7 +247,9 @@ class StandardOrderbookBenchmark(BenchmarkRunner[StandardOrderbookBenchmarkConfi
         bids = self._parse_levels_to_list(data["bids"])
 
         if len(asks) == 0 or len(bids) == 0:
-            raise RuntimeError(f"Snapshot has empty side: asks={len(asks)}, bids={len(bids)}")
+            raise RuntimeError(
+                f"Snapshot has empty side: asks={len(asks)}, bids={len(bids)}"
+            )
 
         num_levels = len(asks) + len(bids)
 
@@ -309,7 +325,9 @@ class StandardOrderbookBenchmark(BenchmarkRunner[StandardOrderbookBenchmarkConfi
 
         return messages
 
-    def _record_metric(self, operation: str, latency_ns: int, num_levels_consumed: int) -> None:
+    def _record_metric(
+        self, operation: str, latency_ns: int, num_levels_consumed: int
+    ) -> None:
         """Record one operation sample."""
         metrics = self.stats.get_operation(operation)
         if metrics is None:
@@ -436,7 +454,9 @@ def _build_config_from_args(args) -> StandardOrderbookBenchmarkConfig:
 
 def main() -> None:
     """Main entry point."""
-    cli = BenchmarkCLI("Benchmark Standard Orderbook with collected Binance data").add_input_file(
+    cli = BenchmarkCLI(
+        "Benchmark Standard Orderbook with collected Binance data"
+    ).add_input_file(
         default="benchmarks/orderbook/data/btcusdt_100k.jsonl",
         help_text="Input file path (default: benchmarks/orderbook/data/btcusdt_100k.jsonl)",
     )

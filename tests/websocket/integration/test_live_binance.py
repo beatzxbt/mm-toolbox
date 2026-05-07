@@ -51,7 +51,9 @@ class _LiveBinanceHarness:
         try:
             return Decimal(value)
         except InvalidOperation as exc:
-            raise AssertionError(f"Invalid decimal in field '{field}': {value}") from exc
+            raise AssertionError(
+                f"Invalid decimal in field '{field}': {value}"
+            ) from exc
 
     @staticmethod
     def _now_ms() -> int:
@@ -214,4 +216,3 @@ class TestLiveBinanceFutures(_LiveBinanceHarness):
                 valid_count += 1
 
         assert valid_count >= 3
-

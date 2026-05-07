@@ -34,7 +34,9 @@ class TestWsConnectionConfigForwarding:
             captured["max_frame_size"] = max_frame_size
             return object(), "listener-sentinel"
 
-        monkeypatch.setattr("mm_toolbox.websocket.connection.ws_connect", fake_ws_connect)
+        monkeypatch.setattr(
+            "mm_toolbox.websocket.connection.ws_connect", fake_ws_connect
+        )
 
         ringbuffer = BytesRingBuffer(max_capacity=8, only_insert_unique=False)
         config = WsConnectionConfig.default(

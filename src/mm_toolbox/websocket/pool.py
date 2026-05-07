@@ -42,8 +42,7 @@ class WsPoolConfig(Struct):
             )
         if self.hash_capacity <= 0:
             raise ValueError(
-                "Invalid hash_capacity; expected >0 but got "
-                f"{self.hash_capacity}"
+                f"Invalid hash_capacity; expected >0 but got {self.hash_capacity}"
             )
 
     @classmethod

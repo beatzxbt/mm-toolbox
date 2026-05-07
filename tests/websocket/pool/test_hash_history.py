@@ -152,7 +152,9 @@ class TestWsPoolHashHistory:
                 received: list[bytes] = []
                 for payload in expected:
                     await basic_server.send_to_all_clients(payload)
-                    received.append(await asyncio.wait_for(pool.__anext__(), timeout=1.0))
+                    received.append(
+                        await asyncio.wait_for(pool.__anext__(), timeout=1.0)
+                    )
 
                 assert received == expected
 

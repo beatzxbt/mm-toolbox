@@ -349,7 +349,9 @@ def _run_producer_async_packed(
 ) -> None:
     """Wrapper to run async producer in process."""
     asyncio.run(
-        _producer_async_packed(path, payload_size, duration_sec, batch_size, result_queue)
+        _producer_async_packed(
+            path, payload_size, duration_sec, batch_size, result_queue
+        )
     )
 
 
@@ -393,7 +395,9 @@ def _read_result(
     try:
         role, duration_ns, count = result_queue.get(timeout=timeout_sec)
     except QueueEmpty as exc:
-        raise RuntimeError(f"{mode_name}: timed out waiting for benchmark result") from exc
+        raise RuntimeError(
+            f"{mode_name}: timed out waiting for benchmark result"
+        ) from exc
 
     if role not in ("producer", "consumer"):
         raise RuntimeError(f"{mode_name}: unexpected result role {role!r}")
@@ -507,8 +511,12 @@ async def benchmark_async_single(
     timeout_sec = max(30.0, duration_sec * 20.0)
     _join_processes([cons_proc, prod_proc], timeout_sec, "async_single")
 
-    prod_role, prod_ns, prod_count = _read_result(prod_queue, timeout_sec, "async_single")
-    cons_role, cons_ns, cons_count = _read_result(cons_queue, timeout_sec, "async_single")
+    prod_role, prod_ns, prod_count = _read_result(
+        prod_queue, timeout_sec, "async_single"
+    )
+    cons_role, cons_ns, cons_count = _read_result(
+        cons_queue, timeout_sec, "async_single"
+    )
 
     if prod_role != "producer" or cons_role != "consumer":
         raise RuntimeError("async_single: producer/consumer result role mismatch")
@@ -538,8 +546,12 @@ async def benchmark_async_packed(
     timeout_sec = max(30.0, duration_sec * 20.0)
     _join_processes([cons_proc, prod_proc], timeout_sec, "async_packed")
 
-    prod_role, prod_ns, prod_count = _read_result(prod_queue, timeout_sec, "async_packed")
-    cons_role, cons_ns, cons_count = _read_result(cons_queue, timeout_sec, "async_packed")
+    prod_role, prod_ns, prod_count = _read_result(
+        prod_queue, timeout_sec, "async_packed"
+    )
+    cons_role, cons_ns, cons_count = _read_result(
+        cons_queue, timeout_sec, "async_packed"
+    )
 
     if prod_role != "producer" or cons_role != "consumer":
         raise RuntimeError("async_packed: producer/consumer result role mismatch")

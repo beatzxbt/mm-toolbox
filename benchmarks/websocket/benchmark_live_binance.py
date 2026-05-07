@@ -100,7 +100,9 @@ class LiveBinanceBenchmarkConfig(BaseBenchmarkConfig):
     num_operations: int = 1
     warmup_operations: int = 0
     combined_base_url: str = "wss://fstream.binance.com/stream?streams="
-    symbols: list[str] = field(default_factory=lambda: ["btcusdt", "ethusdt", "solusdt"])
+    symbols: list[str] = field(
+        default_factory=lambda: ["btcusdt", "ethusdt", "solusdt"]
+    )
     stream_kinds: list[str] = field(default_factory=lambda: ["bookTicker", "trade"])
     connection_timeout_s: float = 10.0
     sample_window_s: float = 15.0
@@ -134,7 +136,9 @@ class _LiveBinanceHarness:
         try:
             return Decimal(value)
         except InvalidOperation as exc:
-            raise AssertionError(f"Invalid decimal in field '{field}': {value}") from exc
+            raise AssertionError(
+                f"Invalid decimal in field '{field}': {value}"
+            ) from exc
 
     @staticmethod
     def _now_ms() -> int:
@@ -264,7 +268,9 @@ class _LiveBinanceHarness:
         symbols: list[str], stream_kinds: list[str]
     ) -> tuple[list[str], set[str]]:
         """Create combined-stream URL params and normalized expected stream names."""
-        url_streams = [f"{symbol}@{kind}" for symbol in symbols for kind in stream_kinds]
+        url_streams = [
+            f"{symbol}@{kind}" for symbol in symbols for kind in stream_kinds
+        ]
         expected_streams = {stream.lower() for stream in url_streams}
         return url_streams, expected_streams
 
@@ -337,13 +343,15 @@ class _LiveBinanceHarness:
                 stream,
                 timeout_s=max(0.1, min(2.0, remaining)),
             )
-            stream_name, event_time_ms, event_key = cls._decode_and_validate_combined_payload(
-                payload,
-                expected_streams=expected_streams,
-                expected_symbols=expected_symbols,
-                freshness_budget_ms=freshness_budget_ms,
-                clock_future_drift_ms=clock_future_drift_ms,
-                strict_trade_values=False,
+            stream_name, event_time_ms, event_key = (
+                cls._decode_and_validate_combined_payload(
+                    payload,
+                    expected_streams=expected_streams,
+                    expected_symbols=expected_symbols,
+                    freshness_budget_ms=freshness_budget_ms,
+                    clock_future_drift_ms=clock_future_drift_ms,
+                    strict_trade_values=False,
+                )
             )
 
             recv_ms = cls._now_ms()
@@ -379,7 +387,9 @@ class LiveBinanceBenchmarkReporter(BenchmarkReporter):
 
         metrics = stats.get_operation("incoming_msgs_per_sec")
         if metrics is None or not metrics.latencies_ns:
-            print(f"{'incoming_msgs_per_sec':<36} {0:>8} {0.0:>13.1f} {0.0:>10.1f} {0.0:>10.1f} {0.0:>10.1f} {0.0:>10.1f}")
+            print(
+                f"{'incoming_msgs_per_sec':<36} {0:>8} {0.0:>13.1f} {0.0:>10.1f} {0.0:>10.1f} {0.0:>10.1f} {0.0:>10.1f}"
+            )
             print("=" * 100)
             return
 
@@ -576,7 +586,9 @@ class LiveBinanceWebSocketBenchmark(
         assert not missing_pool, f"Pool missing streams: {sorted(missing_pool)}"
 
         deltas_ms = self._pair_latency_deltas(single_keyed, pool_keyed)
-        assert deltas_ms, "No overlapping events between single and pool for delta latency"
+        assert deltas_ms, (
+            "No overlapping events between single and pool for delta latency"
+        )
 
         merged_bins: list[int] = []
         for single_rate, pool_rate in zip(single_bins, pool_bins):

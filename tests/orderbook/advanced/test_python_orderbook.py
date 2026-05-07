@@ -449,7 +449,9 @@ class TestCalculations:
         assert buy_impact_quote == pytest.approx(0.0)
 
     def test_get_price_impact_insufficient_liquidity_returns_infinity_marker(self):
-        buy_impact = self.ob.get_price_impact(size=8.0, is_buy=True, is_base_currency=True)
+        buy_impact = self.ob.get_price_impact(
+            size=8.0, is_buy=True, is_base_currency=True
+        )
         assert buy_impact == np.finfo(float).max
 
     def test_get_size_for_price_impact_bps(self):

@@ -164,7 +164,9 @@ def _print_detailed_report(
 
     if delta_latencies:
         print("Delta Processing by Level Count (non-linearity analysis)")
-        print("Note: Level count refers to levels in incoming messages, not orderbook capacity")
+        print(
+            "Note: Level count refers to levels in incoming messages, not orderbook capacity"
+        )
         print("-" * 80)
 
         max_levels_consumed = max(delta_levels) if delta_levels else 0
@@ -194,12 +196,16 @@ def _print_detailed_report(
                     continue
 
                 latencies_in_range = [lat for lat, _ in range_data]
-                ns_per_level_in_range = [lat / lvl for lat, lvl in range_data if lvl > 0]
+                ns_per_level_in_range = [
+                    lat / lvl for lat, lvl in range_data if lvl > 0
+                ]
 
                 count = len(latencies_in_range)
                 mean_ns = float(np.mean(latencies_in_range))
                 mean_ns_per_level = (
-                    float(np.mean(ns_per_level_in_range)) if ns_per_level_in_range else 0.0
+                    float(np.mean(ns_per_level_in_range))
+                    if ns_per_level_in_range
+                    else 0.0
                 )
 
                 range_str = (
@@ -297,7 +303,9 @@ class AdvancedOrderbookBenchmark(BenchmarkRunner[AdvancedOrderbookBenchmarkConfi
         sizes = np.array([float(level[1]) for level in levels], dtype=np.float64)
         return prices, sizes
 
-    def _process_snapshot(self, orderbook: AdvancedOrderbook, data: dict) -> tuple[int, int]:
+    def _process_snapshot(
+        self, orderbook: AdvancedOrderbook, data: dict
+    ) -> tuple[int, int]:
         """Process snapshot and return latency + consumed level count."""
         ask_prices, ask_sizes = self._parse_levels_to_numpy(data["asks"])
         bid_prices, bid_sizes = self._parse_levels_to_numpy(data["bids"])
@@ -319,7 +327,9 @@ class AdvancedOrderbookBenchmark(BenchmarkRunner[AdvancedOrderbookBenchmarkConfi
 
         start = time.perf_counter_ns()
         try:
-            orderbook.consume_snapshot_numpy(ask_prices, ask_sizes, bid_prices, bid_sizes)
+            orderbook.consume_snapshot_numpy(
+                ask_prices, ask_sizes, bid_prices, bid_sizes
+            )
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to process snapshot: {exc}. "
@@ -330,7 +340,9 @@ class AdvancedOrderbookBenchmark(BenchmarkRunner[AdvancedOrderbookBenchmarkConfi
 
         return elapsed, num_levels
 
-    def _process_delta(self, orderbook: AdvancedOrderbook, data: dict) -> tuple[int, int]:
+    def _process_delta(
+        self, orderbook: AdvancedOrderbook, data: dict
+    ) -> tuple[int, int]:
         """Process delta and return latency + consumed level count."""
         ask_prices, ask_sizes = self._parse_levels_to_numpy(data.get("a", []))
         bid_prices, bid_sizes = self._parse_levels_to_numpy(data.get("b", []))
@@ -385,7 +397,9 @@ class AdvancedOrderbookBenchmark(BenchmarkRunner[AdvancedOrderbookBenchmarkConfi
 
         return messages
 
-    def _record_metric(self, operation: str, latency_ns: int, num_levels_consumed: int) -> None:
+    def _record_metric(
+        self, operation: str, latency_ns: int, num_levels_consumed: int
+    ) -> None:
         """Record one operation sample."""
         metrics = self.stats.get_operation(operation)
         if metrics is None:
@@ -536,7 +550,9 @@ def _run_single(config: AdvancedOrderbookBenchmarkConfig) -> None:
         print(f"Loading data from {input_path}...")
         stats = benchmark.run()
         print()
-        _print_detailed_report(stats, str(input_path), config.warmup_operations, config.num_levels)
+        _print_detailed_report(
+            stats, str(input_path), config.warmup_operations, config.num_levels
+        )
     except FileNotFoundError as exc:
         print(f"Error: {exc}")
         print("Run collect_data.py first to generate the input file.")
@@ -600,7 +616,9 @@ def _run_multi_size(base_config: AdvancedOrderbookBenchmarkConfig) -> None:
             "Comparative Mean Latency (raw ns)",
             size_label="Levels",
         )
-        comparative.print_comparative_table(comparative_rows, ["snapshot", "delta", "bbo"])
+        comparative.print_comparative_table(
+            comparative_rows, ["snapshot", "delta", "bbo"]
+        )
 
         print("\nDetailed Reports by Size:")
         print("=" * 80)
@@ -608,7 +626,9 @@ def _run_multi_size(base_config: AdvancedOrderbookBenchmarkConfig) -> None:
             print(f"\n{'=' * 80}")
             print(f"Detailed Report: {size} levels")
             print(f"{'=' * 80}\n")
-            _print_detailed_report(stats, str(input_path), base_config.warmup_operations, size)
+            _print_detailed_report(
+                stats, str(input_path), base_config.warmup_operations, size
+            )
 
     except FileNotFoundError as exc:
         print(f"Error: {exc}")
@@ -617,15 +637,13 @@ def _run_multi_size(base_config: AdvancedOrderbookBenchmarkConfig) -> None:
 
 def main() -> None:
     """Main entry point."""
-    cli = (
-        BenchmarkCLI("Benchmark AdvancedOrderbook with collected Binance data")
-        .add_input_file(
-            default="benchmarks/orderbook/data/btcusdt_100k.jsonl",
-            help_text=(
-                "Input file path "
-                "(default: benchmarks/orderbook/data/btcusdt_100k.jsonl)"
-            ),
-        )
+    cli = BenchmarkCLI(
+        "Benchmark AdvancedOrderbook with collected Binance data"
+    ).add_input_file(
+        default="benchmarks/orderbook/data/btcusdt_100k.jsonl",
+        help_text=(
+            "Input file path (default: benchmarks/orderbook/data/btcusdt_100k.jsonl)"
+        ),
     )
     cli.parser.add_argument(
         "--levels",
