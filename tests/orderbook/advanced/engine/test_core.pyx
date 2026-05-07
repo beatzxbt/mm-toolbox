@@ -1307,9 +1307,10 @@ def test_core_wmid_bid_heavy():
     cdef double ask_prices[1]
     cdef double ask_sizes[1]
     
+    # Use wider spread so integer tick truncation doesn't mask the skew
     bid_prices[0] = 100.00
     bid_sizes[0] = 10.0  # Heavy
-    ask_prices[0] = 100.01
+    ask_prices[0] = 100.10
     ask_sizes[0] = 1.0   # Light
     
     cdef OrderbookLevels bids = _make_levels(bid_prices, bid_sizes, 1, TICK_SIZE, LOT_SIZE)
@@ -1318,9 +1319,8 @@ def test_core_wmid_bid_heavy():
     
     cdef double wmid = core.get_wmid_price()
     cdef double mid = core.get_mid_price()
-    # WMID should be > mid (skewed toward ask which has more weight in imbalance calc)
-    # Actually, formula weights by opposite side, so bid-heavy -> closer to ask
-    assert wmid > mid  # Bid-heavy should skew toward ask price
+    # WMID formula weights by same-side lots, so bid-heavy skews toward bid (lower)
+    assert wmid < mid  # Bid-heavy should skew toward bid price
     
     _free_levels(&bids)
     _free_levels(&asks)

@@ -6,7 +6,7 @@ import sys
 import os
 
 # Go up to tests/ directory to find the compiled .so files
-# cython/test_core_wrapper.py -> cython -> advanced -> orderbook -> tests
+# engine/test_core.py -> engine -> advanced -> orderbook -> tests
 test_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 if test_dir not in sys.path:
     sys.path.insert(0, test_dir)

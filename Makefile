@@ -55,8 +55,12 @@ remove-build-tests: ## Remove C test build artifacts
 	rm -rf build/ *.egg-info/
 	find ./tests/orderbook/advanced/c -name "*.so" -delete
 	cd tests && uv run python setup.py clean --all || true
-	find ./tests/orderbook/advanced -path "*/cython/*.so" -delete
-	find ./tests/orderbook/advanced -path "*/cython/*.c" -type f -delete
+	find ./tests/orderbook/advanced -path "*/engine/*.so" -delete
+	find ./tests/orderbook/advanced -path "*/engine/*.c" -type f -delete
+	find ./tests/orderbook/advanced -path "*/wrapper_cython/*.so" -delete
+	find ./tests/orderbook/advanced -path "*/wrapper_cython/*.c" -type f -delete
+	find ./tests -name "cython_test_*.so" -delete
+	find ./tests -name "cython_test_*.c" -type f -delete
 	$(MAKE) clean-caches
 
 remove-build-all: ## Remove build artifacts and compiled extensions

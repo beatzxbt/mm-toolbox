@@ -6,10 +6,8 @@ import sys
 import os
 
 # Go up to tests/ directory to find the compiled .so files
-# ladder/cython/test_ladder_wrapper.py -> ladder/cython -> ladder -> advanced -> orderbook -> tests
-test_dir = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
-)
+# engine/test_ladder.py -> engine -> advanced -> orderbook -> tests
+test_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 if test_dir not in sys.path:
     sys.path.insert(0, test_dir)
 

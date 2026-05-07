@@ -32,33 +32,35 @@ ORDERBOOK_ADVANCED_INCLUDE_DIRS = [
     "../src/mm_toolbox/orderbook/advanced/level",
     "../src/mm_toolbox/orderbook/advanced/ladder",
     "../src",
+    ".",  # Current dir (tests/) for engine_helpers.pxd
+    "orderbook/advanced/engine",
 ]
 
 orderbook_advanced_extensions = [
     Extension(
         name="cython_test_level",
-        sources=["orderbook/advanced/level/cython/test_level.pyx"],
+        sources=["orderbook/advanced/engine/test_level.pyx"],
         include_dirs=ORDERBOOK_ADVANCED_INCLUDE_DIRS,
         extra_compile_args=EXTRA_COMPILE_ARGS,
         extra_link_args=EXTRA_LINK_ARGS,
     ),
     Extension(
         name="cython_test_ladder",
-        sources=["orderbook/advanced/ladder/cython/test_ladder.pyx"],
+        sources=["orderbook/advanced/engine/test_ladder.pyx"],
         include_dirs=ORDERBOOK_ADVANCED_INCLUDE_DIRS,
         extra_compile_args=EXTRA_COMPILE_ARGS,
         extra_link_args=EXTRA_LINK_ARGS,
     ),
     Extension(
         name="cython_test_core",
-        sources=["orderbook/advanced/cython/test_core.pyx"],
+        sources=["orderbook/advanced/engine/test_core.pyx"],
         include_dirs=ORDERBOOK_ADVANCED_INCLUDE_DIRS,
         extra_compile_args=EXTRA_COMPILE_ARGS,
         extra_link_args=EXTRA_LINK_ARGS,
     ),
     Extension(
         name="cython_test_wrapper",
-        sources=["orderbook/advanced/cython/test_wrapper.pyx"],
+        sources=["orderbook/advanced/wrapper_cython/test_wrapper.pyx"],
         include_dirs=ORDERBOOK_ADVANCED_INCLUDE_DIRS,
         extra_compile_args=EXTRA_COMPILE_ARGS,
         extra_link_args=EXTRA_LINK_ARGS,
