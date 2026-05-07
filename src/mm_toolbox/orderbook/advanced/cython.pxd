@@ -21,4 +21,9 @@ cdef class AdvancedOrderbook:
     cdef double get_size_for_price_impact_bps(self, double impact_bps, bint is_buy, bint is_base_currency)
     cdef bint is_bbo_crossed(self, double other_bid_price, double other_ask_price)
     cdef bint does_bbo_price_change(self, double bid_price, double ask_price)
+    cdef tuple get_bbo(self)
+    cdef OrderbookLevel* get_bids(self)
+    cdef OrderbookLevel* get_asks(self)
+    cdef u64 get_num_bids(self)
+    cdef u64 get_num_asks(self)
 

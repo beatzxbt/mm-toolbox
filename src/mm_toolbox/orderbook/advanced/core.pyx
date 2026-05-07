@@ -456,12 +456,14 @@ cdef class CoreAdvancedOrderbook:
         worst_bid_ticks = bids_data.levels[bid_count - 1].ticks
 
         i = 0
-        if i < bids.num_levels:
+        while i < bids.num_levels:
             bid_level = &bids.levels[i]
             if bid_level.ticks > best_bid_ticks:
                 self._process_higher_bid_ticks(bid_level)
                 best_bid_ticks = bid_level.ticks
                 i += 1
+            else:
+                break
         while i < bids.num_levels:
             bid_level = &bids.levels[i]
             if bid_level.ticks == best_bid_ticks:
@@ -573,10 +575,9 @@ cdef class CoreAdvancedOrderbook:
                 self._asks.increment_count()
                 self._assign_bbo_level(&asks_data.levels[0], &ask, ask_ticks, ask_lots)
             else:
+                # Worse price: old BBO was consumed, remove it. New BBO is next level.
                 self._asks.roll_left(0)
                 self._asks.decrement_count()
-                if asks_data.num_levels > 0:
-                    self._assign_bbo_level(&asks_data.levels[0], &ask, ask_ticks, ask_lots)
         elif ask_lots != 0:
             self._asks.roll_right(0)
             self._asks.increment_count()
@@ -597,10 +598,9 @@ cdef class CoreAdvancedOrderbook:
                 self._bids.increment_count()
                 self._assign_bbo_level(&bids_data.levels[0], &bid, bid_ticks, bid_lots)
             else:
+                # Worse price: old BBO was consumed, remove it. New BBO is next level.
                 self._bids.roll_left(0)
                 self._bids.decrement_count()
-                if bids_data.num_levels > 0:
-                    self._assign_bbo_level(&bids_data.levels[0], &bid, bid_ticks, bid_lots)
         elif bid_lots != 0:
             self._bids.roll_right(0)
             self._bids.increment_count()
@@ -646,10 +646,16 @@ cdef class CoreAdvancedOrderbook:
             OrderbookLadderData* asks_data = self._asks_data
             u64 bid_ticks = bids_data.levels[0].ticks
             u64 ask_ticks = asks_data.levels[0].ticks
-        return convert_price_from_tick(
-            tick=ask_ticks - bid_ticks,
-            tick_size=self._tick_size,
-        )
+        if ask_ticks >= bid_ticks:
+            return convert_price_from_tick(
+                tick=ask_ticks - bid_ticks,
+                tick_size=self._tick_size,
+            )
+        else:
+            return -convert_price_from_tick(
+                tick=bid_ticks - ask_ticks,
+                tick_size=self._tick_size,
+            )
 
     cdef inline double get_wmid_price(self):
         """Calculate weighted mid price using best bid/ask volumes."""
@@ -664,8 +670,11 @@ cdef class CoreAdvancedOrderbook:
             u64 total_lots = bid_lots + ask_lots
         if total_lots == 0:
             return 0.0
+        cdef double weighted_ticks = (
+            <double>bid_ticks * <double>bid_lots + <double>ask_ticks * <double>ask_lots
+        ) / <double>total_lots
         return convert_price_from_tick(
-            tick=(bid_ticks * bid_lots + ask_ticks * ask_lots) // total_lots,
+            tick=<u64>weighted_ticks,
             tick_size=self._tick_size,
         )
 
@@ -752,7 +761,7 @@ cdef class CoreAdvancedOrderbook:
             u64 ticks
             u64 lots
             u64 total_lots = 0
-            u64 total_ticks_times_lots = 0
+            double total_ticks_times_lots = 0.0
             u64 i
         if is_buy:
             limit_price = touch_anchor_price * (1.0 + impact_bps / 10_000.0)
@@ -763,7 +772,7 @@ cdef class CoreAdvancedOrderbook:
                     break
                 lots = side_data.levels[i].lots
                 total_lots += lots
-                total_ticks_times_lots += ticks * lots
+                total_ticks_times_lots += <double>ticks * <double>lots
         else:
             limit_price = touch_anchor_price * (1.0 - impact_bps / 10_000.0)
             limit_ticks = convert_price_to_tick_fast(limit_price, self._tick_size_recip)
@@ -775,10 +784,10 @@ cdef class CoreAdvancedOrderbook:
                     break
                 lots = side_data.levels[i].lots
                 total_lots += lots
-                total_ticks_times_lots += ticks * lots
+                total_ticks_times_lots += <double>ticks * <double>lots
         if is_base_currency:
             return convert_size_from_lot(total_lots, self._lot_size)
-        return (self._tick_size * self._lot_size) * <double> total_ticks_times_lots
+        return (self._tick_size * self._lot_size) * total_ticks_times_lots
 
     cdef inline bint is_bbo_crossed(self, double other_bid_price, double other_ask_price):
         """Check if this orderbook's BBO crosses with another orderbook's BBO."""

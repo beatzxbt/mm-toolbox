@@ -54,6 +54,8 @@ cdef class PyAdvancedOrderbook:
         cdef CyOrderbookSortedness delta_code = <CyOrderbookSortedness> <int> delta_sortedness
         cdef CyOrderbookSortedness snap_code = <CyOrderbookSortedness> <int> snapshot_sortedness
 
+        # Uses CoreAdvancedOrderbook directly for maximum performance.
+        # The Cython wrapper (AdvancedOrderbook) is for external Cython consumers.
         self._core = CoreAdvancedOrderbook(
             tick_size,
             lot_size,

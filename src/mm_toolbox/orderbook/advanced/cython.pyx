@@ -7,6 +7,7 @@ from libc.stdint cimport uint64_t as u64
 
 from .core cimport CoreAdvancedOrderbook
 from .enum.enums cimport CyOrderbookSortedness
+from .ladder.ladder cimport OrderbookLadderData
 from .level.level cimport (
     OrderbookLevel,
     OrderbookLevels,
@@ -199,3 +200,36 @@ cdef class AdvancedOrderbook:
             RuntimeError: If orderbook is empty
         """
         return self._core.does_bbo_price_change(bid_price, ask_price)
+
+    cdef tuple get_bbo(self):
+        """Get the best bid and offer (top of book).
+        
+        Returns:
+            Tuple of (best_bid, best_ask) as OrderbookLevel structs
+        
+        Raises:
+            RuntimeError: If orderbook is empty
+        """
+        if self._core._bids.is_empty() or self._core._asks.is_empty():
+            raise RuntimeError("Empty view on one/both sides of orderbook; cannot compute without data")
+        cdef OrderbookLadderData* bids_data = self._core.get_bids_data()
+        cdef OrderbookLadderData* asks_data = self._core.get_asks_data()
+        return (bids_data.levels[0], asks_data.levels[0])
+
+    cdef OrderbookLevel* get_bids(self):
+        """Get all bid levels."""
+        cdef OrderbookLadderData* v = self._core.get_bids_data()
+        return v.levels
+
+    cdef OrderbookLevel* get_asks(self):
+        """Get all ask levels."""
+        cdef OrderbookLadderData* v = self._core.get_asks_data()
+        return v.levels
+
+    cdef u64 get_num_bids(self):
+        """Get number of bid levels."""
+        return self._core.get_bids_data().num_levels
+
+    cdef u64 get_num_asks(self):
+        """Get number of ask levels."""
+        return self._core.get_asks_data().num_levels

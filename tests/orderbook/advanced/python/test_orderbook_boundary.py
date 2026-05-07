@@ -485,7 +485,7 @@ class TestPathologicalDataBoundaries:
         assert spread == pytest.approx(0.0)
 
     def test_negative_spread_via_snapshot(self, pathological_data):
-        """Crossed orderbook via snapshot."""
+        """Crossed orderbook via snapshot correctly reports negative spread."""
         book = _mk_book(num_levels=64)
 
         bid_price, ask_price = pathological_data["negative_spread"]
@@ -500,13 +500,9 @@ class TestPathologicalDataBoundaries:
 
         book.consume_snapshot(asks, bids)
 
-        # After cross removal, orderbook should be empty or have non-crossed levels
-        try:
-            spread = book.get_bbo_spread()
-            assert spread >= 0.0  # Should not be negative
-        except RuntimeError:
-            # Empty after cross removal is also valid
-            pass
+        # consume_snapshot does not remove crossed levels; spread should be negative
+        spread = book.get_bbo_spread()
+        assert spread < 0.0
 
     def test_duplicate_price_levels_in_snapshot(self):
         """Deduplication verification."""
