@@ -6,6 +6,7 @@ import pytest
 
 from mm_toolbox.candles import TimeCandles
 from mm_toolbox.candles.base import Trade
+from mm_toolbox.time.time import time_ms
 
 
 class TestTimeCandlesSpecific:
@@ -18,7 +19,7 @@ class TestTimeCandlesSpecific:
     def test_time_based_candle_completion(self):
         """Test that candles complete based on time duration."""
         time_candles = TimeCandles(60.0)  # 60 seconds per bucket
-        base_time = 1640995200000
+        base_time = time_ms()
 
         # First trade
         trade1 = Trade(time_ms=base_time, is_buy=True, price=100.0, size=1.0)
@@ -32,13 +33,14 @@ class TestTimeCandlesSpecific:
         trade3 = Trade(time_ms=base_time + 70000, is_buy=True, price=102.0, size=1.0)
         time_candles.process_trade(trade3)
 
-        # Should complete without errors (new candle created after 60s)
-        assert True
+        assert len(time_candles) == 1
+        assert time_candles.latest_candle.num_trades == 1
+        assert time_candles.latest_candle.open_price == 102.0
 
     def test_time_boundary_precision(self):
         """Test precision at time boundaries."""
         time_candles = TimeCandles(30.0)  # 30 seconds
-        base_time = 1640995200000
+        base_time = time_ms()
 
         # Test exactly at boundary
         boundary_trades = [
@@ -57,13 +59,25 @@ class TestTimeCandlesSpecific:
         for trade in boundary_trades:
             time_candles.process_trade(trade)
 
-        # Should handle boundary conditions precisely
-        assert True
+        assert len(time_candles) >= 1
+        assert time_candles.latest_candle.num_trades >= 1
+
+    def test_late_first_trade_no_empty_candle(self):
+        """Ensure a late first trade does not insert an empty candle."""
+        time_candles = TimeCandles(60.0)
+        # Trade arrives well after construction time
+        late_time = time_ms() + 120000
+        late_trade = Trade(time_ms=late_time, is_buy=True, price=100.0, size=1.0)
+        time_candles.process_trade(late_trade)
+
+        assert len(time_candles) == 0
+        assert time_candles.latest_candle.num_trades == 1
+        assert time_candles.latest_candle.open_price == 100.0
 
     def test_simultaneous_timestamp_handling(self):
         """Test handling of trades with identical timestamps."""
         time_candles = TimeCandles(120.0)  # 2 minutes
-        same_time = 1640995200000
+        same_time = time_ms()
 
         # Multiple trades at exact same timestamp
         simultaneous_trades = [
@@ -76,13 +90,14 @@ class TestTimeCandlesSpecific:
         for trade in simultaneous_trades:
             time_candles.process_trade(trade)
 
-        # Should handle all trades with same timestamp
-        assert True
+        assert time_candles.latest_candle.num_trades == 4
+        assert time_candles.latest_candle.high_price == 100.5
+        assert time_candles.latest_candle.low_price == 99.5
 
     def test_time_sequence_validation(self):
         """Test that time-based logic works with proper sequences."""
         time_candles = TimeCandles(10.0)  # 10 seconds
-        base_time = 1640995200000
+        base_time = time_ms()
 
         # Send trades in proper time sequence
         for i in range(5):
@@ -94,13 +109,12 @@ class TestTimeCandlesSpecific:
             )
             time_candles.process_trade(trade)
 
-        # Should process all trades in sequence
-        assert True
+        assert time_candles.latest_candle.num_trades >= 1
 
     def test_time_candles_with_gaps(self):
         """Test TimeCandles with time gaps between trades."""
         time_candles = TimeCandles(60.0)  # 1 minute
-        base_time = 1640995200000
+        base_time = time_ms()
 
         # Trades with various time gaps
         gap_trades = [
@@ -119,13 +133,14 @@ class TestTimeCandlesSpecific:
         for trade in gap_trades:
             time_candles.process_trade(trade)
 
-        # Should handle time gaps properly
-        assert True
+        assert len(time_candles) == 1
+        assert time_candles.latest_candle.num_trades == 1
+        assert time_candles.latest_candle.open_price == 102.0
 
     def test_long_duration_candles(self):
         """Test TimeCandles with longer durations."""
         time_candles = TimeCandles(300.0)  # 5 minutes
-        base_time = 1640995200000
+        base_time = time_ms()
 
         # Send trades over several minutes
         for i in range(20):
@@ -138,7 +153,8 @@ class TestTimeCandlesSpecific:
             time_candles.process_trade(trade)
 
         # Total time: 20 * 10s = 200s < 300s (should stay in same candle)
-        assert True
+        assert len(time_candles) == 0
+        assert time_candles.latest_candle.num_trades == 20
 
 
 if __name__ == "__main__":

@@ -30,18 +30,14 @@ class TestTickCandlesSpecific:
         final_trade = Trade(time_ms=1640995203000, is_buy=True, price=110.0, size=1.0)
         tick_candles.process_trade(final_trade)
 
-        # Should complete without errors (new candle created)
-        assert True
+        assert len(tick_candles) == 1
+        assert tick_candles.latest_candle.num_trades == 1
+        assert tick_candles.latest_candle.open_price == 110.0
 
     def test_tick_count_accuracy(self):
         """Test that tick counting is accurate."""
-        tick_candles = TickCandles(5)  # noqa: F841
-
-        # Process various numbers of trades
-        trade_counts = [1, 3, 5, 7, 10, 15]
-
-        for count in trade_counts:
-            tc = TickCandles(count)  # Set limit to current count
+        for count in [1, 3, 5, 7, 10, 15]:
+            tc = TickCandles(count)
 
             # Process exactly that many trades
             for i in range(count):
@@ -53,8 +49,8 @@ class TestTickCandlesSpecific:
                 )
                 tc.process_trade(trade)
 
-            # Should complete exactly at the limit
-            assert True
+            assert len(tc) == 1
+            assert tc.latest_candle.num_trades == 0
 
     def test_tick_candles_with_mixed_trade_sizes(self):
         """Test TickCandles with various trade sizes."""
@@ -71,8 +67,8 @@ class TestTickCandlesSpecific:
         for trade in trades:
             tick_candles.process_trade(trade)
 
-        # All trades should be processed regardless of size
-        assert True
+        assert len(tick_candles) == 1
+        assert tick_candles.latest_candle.num_trades == 0  # Reset after 4th trade
 
     def test_tick_candles_rapid_succession(self):
         """Test TickCandles with rapid trade succession."""
@@ -88,13 +84,11 @@ class TestTickCandlesSpecific:
             )
             tick_candles.process_trade(trade)
 
-        # Should handle rapid processing without issues
-        assert True
+        assert len(tick_candles) == 2
+        assert tick_candles.latest_candle.num_trades == 5
 
     def test_tick_candles_price_patterns(self):
         """Test TickCandles with various price patterns."""
-        tick_candles = TickCandles(8)  # noqa: F841
-
         # Test different price movement patterns
         price_patterns = [
             [100.0, 101.0, 102.0, 103.0],  # Upward trend
@@ -114,8 +108,15 @@ class TestTickCandlesSpecific:
                 )
                 tc.process_trade(trade)
 
-        # Should handle all price patterns
-        assert True
+            assert len(tc) == 1
+            assert tc.latest_candle.num_trades == 0
+
+    def test_invalid_ticks_per_bucket(self):
+        """Test that non-positive ticks_per_bucket raises ValueError."""
+        with pytest.raises(ValueError):
+            TickCandles(0)
+        with pytest.raises(ValueError):
+            TickCandles(-1)
 
 
 if __name__ == "__main__":

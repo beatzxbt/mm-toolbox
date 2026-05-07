@@ -9,6 +9,8 @@ cdef class TickCandles(BaseCandles):
     """
     def __init__(self, int ticks_per_bucket, int num_candles=1000, bint store_trades=True):
         """Initialize the tick-based candle aggregator."""
+        if ticks_per_bucket <= 0:
+            raise ValueError(f"Invalid ticks_per_bucket; expected >0 but got {ticks_per_bucket}")
         BaseCandles.__init__(self, num_candles, store_trades)
         self.ticks_per_bucket = ticks_per_bucket
 

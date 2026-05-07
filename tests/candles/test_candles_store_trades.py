@@ -41,7 +41,8 @@ class TestCandleCopyTrades:
 
         assert copied is not candle
         assert copied.trades is not candle.trades
-        assert copied.trades[0] is not candle.trades[0]
+        # Frozen trades are immutable, so they are shared (not duplicated)
+        assert copied.trades[0] is candle.trades[0]
         assert copied.num_trades == candle.num_trades
 
     def test_copy_include_trades_false_omits_trade_payload(self):

@@ -2,7 +2,6 @@
 # cython: boundscheck=False
 # cython: wraparound=False
 
-import copy
 import asyncio
 from abc import ABC, abstractmethod
 from typing import final, AsyncIterator, Self
@@ -12,7 +11,8 @@ from libc.stdint cimport uint64_t as u64
 
 from mm_toolbox.ringbuffer.generic cimport GenericRingBuffer
 
-class Trade(Struct):
+class Trade(Struct, frozen=True):
+    """Immutable trade record."""
     time_ms: int
     is_buy: bool
     price: float
@@ -56,9 +56,6 @@ class Candle(Struct):
 
     def copy(self, include_trades: bool = True) -> Self:
         """Create a copy of the candle."""
-        if include_trades:
-            return copy.deepcopy(self)
-
         return type(self)(
             open_time_ms=self.open_time_ms,
             close_time_ms=self.close_time_ms,
@@ -72,7 +69,7 @@ class Candle(Struct):
             sell_volume=self.sell_volume,
             vwap=self.vwap,
             num_trades=self.num_trades,
-            trades=[],
+            trades=list(self.trades) if include_trades else [],
         )
 
     @classmethod
@@ -111,7 +108,7 @@ cdef class BaseCandles:
         """Initialize ring buffer capacity and validate settings."""
         if num_candles <= 0:
             raise ValueError(f"Invalid number of candles; expected >1 but got {num_candles}")
-        self.ringbuffer = GenericRingBuffer(max_capacity=num_candles)
+        self._ringbuffer = GenericRingBuffer(max_capacity=num_candles)
         self._store_trades = store_trades
 
     cdef inline double calculate_vwap(self, double price, double size) noexcept nogil:
@@ -131,13 +128,19 @@ cdef class BaseCandles:
         cdef object closed_candle = self.latest_candle.copy(
             include_trades=self._store_trades
         )
-        self.ringbuffer.insert(closed_candle)
+        self._ringbuffer.insert(closed_candle)
 
-        if isinstance(self.candle_push_event, asyncio.Future):
-            if not self.candle_push_event.done():
-                self.candle_push_event.set_result(closed_candle)
-            else:
-                self.candle_push_event = closed_candle
+        cdef object event = self.candle_push_event
+        cdef object future
+        if isinstance(event, list):
+            for future in event:
+                if isinstance(future, asyncio.Future) and not future.done():
+                    future.set_result(closed_candle)
+            self.candle_push_event = closed_candle
+        elif isinstance(event, asyncio.Future):
+            if not event.done():
+                event.set_result(closed_candle)
+            self.candle_push_event = closed_candle
         else:
             self.candle_push_event = closed_candle
         
@@ -147,18 +150,19 @@ cdef class BaseCandles:
 
         # This ensures the newest candle is always the latest one incase the 
         # ringbuffer is accessed whilst there is an open candle.
-        self.ringbuffer.overwrite_latest(self.latest_candle, increment_count=False)
+        self._ringbuffer.overwrite_latest(self.latest_candle, increment_count=False)
 
     cpdef void initialize(self, list[object] trades):
         """Initialize candle data from a batch of existing trades."""
-        # The type must strictly be list[Trade], however Cython doesn't support
-        # typed lists containing specific Python objects. Check that first and/or
-        # last values are of the Trade type, and call it a day. 
-        if not isinstance(trades[0], Trade) or not isinstance(trades[-1], Trade):
-            raise ValueError(f"Invalid object typing in list; expected list[Trade] but got {type(trades)}")
+        if not trades:
+            raise ValueError("Cannot initialize with an empty trade list.")
+        cdef object t
+        for t in trades:
+            if not isinstance(t, Trade):
+                raise ValueError(f"Invalid object typing in list; expected list[Trade] but got {type(trades)}")
 
         self.latest_candle.reset()
-        self.ringbuffer.clear()
+        self._ringbuffer.clear()
         self.__cum_volume = 0.0
         self.__total_size = 0.0
 
@@ -171,37 +175,37 @@ cdef class BaseCandles:
 
     def __len__(self):
         """Number of candles currently stored."""
-        return len(self.ringbuffer)
+        return len(self._ringbuffer)
 
     def __getitem__(self, index: int) -> Candle:
         """Access a specific candle by index."""
-        return self.ringbuffer[index]
-
-    def __getattr__(self, name: str):
-        """Expose selected C-level attributes to Python callers."""
-        if name == "latest_candle":
-            return self.latest_candle
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        return self._ringbuffer[index]
 
     def __aiter__(self) -> AsyncIterator[Candle]:
         """Async iterator over the candles."""
         return self
 
     async def __anext__(self) -> Candle:
-        """Async next candle."""
-        cdef object candle_event = self.candle_push_event
+        """Async next candle. Supports multiple concurrent consumers."""
+        cdef object event = self.candle_push_event
+        cdef object future
         cdef object new_candle
 
-        if isinstance(candle_event, Candle):
+        if isinstance(event, Candle):
             self.candle_push_event = None
-            return candle_event
+            return event
 
-        if candle_event is None:
-            candle_event = asyncio.get_running_loop().create_future()
-            self.candle_push_event = candle_event
+        future = asyncio.get_running_loop().create_future()
+        if event is None:
+            self.candle_push_event = [future]
+        elif isinstance(event, list):
+            event.append(future)
+        elif isinstance(event, asyncio.Future):
+            # Convert single pending future to a list
+            self.candle_push_event = [event, future]
+        else:
+            self.candle_push_event = [future]
 
-        await candle_event
-        new_candle = candle_event.result()
-        if self.candle_push_event is candle_event:
-            self.candle_push_event = None
+        await future
+        new_candle = future.result()
         return new_candle

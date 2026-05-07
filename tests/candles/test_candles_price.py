@@ -34,7 +34,9 @@ class TestPriceCandlesSpecific:
         )  # 0.06 > 0.05
         price_candles.process_trade(trade3)
 
-        assert True
+        assert len(price_candles) == 1
+        # Triggering trade closes the candle; latest is empty until next trade
+        assert price_candles.latest_candle.num_trades == 0
 
     def test_price_movement_both_directions(self):
         """Test price movement detection in both directions."""
@@ -70,7 +72,20 @@ class TestPriceCandlesSpecific:
         for trade in downward_trades:
             pc_down.process_trade(trade)
 
-        assert True
+        assert len(price_candles) == 1
+        # Triggering trade is included in the closed candle, new candle is empty
+        assert price_candles.latest_candle.num_trades == 0
+
+    def test_first_trade_low_price_not_zero(self):
+        """Ensure first candle's low_price is set correctly on the first trade."""
+        price_candles = PriceCandles(1.0)
+        trade = Trade(time_ms=1640995200000, is_buy=True, price=100.0, size=1.0)
+        price_candles.process_trade(trade)
+
+        assert price_candles.latest_candle.low_price == 100.0
+        assert price_candles.latest_candle.high_price == 100.0
+        assert price_candles.latest_candle.open_price == 100.0
+        assert price_candles.latest_candle.num_trades == 1
 
     def test_price_volatility_patterns(self):
         """Test PriceCandles with volatile price patterns."""
@@ -95,7 +110,10 @@ class TestPriceCandlesSpecific:
             price_candles.process_trade(trade)
 
         # All should stay in same candle (max movement is 0.15, less than 0.20)
-        assert True
+        assert len(price_candles) == 0
+        assert price_candles.latest_candle.num_trades == 4
+        assert price_candles.latest_candle.low_price == 99.90
+        assert price_candles.latest_candle.high_price == 100.15
 
     def test_price_candles_trigger_accuracy(self):
         """Test accuracy of price trigger detection."""
@@ -119,8 +137,8 @@ class TestPriceCandlesSpecific:
         for trade in precision_trades:
             price_candles.process_trade(trade)
 
-        # Should handle precise boundary detection
-        assert True
+        assert len(price_candles) == 1
+        assert price_candles.latest_candle.num_trades == 0
 
     def test_price_candles_with_mixed_sizes(self):
         """Test PriceCandles with various trade sizes."""
@@ -144,8 +162,15 @@ class TestPriceCandlesSpecific:
         for trade in mixed_size_trades:
             price_candles.process_trade(trade)
 
-        # Size should not affect price movement detection
-        assert True
+        assert len(price_candles) == 1
+        assert price_candles.latest_candle.num_trades == 0
+
+    def test_invalid_price_bucket(self):
+        """Test that non-positive price_bucket raises ValueError."""
+        with pytest.raises(ValueError):
+            PriceCandles(0.0)
+        with pytest.raises(ValueError):
+            PriceCandles(-0.1)
 
 
 if __name__ == "__main__":

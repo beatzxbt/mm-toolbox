@@ -32,7 +32,8 @@ cdef class TimeCandles(BaseCandles):
 
         # Check if time interval has elapsed
         if self.next_candle_close_time <= time_ms:
-            self.insert_and_reset_candle()
+            if self.latest_candle.num_trades > 0:
+                self.insert_and_reset_candle()
             # Calculate the next candle close time as a multiple of millis_per_bucket
             self.next_candle_close_time = (
                 (time_ms // self.millis_per_bucket) + 1

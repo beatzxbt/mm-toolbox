@@ -2,8 +2,8 @@ from mm_toolbox.ringbuffer.generic cimport GenericRingBuffer
 
 cdef class BaseCandles:
     cdef:
-        object latest_candle
-        GenericRingBuffer ringbuffer
+        public object latest_candle
+        GenericRingBuffer _ringbuffer
         object candle_push_event
         bint _store_trades
 

@@ -42,6 +42,12 @@ class TestTradeStructure:
         assert buy_trade.is_buy is True
         assert sell_trade.is_buy is False
 
+    def test_trade_is_frozen(self):
+        """Test that Trade is immutable."""
+        trade = Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0)
+        with pytest.raises(AttributeError):
+            trade.price = 99.0
+
 
 class TestCandleStructure:
     """Test the Candle data structure."""
@@ -192,8 +198,7 @@ class TestBaseCandlesFunctionality:
         for trade in trades:
             tick_candles.process_trade(trade)
 
-        # VWAP calculation happens internally - if no crash, it's working
-        assert True
+        assert tick_candles.latest_candle.vwap == pytest.approx(102.5)
 
     def test_vwap_uses_price_weighting(self):
         """Verify VWAP uses price-weighted sizes for calculations.
@@ -260,27 +265,46 @@ class TestBaseCandlesFunctionality:
         stale_trade = Trade(time_ms=1640995199000, is_buy=True, price=99.0, size=1.0)
         time_candles.process_trade(stale_trade)
 
-        # Should handle stale trade gracefully (likely ignored)
-        assert True
+        # Should ignore stale trade
+        assert time_candles.latest_candle.num_trades == 1
+        assert time_candles.latest_candle.close_price == 100.0
 
     def test_async_future_recreation(self):
         """Test that async Futures are properly recreated."""
         from mm_toolbox.candles import VolumeCandles
 
-        volume_candles = VolumeCandles(100.0)  # Small volume for quick triggers
+        volume_candles = VolumeCandles(1.0)  # Small size threshold for quick triggers
 
         # Process trades that will trigger multiple candle resets
         high_volume_trades = [
-            Trade(time_ms=1000, is_buy=True, price=100.0, size=2.0),  # 200 volume > 100
-            Trade(time_ms=2000, is_buy=True, price=101.0, size=3.0),  # 303 volume > 100
-            Trade(time_ms=3000, is_buy=True, price=102.0, size=1.5),  # 153 volume > 100
+            Trade(time_ms=1000, is_buy=True, price=100.0, size=2.0),  # size=2.0 > 1.0
+            Trade(time_ms=2000, is_buy=True, price=101.0, size=3.0),  # size=3.0 > 1.0
+            Trade(time_ms=3000, is_buy=True, price=102.0, size=1.5),  # size=1.5 > 1.0
         ]
 
         for trade in high_volume_trades:
             volume_candles.process_trade(trade)
 
         # Should handle multiple Future recreations without errors
-        assert True
+        assert len(volume_candles) == 6
+
+    def test_initialize_empty_list_raises(self):
+        """Test that initialize([]) raises ValueError."""
+        from mm_toolbox.candles import TickCandles
+
+        tick_candles = TickCandles(5)
+        with pytest.raises(ValueError, match="empty"):
+            tick_candles.initialize([])
+
+    def test_initialize_mixed_types_raises(self):
+        """Test that initialize with non-Trade objects raises ValueError."""
+        from mm_toolbox.candles import TickCandles
+
+        tick_candles = TickCandles(5)
+        with pytest.raises(ValueError, match="Trade"):
+            tick_candles.initialize(
+                [Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0), "not a trade"]
+            )
 
 
 if __name__ == "__main__":

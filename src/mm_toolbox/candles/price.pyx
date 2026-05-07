@@ -9,6 +9,8 @@ cdef class PriceCandles(BaseCandles):
     """
     def __init__(self, double price_bucket, int num_candles=1000, bint store_trades=True):
         """Initialize the price-based candle aggregator."""
+        if price_bucket <= 0.0:
+            raise ValueError(f"Invalid price_bucket; expected >0 but got {price_bucket}")
         BaseCandles.__init__(self, num_candles, store_trades)
         self.price_bucket = price_bucket
         self.upper_price_bound = 0.0
@@ -29,6 +31,8 @@ cdef class PriceCandles(BaseCandles):
         if self.latest_candle.num_trades == 0:
             self.latest_candle.open_time_ms = time_ms
             self.latest_candle.open_price = price
+            self.latest_candle.high_price = price
+            self.latest_candle.low_price = price
 
             self.upper_price_bound = price + self.price_bucket
             self.lower_price_bound = price - self.price_bucket
