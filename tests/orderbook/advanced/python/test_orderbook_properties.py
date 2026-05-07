@@ -349,8 +349,12 @@ class TestOperationSequenceConsistency:
 
             elif operation == "delta":
                 price = rng.uniform(90.0, 110.0)
-                size = rng.uniform(0.0, 10.0)  # Include deletions
-                norders = 0 if size == 0.0 else 1
+                if rng.random() < 0.1:  # 10% chance of deletion
+                    size = 0.0
+                    norders = 0
+                else:
+                    size = rng.uniform(0.1, 10.0)
+                    norders = 1
 
                 delta = OrderbookLevels.from_list_with_ticks_and_lots(
                     [price], [size], [norders], TICK_SIZE, LOT_SIZE

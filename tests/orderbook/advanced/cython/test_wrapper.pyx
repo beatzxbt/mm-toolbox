@@ -171,6 +171,9 @@ def test_wrapper_consume_deltas():
     
     book.consume_deltas(delta_asks, delta_bids)
     
+    cdef double mid = book.get_mid_price()
+    assert _approx_eq(mid, 100.00)
+    
     _free_levels(&delta_asks)
 
 
@@ -207,6 +210,11 @@ def test_wrapper_consume_bbo():
     )
     
     book.consume_bbo(new_ask, new_bid)
+    
+    cdef OrderbookLadderData* asks = book._core.get_asks_data()
+    cdef OrderbookLadderData* bids = book._core.get_bids_data()
+    assert asks.levels[0].size == 5.0
+    assert bids.levels[0].size == 5.0
 
 
 def test_wrapper_clear():

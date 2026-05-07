@@ -640,13 +640,13 @@ class TestIntegrationAndEdgeCases:
 
     def test_empty_orderbook_errors(self):
         ob = _mk_book(num_levels=64)
-        with pytest.raises((RuntimeError, ValueError)):
+        with pytest.raises(RuntimeError):
             ob.get_bbo()
-        with pytest.raises((RuntimeError, ValueError)):
+        with pytest.raises(ValueError):
             ob.get_bids()
-        with pytest.raises((RuntimeError, ValueError)):
+        with pytest.raises(ValueError):
             ob.get_asks()
-        with pytest.raises((RuntimeError, ValueError)):
+        with pytest.raises(RuntimeError):
             ob.get_bbo_spread()
 
     def test_reset_functionality(self):
@@ -666,9 +666,9 @@ class TestIntegrationAndEdgeCases:
         ob.consume_snapshot(asks, bids)
         ob.clear()
 
-        with pytest.raises((RuntimeError, ValueError)):
+        with pytest.raises(RuntimeError):
             ob.get_mid_price()
-        with pytest.raises((RuntimeError, ValueError)):
+        with pytest.raises(RuntimeError):
             ob.get_bbo_spread()
 
 

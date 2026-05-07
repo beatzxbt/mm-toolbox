@@ -547,9 +547,11 @@ def test_core_delta_ask_insert_new_bbo():
     core.consume_deltas(delta_asks, delta_bids)
     
     cdef OrderbookLadderData* asks = core.get_asks_data()
-    # Note: 100.005 / 0.01 = 10000.5, truncated to 10000 ticks = 100.00
-    # This may cause the ask to match bid tick, triggering cross resolution
-    # The exact behavior depends on implementation
+    cdef OrderbookLadderData* bids = core.get_bids_data()
+    # Ask at 100.00 (10000 ticks) should be new BBO
+    assert asks.levels[0].ticks == 10000
+    # Overlapping bid at 100.00 should be removed
+    assert bids.num_levels == 0 or bids.levels[0].ticks < 10000
     
     _free_levels(&delta_asks)
 
@@ -578,7 +580,8 @@ def test_core_delta_ask_insert_new_bbo_removes_overlapping_bids():
     # New ask should be BBO
     assert asks.levels[0].price == 99.99
     # Overlapping bids should be removed
-    assert bids.num_levels < 3 or bids.levels[0].ticks < 9999
+    assert bids.num_levels < 3
+    assert bids.levels[0].ticks < 9999
     
     _free_levels(&delta_asks)
 
@@ -846,7 +849,8 @@ def test_core_delta_bid_insert_new_bbo_removes_overlapping_asks():
     
     assert bids.levels[0].price == 100.02
     # Overlapping asks removed
-    assert asks.num_levels < 3 or asks.levels[0].ticks > 10002
+    assert asks.num_levels < 3
+    assert asks.levels[0].ticks > 10002
     
     _free_levels(&delta_bids)
 
@@ -1095,13 +1099,14 @@ def test_core_bbo_crossed_book_resolution():
     cdef OrderbookLadderData* asks = core.get_asks_data()
     cdef OrderbookLadderData* bids = core.get_bids_data()
     
-    # Book should resolve crossing
-    if asks.num_levels > 0 and bids.num_levels > 0:
-        assert bids.levels[0].ticks < asks.levels[0].ticks
+    # Book should resolve crossing - both sides should remain and not be crossed
+    assert bids.num_levels > 0
+    assert asks.num_levels > 0
+    assert bids.levels[0].ticks < asks.levels[0].ticks
 
 
 def test_core_bbo_on_empty_book():
-    """Test BBO on empty book populates single level."""
+    """Test BBO on empty book returns early."""
     cdef CoreAdvancedOrderbook core = _create_core()
     # Don't populate
     
@@ -1114,8 +1119,11 @@ def test_core_bbo_on_empty_book():
     
     core.consume_bbo(ask, bid)
     
-    # Note: consume_bbo on empty book returns early per implementation
-    # This test documents that behavior
+    # consume_bbo on empty book returns early - book should still be empty
+    cdef OrderbookLadderData* bids = core.get_bids_data()
+    cdef OrderbookLadderData* asks = core.get_asks_data()
+    assert bids.num_levels == 0
+    assert asks.num_levels == 0
 
 
 def test_core_bbo_populates_ticks_and_lots():
@@ -1312,6 +1320,7 @@ def test_core_wmid_bid_heavy():
     cdef double mid = core.get_mid_price()
     # WMID should be > mid (skewed toward ask which has more weight in imbalance calc)
     # Actually, formula weights by opposite side, so bid-heavy -> closer to ask
+    assert wmid > mid  # Bid-heavy should skew toward ask price
     
     _free_levels(&bids)
     _free_levels(&asks)
@@ -1395,9 +1404,9 @@ def test_core_impact_buy_single_level():
     cdef CoreAdvancedOrderbook core = _create_core()
     _populate_standard_book(core)
     
-    # BBO ask has 1.5 size, buy 0.5
+    # BBO ask has 1.5 size, buy 0.5 - stays within first level
     cdef double impact = core.get_price_impact(0.5, True, True)
-    assert impact >= 0.0
+    assert _approx_eq(impact, 0.0)
 
 
 def test_core_impact_sell_single_level():
@@ -1405,8 +1414,9 @@ def test_core_impact_sell_single_level():
     cdef CoreAdvancedOrderbook core = _create_core()
     _populate_standard_book(core)
     
+    # BBO bid has 1.0 size, sell 0.5 - stays within first level
     cdef double impact = core.get_price_impact(0.5, False, True)
-    assert impact >= 0.0
+    assert _approx_eq(impact, 0.0)
 
 
 def test_core_impact_buy_multi_level():
@@ -1414,9 +1424,9 @@ def test_core_impact_buy_multi_level():
     cdef CoreAdvancedOrderbook core = _create_core()
     _populate_standard_book(core)
     
-    # Buy more than BBO ask size (1.5)
+    # Buy 3.0: exceeds BBO ask size (1.5), sweeps to 100.02
     cdef double impact = core.get_price_impact(3.0, True, True)
-    assert impact > 0.0
+    assert _approx_eq(impact, 0.01)
 
 
 def test_core_impact_exceeds_liquidity():

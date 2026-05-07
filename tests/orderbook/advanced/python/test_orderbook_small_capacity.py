@@ -26,11 +26,11 @@ from tests.orderbook.advanced.conftest import (
 
 @pytest.mark.boundary
 class TestMinimumCapacityEnforcement:
-    """Test that minimum orderbook size of 16 levels is enforced."""
+    """Test that minimum orderbook size of 64 levels is enforced."""
 
     @pytest.mark.parametrize("invalid_size", [0, 1, 2, 4, 8, 16, 32, 63])
     def test_reject_sizes_below_minimum(self, invalid_size: int):
-        """Orderbook creation fails for sizes below 16."""
+        """Orderbook creation fails for sizes below 64."""
         with pytest.raises(ValueError, match="expected >=64"):
             AdvancedOrderbook(
                 tick_size=TICK_SIZE,
@@ -41,7 +41,7 @@ class TestMinimumCapacityEnforcement:
             )
 
     def test_accept_minimum_size(self):
-        """Orderbook creation succeeds at minimum size of 16."""
+        """Orderbook creation succeeds at minimum size of 64."""
         book = AdvancedOrderbook(
             tick_size=TICK_SIZE,
             lot_size=LOT_SIZE,
@@ -53,7 +53,7 @@ class TestMinimumCapacityEnforcement:
 
     @pytest.mark.parametrize("valid_size", [64, 65, 128, 256, 512, 1024])
     def test_accept_valid_sizes(self, valid_size: int):
-        """Orderbook creation succeeds for sizes >= 16."""
+        """Orderbook creation succeeds for sizes >= 64."""
         book = AdvancedOrderbook(
             tick_size=TICK_SIZE,
             lot_size=LOT_SIZE,

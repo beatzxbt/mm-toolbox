@@ -289,16 +289,14 @@ class TestDeltaBatchTopLevelRemovals:
 class TestMaxCapacityBoundaries:
     """Test max capacity edge cases and overflow protection."""
 
+    @pytest.mark.slow
     def test_initialization_at_max_capacity(self):
-        """Create with num_levels=64777216 (ORDERBOOK_MAX_LEVELS)."""
+        """Create with num_levels=16777216 (ORDERBOOK_MAX_LEVELS)."""
         # This test is slow due to large memory allocation
-        # Skip in normal test runs
-        pytest.skip("Skipping max capacity initialization test (very slow)")
-
         book = AdvancedOrderbook(
             tick_size=TICK_SIZE,
             lot_size=LOT_SIZE,
-            num_levels=64777216,  # 2^24
+            num_levels=16777216,  # 2^24
             delta_sortedness=PyOrderbookSortedness.UNKNOWN,
             snapshot_sortedness=PyOrderbookSortedness.UNKNOWN,
         )
@@ -312,7 +310,7 @@ class TestMaxCapacityBoundaries:
             AdvancedOrderbook(
                 tick_size=TICK_SIZE,
                 lot_size=LOT_SIZE,
-                num_levels=64777217,  # 2^24 + 1, exceeds max
+                num_levels=16777217,  # 2^24 + 1, exceeds max
                 delta_sortedness=PyOrderbookSortedness.UNKNOWN,
                 snapshot_sortedness=PyOrderbookSortedness.UNKNOWN,
             )
@@ -348,7 +346,7 @@ class TestMaxCapacityBoundaries:
         """Verify truncation to capacity."""
         book = _mk_book(num_levels=64)
 
-        # Create 20 levels (exceeds capacity of 10)
+        # Create 20 levels (exceeds capacity of 64)
         ask_prices = [100.0 + i * 0.01 for i in range(20)]
         bid_prices = [99.99 - i * 0.01 for i in range(20)]
         sizes = [1.0] * 20
