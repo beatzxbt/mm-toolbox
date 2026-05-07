@@ -229,6 +229,11 @@ class Orderbook:
             ask: Ask level.
             bid: Bid level.
         """
+        bids = self._bids
+        asks = self._asks
+        sorted_bid_ticks = self._sorted_bid_ticks
+        sorted_ask_ticks = self._sorted_ask_ticks
+
         self._ensure_level_precision(bid)
         self._ensure_level_precision(ask)
 
@@ -236,26 +241,26 @@ class Orderbook:
         ask_ticks, ask_lots = ask.ticks, ask.lots
 
         if bid_lots == 0:
-            if self._sorted_bid_ticks:
+            if sorted_bid_ticks:
                 best_bid_ticks = self._best_bid_ticks
-                self._bids.pop(best_bid_ticks, None)
-                self._sorted_bid_ticks.pop()
+                bids.pop(best_bid_ticks, None)
+                sorted_bid_ticks.pop()
         else:
             self._prune_better_bids(bid_ticks)
-            if bid_ticks not in self._bids:
-                insort(self._sorted_bid_ticks, bid_ticks)
-            self._bids[bid_ticks] = bid
+            if bid_ticks not in bids:
+                insort(sorted_bid_ticks, bid_ticks)
+            bids[bid_ticks] = bid
 
         if ask_lots == 0:
-            if self._sorted_ask_ticks:
+            if sorted_ask_ticks:
                 best_ask_ticks = self._best_ask_ticks
-                self._asks.pop(best_ask_ticks, None)
-                self._sorted_ask_ticks.pop(0)
+                asks.pop(best_ask_ticks, None)
+                sorted_ask_ticks.pop(0)
         else:
             self._prune_better_asks(ask_ticks)
-            if ask_ticks not in self._asks:
-                insort(self._sorted_ask_ticks, ask_ticks)
-            self._asks[ask_ticks] = ask
+            if ask_ticks not in asks:
+                insort(sorted_ask_ticks, ask_ticks)
+            asks[ask_ticks] = ask
 
         self._is_initialized = True
         self._refresh_population_state()
@@ -264,30 +269,34 @@ class Orderbook:
     def get_asks(self, depth: int | None = None) -> list[OrderbookLevel]:
         """Get ask levels sorted by price (lowest first)."""
         self._ensure_initialized()
+        asks = self._asks
+        sorted_ask_ticks = self._sorted_ask_ticks
         if depth is None:
-            return [self._asks[tick] for tick in self._sorted_ask_ticks]
+            return [asks[tick] for tick in sorted_ask_ticks]
         if depth <= 0:
             return []
         result = []
-        for i, tick in enumerate(self._sorted_ask_ticks):
+        for i, tick in enumerate(sorted_ask_ticks):
             if i >= depth:
                 break
-            result.append(self._asks[tick])
+            result.append(asks[tick])
         return result
 
     def get_bids(self, depth: int | None = None) -> list[OrderbookLevel]:
         """Get bid levels sorted by price (highest first)."""
         self._ensure_initialized()
+        bids = self._bids
+        sorted_bid_ticks = self._sorted_bid_ticks
         if depth is None:
-            return [self._bids[tick] for tick in reversed(self._sorted_bid_ticks)]
+            return [bids[tick] for tick in reversed(sorted_bid_ticks)]
         if depth <= 0:
             return []
         result = []
-        n = len(self._sorted_bid_ticks)
+        n = len(sorted_bid_ticks)
         for i in range(n - 1, n - 1 - depth, -1):
             if i < 0:
                 break
-            result.append(self._bids[self._sorted_bid_ticks[i]])
+            result.append(bids[sorted_bid_ticks[i]])
         return result
 
     def iter_asks(self, depth: int | None = None) -> Iterator[OrderbookLevel]:
@@ -295,29 +304,33 @@ class Orderbook:
         self._ensure_initialized()
         if depth is not None and depth <= 0:
             return
+        asks = self._asks
+        sorted_ask_ticks = self._sorted_ask_ticks
         if depth is None:
-            for tick in self._sorted_ask_ticks:
-                yield self._asks[tick]
+            for tick in sorted_ask_ticks:
+                yield asks[tick]
         else:
-            for i, tick in enumerate(self._sorted_ask_ticks):
+            for i, tick in enumerate(sorted_ask_ticks):
                 if i >= depth:
                     break
-                yield self._asks[tick]
+                yield asks[tick]
 
     def iter_bids(self, depth: int | None = None) -> Iterator[OrderbookLevel]:
         """Iterate over bid levels sorted by price (highest -> lowest)."""
         self._ensure_initialized()
         if depth is not None and depth <= 0:
             return
-        n = len(self._sorted_bid_ticks)
+        bids = self._bids
+        sorted_bid_ticks = self._sorted_bid_ticks
+        n = len(sorted_bid_ticks)
         if depth is None:
             for i in range(n - 1, -1, -1):
-                yield self._bids[self._sorted_bid_ticks[i]]
+                yield bids[sorted_bid_ticks[i]]
         else:
             for i in range(n - 1, n - 1 - depth, -1):
                 if i < 0:
                     break
-                yield self._bids[self._sorted_bid_ticks[i]]
+                yield bids[sorted_bid_ticks[i]]
 
     def get_bbo(self) -> tuple[OrderbookLevel, OrderbookLevel]:
         """Get best bid and offer as a tuple."""
@@ -328,21 +341,25 @@ class Orderbook:
         """Get the bid-ask spread."""
         self._ensure_bbo_available()
         spread_ticks = self._best_ask_ticks - self._best_bid_ticks
-        return price_from_ticks(spread_ticks, self._tick_size)
+        tick_size = self._tick_size
+        return spread_ticks * tick_size
 
     def get_mid_price(self) -> float:
         """Get the mid price between best bid and ask."""
         self._ensure_bbo_available()
         mid_ticks = (self._best_ask_ticks + self._best_bid_ticks) // 2
-        return price_from_ticks(mid_ticks, self._tick_size)
+        tick_size = self._tick_size
+        return mid_ticks * tick_size
 
     def get_wmid_price(self) -> float:
         """Get the weighted mid price between best bid and ask."""
         self._ensure_bbo_available()
+        bids = self._bids
+        asks = self._asks
         best_bid_ticks = self._best_bid_ticks
         best_ask_ticks = self._best_ask_ticks
-        best_bid_lots = self._bids[best_bid_ticks].lots
-        best_ask_lots = self._asks[best_ask_ticks].lots
+        best_bid_lots = bids[best_bid_ticks].lots
+        best_ask_lots = asks[best_ask_ticks].lots
 
         total_lots = best_bid_lots + best_ask_lots
         if total_lots == 0:
@@ -357,17 +374,28 @@ class Orderbook:
     ) -> float:
         """Get the mid price between the price to buy and sell 'size' on the book."""
         self._ensure_bbo_available()
-        if size == 0.0:
-            return self.get_mid_price()
 
-        mid_price = self.get_mid_price()
+        asks = self._asks
+        bids = self._bids
+        sorted_ask_ticks = self._sorted_ask_ticks
+        sorted_bid_ticks = self._sorted_bid_ticks
+        best_ask_ticks = self._best_ask_ticks
+        best_bid_ticks = self._best_bid_ticks
+        tick_size = self._tick_size
+
+        if size == 0.0:
+            mid_ticks = (best_ask_ticks + best_bid_ticks) // 2
+            return mid_ticks * tick_size
+
+        mid_ticks = (best_ask_ticks + best_bid_ticks) // 2
+        mid_price = mid_ticks * tick_size
         if not is_base_currency:
             size = size / mid_price
 
         cum_bid_size = 0.0
         buy_price = None
-        for tick in self._sorted_ask_ticks:
-            level = self._asks[tick]
+        for tick in sorted_ask_ticks:
+            level = asks[tick]
             if cum_bid_size + level.size >= size:
                 buy_price = level.price
                 break
@@ -377,8 +405,8 @@ class Orderbook:
 
         cum_ask_size = 0.0
         sell_price = None
-        for tick in reversed(self._sorted_bid_ticks):
-            level = self._bids[tick]
+        for tick in reversed(sorted_bid_ticks):
+            level = bids[tick]
             if cum_ask_size + level.size >= size:
                 sell_price = level.price
                 break
@@ -397,10 +425,17 @@ class Orderbook:
         if size <= 0.0:
             return 0.0
 
+        asks = self._asks
+        bids = self._bids
+        sorted_ask_ticks = self._sorted_ask_ticks
+        sorted_bid_ticks = self._sorted_bid_ticks
+        best_ask_ticks = self._best_ask_ticks
+        best_bid_ticks = self._best_bid_ticks
+
         if is_buy:
-            touch_anchor_price = self._asks[self._best_ask_ticks].price
+            touch_anchor_price = asks[best_ask_ticks].price
         else:
-            touch_anchor_price = self._bids[self._best_bid_ticks].price
+            touch_anchor_price = bids[best_bid_ticks].price
 
         if not is_base_currency:
             size = size / touch_anchor_price
@@ -409,8 +444,8 @@ class Orderbook:
         last_touched_price = touch_anchor_price
 
         if is_buy:
-            for tick in self._sorted_ask_ticks:
-                level = self._asks[tick]
+            for tick in sorted_ask_ticks:
+                level = asks[tick]
                 consumed_size = min(remaining_size, level.size)
                 remaining_size -= consumed_size
                 if consumed_size > 0.0:
@@ -418,8 +453,8 @@ class Orderbook:
                 if remaining_size <= 0.0:
                     break
         else:
-            for tick in reversed(self._sorted_bid_ticks):
-                level = self._bids[tick]
+            for tick in reversed(sorted_bid_ticks):
+                level = bids[tick]
                 consumed_size = min(remaining_size, level.size)
                 remaining_size -= consumed_size
                 if consumed_size > 0.0:
@@ -447,29 +482,36 @@ class Orderbook:
         if impact_bps <= 0.0:
             return 0.0
 
+        asks = self._asks
+        bids = self._bids
+        sorted_ask_ticks = self._sorted_ask_ticks
+        sorted_bid_ticks = self._sorted_bid_ticks
+        best_ask_ticks = self._best_ask_ticks
+        best_bid_ticks = self._best_bid_ticks
+        inv_tick_size = self._inv_tick_size
+        tick_size = self._tick_size
+
         total_base = 0.0
         total_quote = 0.0
 
         if is_buy:
-            best_ask_ticks = self._best_ask_ticks
-            max_price = self._asks[best_ask_ticks].price * (1.0 + impact_bps / 10_000.0)
-            max_ticks = price_to_ticks_fast(max_price, self._inv_tick_size)
-            for tick in self._sorted_ask_ticks:
+            max_price = asks[best_ask_ticks].price * (1.0 + impact_bps / 10_000.0)
+            max_ticks = price_to_ticks_fast(max_price, inv_tick_size)
+            for tick in sorted_ask_ticks:
                 if tick > max_ticks:
                     break
-                level = self._asks[tick]
+                level = asks[tick]
                 total_base += level.size
                 total_quote += level.size * level.price
         else:
-            best_bid_ticks = self._best_bid_ticks
-            min_price = self._bids[best_bid_ticks].price * (1.0 - impact_bps / 10_000.0)
-            min_ticks = price_to_ticks_fast(min_price, self._inv_tick_size)
-            if min_ticks * self._tick_size < min_price:
+            min_price = bids[best_bid_ticks].price * (1.0 - impact_bps / 10_000.0)
+            min_ticks = price_to_ticks_fast(min_price, inv_tick_size)
+            if min_ticks * tick_size < min_price:
                 min_ticks += 1
-            for tick in reversed(self._sorted_bid_ticks):
+            for tick in reversed(sorted_bid_ticks):
                 if tick < min_ticks:
                     break
-                level = self._bids[tick]
+                level = bids[tick]
                 total_base += level.size
                 total_quote += level.size * level.price
 
@@ -478,19 +520,19 @@ class Orderbook:
     def does_bbo_price_change(self, bid_price: float, ask_price: float) -> bool:
         """Check if the best bid/ask price will change."""
         self._ensure_bbo_available()
-        other_bid_ticks = price_to_ticks_fast(bid_price, self._inv_tick_size)
-        other_ask_ticks = price_to_ticks_fast(ask_price, self._inv_tick_size)
-        return (
-            self._best_bid_ticks != other_bid_ticks
-            or self._best_ask_ticks != other_ask_ticks
-        )
+        best_bid_ticks = self._best_bid_ticks
+        best_ask_ticks = self._best_ask_ticks
+        inv_tick_size = self._inv_tick_size
+        other_bid_ticks = price_to_ticks_fast(bid_price, inv_tick_size)
+        other_ask_ticks = price_to_ticks_fast(ask_price, inv_tick_size)
+        return best_bid_ticks != other_bid_ticks or best_ask_ticks != other_ask_ticks
 
     def does_bbo_cross(self, bid_price: float, ask_price: float) -> bool:
         """Check if the best bid/ask price crosses with the given price."""
         self._ensure_bbo_available()
-        other_bid_ticks = price_to_ticks_fast(bid_price, self._inv_tick_size)
-        other_ask_ticks = price_to_ticks_fast(ask_price, self._inv_tick_size)
-        return (
-            self._best_bid_ticks > other_ask_ticks
-            or self._best_ask_ticks < other_bid_ticks
-        )
+        best_bid_ticks = self._best_bid_ticks
+        best_ask_ticks = self._best_ask_ticks
+        inv_tick_size = self._inv_tick_size
+        other_bid_ticks = price_to_ticks_fast(bid_price, inv_tick_size)
+        other_ask_ticks = price_to_ticks_fast(ask_price, inv_tick_size)
+        return best_bid_ticks > other_ask_ticks or best_ask_ticks < other_bid_ticks
