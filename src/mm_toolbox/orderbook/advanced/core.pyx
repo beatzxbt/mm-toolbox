@@ -45,8 +45,8 @@ cdef class CoreAdvancedOrderbook:
             raise ValueError(f"Invalid tick_size; expected >0 but got {tick_size}")
         if lot_size <= 0.0:
             raise ValueError(f"Invalid lot_size; expected >0 but got {lot_size}")
-        if num_levels < 64:
-            raise ValueError(f"Invalid num_levels; expected >=64 but got {num_levels}")
+        if num_levels < 4:
+            raise ValueError(f"Invalid num_levels; expected >=4 but got {num_levels}")
         self._tick_size = tick_size
         self._lot_size = lot_size
         self._tick_size_recip = 1.0 / tick_size

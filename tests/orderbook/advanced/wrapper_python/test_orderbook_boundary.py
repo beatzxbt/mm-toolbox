@@ -31,8 +31,8 @@ class TestEmptyOrderbookBoundaries:
     """Test empty orderbook operations and edge cases."""
 
     def test_empty_orderbook_initialization(self):
-        """Verify that num_levels<16 raises ValueError."""
-        with pytest.raises(ValueError, match="expected >=64"):
+        """Verify that num_levels<4 raises ValueError."""
+        with pytest.raises(ValueError, match="expected >=4"):
             AdvancedOrderbook(
                 tick_size=TICK_SIZE,
                 lot_size=LOT_SIZE,

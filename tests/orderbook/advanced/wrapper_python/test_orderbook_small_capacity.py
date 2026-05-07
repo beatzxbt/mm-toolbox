@@ -21,17 +21,18 @@ from tests.orderbook.advanced.conftest import (
     _mk_book,
     _make_levels,
     _empty_bid_levels,
+    _bids_asks_arrays,
 )
 
 
 @pytest.mark.boundary
 class TestMinimumCapacityEnforcement:
-    """Test that minimum orderbook size of 64 levels is enforced."""
+    """Test that minimum orderbook size of 4 levels is enforced."""
 
-    @pytest.mark.parametrize("invalid_size", [0, 1, 2, 4, 8, 16, 32, 63])
+    @pytest.mark.parametrize("invalid_size", [0, 1, 2, 3])
     def test_reject_sizes_below_minimum(self, invalid_size: int):
-        """Orderbook creation fails for sizes below 64."""
-        with pytest.raises(ValueError, match="expected >=64"):
+        """Orderbook creation fails for sizes below 4."""
+        with pytest.raises(ValueError, match="expected >=4"):
             AdvancedOrderbook(
                 tick_size=TICK_SIZE,
                 lot_size=LOT_SIZE,
@@ -41,19 +42,19 @@ class TestMinimumCapacityEnforcement:
             )
 
     def test_accept_minimum_size(self):
-        """Orderbook creation succeeds at minimum size of 64."""
+        """Orderbook creation succeeds at minimum size of 4."""
         book = AdvancedOrderbook(
             tick_size=TICK_SIZE,
             lot_size=LOT_SIZE,
-            num_levels=64,
+            num_levels=4,
             delta_sortedness=PyOrderbookSortedness.UNKNOWN,
             snapshot_sortedness=PyOrderbookSortedness.UNKNOWN,
         )
         assert book is not None
 
-    @pytest.mark.parametrize("valid_size", [64, 65, 128, 256, 512, 1024])
+    @pytest.mark.parametrize("valid_size", [4, 5, 16, 32, 64, 128, 1024])
     def test_accept_valid_sizes(self, valid_size: int):
-        """Orderbook creation succeeds for sizes >= 64."""
+        """Orderbook creation succeeds for sizes >= 4."""
         book = AdvancedOrderbook(
             tick_size=TICK_SIZE,
             lot_size=LOT_SIZE,
@@ -432,3 +433,167 @@ class TestBBOCrossRemovalEdgeCases:
             bids_arr = book.get_bids_numpy()
             assert len(asks_arr) >= 1, f"Empty asks at iteration {i}"
             assert len(bids_arr) >= 1, f"Empty bids at iteration {i}"
+
+
+@pytest.mark.boundary
+class TestMinimumCapacityBehavior:
+    """Test 4-level orderbook behaves correctly under stress."""
+
+    def test_4_level_snapshot(self):
+        """Snapshot with 4 levels per side works."""
+        book = AdvancedOrderbook(
+            tick_size=TICK_SIZE,
+            lot_size=LOT_SIZE,
+            num_levels=4,
+            delta_sortedness=PyOrderbookSortedness.UNKNOWN,
+            snapshot_sortedness=PyOrderbookSortedness.UNKNOWN,
+        )
+        asks, _ = _make_levels(
+            prices=[100.01, 100.02, 100.03, 100.04],
+            sizes=[1.0, 1.0, 1.0, 1.0],
+            with_precision=True,
+        )
+        bids, _ = _make_levels(
+            prices=[100.0, 99.99, 99.98, 99.97],
+            sizes=[1.0, 1.0, 1.0, 1.0],
+            with_precision=True,
+        )
+        book.consume_snapshot(asks, bids)
+
+        bid_arr, ask_arr = _bids_asks_arrays(book)
+        assert len(bid_arr) == 4
+        assert len(ask_arr) == 4
+        assert book.get_bbo_spread() == pytest.approx(0.01)
+
+    def test_4_level_delta_adds_beyond_capacity(self):
+        """Deltas beyond 4 levels truncate."""
+        book = AdvancedOrderbook(
+            tick_size=TICK_SIZE,
+            lot_size=LOT_SIZE,
+            num_levels=4,
+            delta_sortedness=PyOrderbookSortedness.UNKNOWN,
+            snapshot_sortedness=PyOrderbookSortedness.UNKNOWN,
+        )
+        # Fill to capacity
+        asks, _ = _make_levels(
+            prices=[100.0 + i * 0.01 for i in range(4)],
+            sizes=[1.0] * 4,
+            with_precision=True,
+        )
+        bids, _ = _make_levels(
+            prices=[99.99 - i * 0.01 for i in range(4)],
+            sizes=[1.0] * 4,
+            with_precision=True,
+        )
+        book.consume_snapshot(asks, bids)
+
+        # Try to add 5th level - should be ignored
+        extra_ask = OrderbookLevels.from_list_with_ticks_and_lots(
+            [100.05], [1.0], [1], TICK_SIZE, LOT_SIZE
+        )
+        book.consume_deltas(extra_ask, _empty_bid_levels())
+
+        _, ask_arr = _bids_asks_arrays(book)
+        assert len(ask_arr) == 4
+        assert ask_arr["price"][-1] == pytest.approx(100.03)
+
+    def test_4_level_bbo_updates(self):
+        """BBO updates work on minimum capacity."""
+        book = AdvancedOrderbook(
+            tick_size=TICK_SIZE,
+            lot_size=LOT_SIZE,
+            num_levels=4,
+            delta_sortedness=PyOrderbookSortedness.UNKNOWN,
+            snapshot_sortedness=PyOrderbookSortedness.UNKNOWN,
+        )
+        asks, _ = _make_levels(
+            prices=[100.01, 100.02, 100.03, 100.04],
+            sizes=[1.0, 1.0, 1.0, 1.0],
+            with_precision=True,
+        )
+        bids, _ = _make_levels(
+            prices=[100.0, 99.99, 99.98, 99.97],
+            sizes=[1.0, 1.0, 1.0, 1.0],
+            with_precision=True,
+        )
+        book.consume_snapshot(asks, bids)
+
+        # BBO update
+        from mm_toolbox.orderbook.advanced import OrderbookLevel
+
+        new_ask = OrderbookLevel.with_ticks_and_lots(
+            100.015, 2.0, TICK_SIZE, LOT_SIZE, 1
+        )
+        new_bid = OrderbookLevel.with_ticks_and_lots(
+            100.005, 2.0, TICK_SIZE, LOT_SIZE, 1
+        )
+        book.consume_bbo(new_ask, new_bid)
+
+        assert book.get_bbo_spread() == pytest.approx(0.01)
+
+    def test_4_level_calculations(self):
+        """Price calculations work on minimum capacity."""
+        book = AdvancedOrderbook(
+            tick_size=TICK_SIZE,
+            lot_size=LOT_SIZE,
+            num_levels=4,
+            delta_sortedness=PyOrderbookSortedness.UNKNOWN,
+            snapshot_sortedness=PyOrderbookSortedness.UNKNOWN,
+        )
+        asks, _ = _make_levels(
+            prices=[100.01, 100.02, 100.03, 100.04],
+            sizes=[1.0, 1.0, 1.0, 1.0],
+            with_precision=True,
+        )
+        bids, _ = _make_levels(
+            prices=[100.0, 99.99, 99.98, 99.97],
+            sizes=[1.0, 1.0, 1.0, 1.0],
+            with_precision=True,
+        )
+        book.consume_snapshot(asks, bids)
+
+        assert book.get_mid_price() == pytest.approx(100.0)
+        assert book.get_bbo_spread() == pytest.approx(0.01)
+        assert book.get_wmid_price() > 0
+
+        # Impact for 1.0 should be 0 (within first level)
+        impact = book.get_price_impact(1.0, True, True)
+        assert impact == 0.0
+
+        # Impact for 2.0 should be 0.01 (spills into second level)
+        impact = book.get_price_impact(2.0, True, True)
+        assert impact == pytest.approx(0.01)
+
+    def test_4_level_rapid_updates(self):
+        """100 rapid updates on 4-level book."""
+        book = AdvancedOrderbook(
+            tick_size=TICK_SIZE,
+            lot_size=LOT_SIZE,
+            num_levels=4,
+            delta_sortedness=PyOrderbookSortedness.UNKNOWN,
+            snapshot_sortedness=PyOrderbookSortedness.UNKNOWN,
+        )
+        asks, _ = _make_levels(
+            prices=[100.01, 100.02, 100.03, 100.04],
+            sizes=[1.0, 1.0, 1.0, 1.0],
+            with_precision=True,
+        )
+        bids, _ = _make_levels(
+            prices=[100.0, 99.99, 99.98, 99.97],
+            sizes=[1.0, 1.0, 1.0, 1.0],
+            with_precision=True,
+        )
+        book.consume_snapshot(asks, bids)
+
+        for i in range(100):
+            delta_asks = OrderbookLevels.from_list_with_ticks_and_lots(
+                [100.01 + (i % 4) * 0.01],
+                [float(i % 10 + 1)],
+                [1],
+                TICK_SIZE,
+                LOT_SIZE,
+            )
+            book.consume_deltas(delta_asks, _empty_bid_levels())
+
+        asks_arr = book.get_asks_numpy()
+        assert len(asks_arr) <= 4
