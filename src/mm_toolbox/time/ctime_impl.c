@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <math.h>
 
 /* Clock constants for high precision timing */
 #ifndef CLOCK_REALTIME
@@ -98,24 +99,38 @@ int64_t c_time_monotonic_ns(void) {
     return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
 }
 
-char* c_time_iso8601(double timestamp) {
-    char* buf = malloc(32);
-    if (buf == NULL) {
-        return NULL;
+/**
+ * Formats a Unix timestamp into an ISO 8601 string.
+ *
+ * Uses magnitude heuristics to detect input precision:
+ *   >= 1e18 : treated as nanoseconds
+ *   >= 1e15 : treated as microseconds  
+ *   >= 1e12 : treated as milliseconds
+ *   else    : treated as seconds (float)
+ *
+ * NOTE: timestamp == 0.0 means "current time" for backward compatibility.
+ *       To format the Unix epoch, use a small non-zero value like 1e-9.
+ *
+ * @param timestamp  Unix timestamp (see precision rules above)
+ * @param buf        Output buffer (must be at least 48 bytes for nanosecond precision)
+ * @param buf_size   Size of output buffer
+ * @return 0 on success, -1 on error
+ */
+int c_time_iso8601(double timestamp, char* buf, size_t buf_size) {
+    if (buf == NULL || buf_size == 0) {
+        return -1;
     }
     
     if (timestamp == 0.0) {
-        /* Constants for time arithmetic */
+        /* Fast path: get current time and format directly using manual arithmetic */
         const int64_t NS_IN_DAY = 86400000000000LL;
         const int64_t NS_IN_HOUR = 3600000000000LL;
         const int64_t NS_IN_MIN = 60000000000LL;
         const int64_t NS_IN_SEC = 1000000000LL;
         
-        /* Fast path: get current time and format directly using manual arithmetic */
         int64_t nanoseconds = c_time_ns();
         if (nanoseconds == -1) {
-            free(buf);
-            return NULL;
+            return -1;
         }
         
         /* Convert nanoseconds to days + remainder */
@@ -146,16 +161,22 @@ char* c_time_iso8601(double timestamp) {
         remainder_ns %= NS_IN_SEC;
         int64_t ms = remainder_ns / 1000000LL;
         
-        /* Format the result */
-        snprintf(buf, 32, "%04lld-%02lld-%02lldT%02lld:%02lld:%02lld.%03lldZ",
+        /* Format the result - 24 chars + null for millisecond precision */
+        int ret = snprintf(buf, buf_size, "%04lld-%02lld-%02lldT%02lld:%02lld:%02lld.%03lldZ",
                  (long long)year, (long long)month, (long long)day,
                  (long long)h, (long long)M, (long long)s, (long long)ms);
         
+        if (ret < 0 || (size_t)ret >= buf_size) {
+            return -1; /* Encoding error or truncation */
+        }
+        
     } else {
-        /* Provided timestamp path: use gmtime for conversion */
+        /* Provided timestamp path: use gmtime_r for thread safety */
         time_t seconds;
         int fractional_part;
-        char fractional_str[10];
+        char fractional_str[16];
+        struct tm utc_tm;
+        struct tm* result;
         
         if (timestamp >= 1e18) {  /* nanoseconds */
             seconds = (time_t)(timestamp / 1e9);
@@ -175,22 +196,19 @@ char* c_time_iso8601(double timestamp) {
             snprintf(fractional_str, sizeof(fractional_str), "%03d", fractional_part);
         }
         
-        struct tm* utc_tm = gmtime(&seconds);
-        if (utc_tm == NULL) {
-            free(buf);
-            return NULL;
+        result = gmtime_r(&seconds, &utc_tm);
+        if (result == NULL) {
+            return -1;
         }
         
-        snprintf(buf, 32, "%04d-%02d-%02dT%02d:%02d:%02d.%sZ",
-                 utc_tm->tm_year + 1900, utc_tm->tm_mon + 1, utc_tm->tm_mday,
-                 utc_tm->tm_hour, utc_tm->tm_min, utc_tm->tm_sec, fractional_str);
+        int ret = snprintf(buf, buf_size, "%04d-%02d-%02dT%02d:%02d:%02d.%sZ",
+                 utc_tm.tm_year + 1900, utc_tm.tm_mon + 1, utc_tm.tm_mday,
+                 utc_tm.tm_hour, utc_tm.tm_min, utc_tm.tm_sec, fractional_str);
+        
+        if (ret < 0 || (size_t)ret >= buf_size) {
+            return -1; /* Encoding error or truncation */
+        }
     }
     
-    return buf;
+    return 0;
 }
-
-void c_free_string(char* ptr) {
-    if (ptr != NULL) {
-        free(ptr);
-    }
-} 

@@ -3,74 +3,88 @@
 # distutils: include_dirs = src/mm_toolbox/time
 
 import ciso8601
-from cpython.unicode cimport PyUnicode_DecodeASCII
-from libc.string cimport strlen
 from libc.stdint cimport int64_t as i64
+from libc.stddef cimport size_t
 
 cdef extern from "ctime_impl.h":
-    i64 c_time_s ()
-    i64 c_time_ms ()
-    i64 c_time_us ()
-    i64 c_time_ns ()
-    i64 c_time_monotonic_s ()
-    i64 c_time_monotonic_ms ()
-    i64 c_time_monotonic_us ()
-    i64 c_time_monotonic_ns ()
-    char* c_time_iso8601 (double timestamp)
-    void c_free_string (char* ptr)
+    i64 c_time_s () nogil
+    i64 c_time_ms () nogil
+    i64 c_time_us () nogil
+    i64 c_time_ns () nogil
+    i64 c_time_monotonic_s () nogil
+    i64 c_time_monotonic_ms () nogil
+    i64 c_time_monotonic_us () nogil
+    i64 c_time_monotonic_ns () nogil
+    int c_time_iso8601 (double timestamp, char* buf, size_t buf_size) nogil
 
 cpdef i64 time_s():
     """Returns the current wall-clock time in seconds."""
-    cdef i64 result = c_time_s()
+    cdef i64 result
+    with nogil:
+        result = c_time_s()
     if result == -1:
         raise RuntimeError("Failed to get system time")
     return result
 
 cpdef i64 time_ms():
     """Returns the current wall-clock time in milliseconds."""
-    cdef i64 result = c_time_ms()
+    cdef i64 result
+    with nogil:
+        result = c_time_ms()
     if result == -1:
         raise RuntimeError("Failed to get system time")
     return result
 
 cpdef i64 time_us():
     """Returns the current wall-clock time in microseconds."""
-    cdef i64 result = c_time_us()
+    cdef i64 result
+    with nogil:
+        result = c_time_us()
     if result == -1:
         raise RuntimeError("Failed to get system time")
     return result
 
 cpdef i64 time_ns():
     """Returns the current wall-clock time in nanoseconds."""
-    cdef i64 result = c_time_ns()
+    cdef i64 result
+    with nogil:
+        result = c_time_ns()
     if result == -1:
         raise RuntimeError("Failed to get system time")
     return result
 
 cpdef i64 time_monotonic_s():
     """Returns monotonic time in seconds (never decreases, unaffected by clock changes)."""
-    cdef i64 result = c_time_monotonic_s()
+    cdef i64 result
+    with nogil:
+        result = c_time_monotonic_s()
     if result == -1:
         raise RuntimeError("Failed to get monotonic time")
     return result
 
 cpdef i64 time_monotonic_ms():
     """Returns monotonic time in milliseconds (never decreases, unaffected by clock changes)."""
-    cdef i64 result = c_time_monotonic_ms()
+    cdef i64 result
+    with nogil:
+        result = c_time_monotonic_ms()
     if result == -1:
         raise RuntimeError("Failed to get monotonic time")
     return result
 
 cpdef i64 time_monotonic_us():
     """Returns monotonic time in microseconds (never decreases, unaffected by clock changes)."""
-    cdef i64 result = c_time_monotonic_us()
+    cdef i64 result
+    with nogil:
+        result = c_time_monotonic_us()
     if result == -1:
         raise RuntimeError("Failed to get monotonic time")
     return result
 
 cpdef i64 time_monotonic_ns():
     """Returns monotonic time in nanoseconds (never decreases, unaffected by clock changes)."""
-    cdef i64 result = c_time_monotonic_ns()
+    cdef i64 result
+    with nogil:
+        result = c_time_monotonic_ns()
     if result == -1:
         raise RuntimeError("Failed to get monotonic time")
     return result
@@ -91,17 +105,13 @@ cpdef str time_iso8601(double timestamp = 0.0):
     Returns:
         str: The formatted timestamp as 'YYYY-MM-DDTHH:MM:SS.fffZ'.
     """
-    cdef char* c_result
-    cdef Py_ssize_t c_result_len
-    cdef str result
-
-    c_result = c_time_iso8601(timestamp)
-    if c_result is NULL:
-        raise MemoryError("Failed to allocate memory for timestamp formatting")
+    cdef char buf[64]
+    cdef int ret
     
-    try:
-        c_result_len = <Py_ssize_t>strlen(c_result)
-        result = <str>PyUnicode_DecodeASCII(c_result, c_result_len, NULL)
-        return result
-    finally:
-        c_free_string(c_result)
+    with nogil:
+        ret = c_time_iso8601(timestamp, buf, 64)
+    
+    if ret != 0:
+        raise RuntimeError("Failed to format timestamp")
+    
+    return buf.decode('ascii')

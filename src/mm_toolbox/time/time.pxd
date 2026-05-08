@@ -1,4 +1,5 @@
 from libc.stdint cimport int64_t as i64
+from libc.stddef cimport size_t
 
 cpdef i64 time_s()
 cpdef i64 time_ms()

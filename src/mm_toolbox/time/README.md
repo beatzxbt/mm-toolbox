@@ -9,6 +9,8 @@ High-resolution time helpers and ISO-8601 conversions.
   monotonic time for duration measurement.
 - `iso8601_to_unix(timestamp)`: parse ISO-8601 string to unix seconds.
 - `time_iso8601(timestamp=0.0)`: format unix seconds to ISO-8601 (uses now if 0).
+  Note: `0.0` is treated as "current time" for backward compatibility.
+  To format the Unix epoch, use a small non-zero value like `1e-9`.
 
 ## Basic usage
 
