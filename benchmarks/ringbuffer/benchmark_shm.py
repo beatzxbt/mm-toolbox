@@ -61,23 +61,20 @@ def latency_benchmark_insert(
     path: str,
 ) -> np.ndarray:
     """Benchmark insert latency (producer only, no consumer pressure)."""
-    producer = SharedBytesRingBufferProducer(
-        path, capacity_bytes, create=True, unlink_on_close=True
-    )
+    required_capacity = max(capacity_bytes, num_iterations * (8 + payload_size))
     payload = b"x" * payload_size
     latencies = np.zeros(num_iterations, dtype=np.int64)
 
-    for _ in range(min(1000, num_iterations // 10)):
-        producer.insert(payload)
+    with SharedBytesRingBufferProducer(
+        path, required_capacity, create=True, unlink_on_close=True
+    ) as producer:
+        for _ in range(min(1000, num_iterations // 10)):
+            producer.insert(payload)
 
-    producer = SharedBytesRingBufferProducer(
-        path, capacity_bytes, create=True, unlink_on_close=True
-    )
-
-    for i in range(num_iterations):
-        start = time.perf_counter_ns()
-        producer.insert(payload)
-        latencies[i] = time.perf_counter_ns() - start
+        for i in range(num_iterations):
+            start = time.perf_counter_ns()
+            producer.insert(payload)
+            latencies[i] = time.perf_counter_ns() - start
 
     return latencies
 
@@ -89,21 +86,21 @@ def latency_benchmark_consume(
     path: str,
 ) -> np.ndarray:
     """Benchmark consume latency (pre-filled buffer)."""
-    producer = SharedBytesRingBufferProducer(
-        path, capacity_bytes, create=True, unlink_on_close=True
-    )
+    required_capacity = max(capacity_bytes, num_iterations * (8 + payload_size))
     payload = b"x" * payload_size
 
-    for _ in range(num_iterations):
-        producer.insert(payload)
+    with SharedBytesRingBufferProducer(
+        path, required_capacity, create=True, unlink_on_close=True
+    ) as producer:
+        for _ in range(num_iterations):
+            producer.insert(payload)
 
-    consumer = SharedBytesRingBufferConsumer(path)
-    latencies = np.zeros(num_iterations, dtype=np.int64)
-
-    for i in range(num_iterations):
-        start = time.perf_counter_ns()
-        consumer.consume()
-        latencies[i] = time.perf_counter_ns() - start
+        with SharedBytesRingBufferConsumer(path) as consumer:
+            latencies = np.zeros(num_iterations, dtype=np.int64)
+            for i in range(num_iterations):
+                start = time.perf_counter_ns()
+                consumer.consume()
+                latencies[i] = time.perf_counter_ns() - start
 
     return latencies
 
@@ -117,24 +114,28 @@ def _producer_process(
     barrier: multiprocessing.Barrier,
 ) -> None:
     """Producer process for throughput benchmark."""
-    producer = SharedBytesRingBufferProducer(
-        path, capacity_bytes, create=True, unlink_on_close=False
-    )
     payload = b"x" * payload_size
 
-    barrier.wait()
-    time.sleep(0.05)
+    with SharedBytesRingBufferProducer(
+        path, capacity_bytes, create=True, unlink_on_close=False
+    ) as producer:
+        barrier.wait()
 
-    start_ns = time.perf_counter_ns()
-    end_time_ns = start_ns + int(duration_sec * 1e9)
-    count = 0
+        start_ns = time.perf_counter_ns()
+        end_time_ns = start_ns + int(duration_sec * 1e9)
+        count = 0
 
-    while time.perf_counter_ns() < end_time_ns:
-        producer.insert(payload)
-        count += 1
+        while time.perf_counter_ns() < end_time_ns:
+            producer.insert(payload)
+            count += 1
 
-    actual_end_ns = time.perf_counter_ns()
-    result_queue.put((actual_end_ns - start_ns, count))
+        actual_end_ns = time.perf_counter_ns()
+        result_queue.put(("producer", actual_end_ns - start_ns, count))
+
+        # Keep inserting briefly so a blocked consumer can unblock
+        extra_end = time.perf_counter_ns() + int(0.05 * 1e9)
+        while time.perf_counter_ns() < extra_end:
+            producer.insert(payload)
 
 
 def _consumer_process(
@@ -147,22 +148,17 @@ def _consumer_process(
     """Consumer process for throughput benchmark."""
     barrier.wait()
 
-    consumer = SharedBytesRingBufferConsumer(path)
+    with SharedBytesRingBufferConsumer(path) as consumer:
+        start_ns = time.perf_counter_ns()
+        end_time_ns = start_ns + int(duration_sec * 1e9)
+        count = 0
 
-    start_ns = time.perf_counter_ns()
-    end_time_ns = start_ns + int(duration_sec * 1e9)
-    count = 0
-
-    while time.perf_counter_ns() < end_time_ns:
-        msg = consumer.peekleft()
-        if msg is not None:
+        while time.perf_counter_ns() < end_time_ns:
             consumer.consume()
             count += 1
-        else:
-            time.sleep(0.00001)
 
-    actual_end_ns = time.perf_counter_ns()
-    result_queue.put((actual_end_ns - start_ns, count))
+        actual_end_ns = time.perf_counter_ns()
+        result_queue.put(("consumer", actual_end_ns - start_ns, count))
 
 
 def throughput_benchmark(
@@ -184,14 +180,27 @@ def throughput_benchmark(
         args=(path, capacity_bytes, duration_sec, result_queue, barrier),
     )
 
-    cons_proc.start()
     prod_proc.start()
+    cons_proc.start()
 
-    prod_proc.join()
-    cons_proc.join()
+    try:
+        prod_proc.join(timeout=duration_sec + 5)
+        cons_proc.join(timeout=duration_sec + 5)
+    finally:
+        if prod_proc.is_alive():
+            prod_proc.terminate()
+            prod_proc.join(timeout=1)
+        if cons_proc.is_alive():
+            cons_proc.terminate()
+            cons_proc.join(timeout=1)
 
-    prod_ns, prod_count = result_queue.get()
-    cons_ns, cons_count = result_queue.get()
+    results = {}
+    for _ in range(2):
+        tag, duration_ns, count = result_queue.get()
+        results[tag] = (duration_ns, count)
+
+    prod_ns, prod_count = results["producer"]
+    cons_ns, cons_count = results["consumer"]
 
     return prod_ns, cons_ns, prod_count, cons_count
 
@@ -287,6 +296,11 @@ class SHMRingBufferBenchmark(BenchmarkRunner[SHMBenchmarkConfig]):
                         self.config.throughput_duration_sec,
                         tp_path,
                     )
+                    if prod_count != cons_count:
+                        print(
+                            f"  Warning: producer sent {prod_count:,} messages but "
+                            f"consumer received {cons_count:,} (drops occurred)"
+                        )
                     self._record_throughput_sample(
                         f"throughput_producer(payload={payload_size})",
                         payload_size,
