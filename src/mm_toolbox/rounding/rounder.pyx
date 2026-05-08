@@ -1,19 +1,31 @@
 import msgspec
 import numpy as np
 cimport numpy as cnp
-from decimal import Decimal
 from numpy cimport (
     ndarray as cndarray,
     PyArray_EMPTY as cPyArray_EMPTY,
 )
-from libc.math cimport ceil, floor, pow, round as c_round
+from libc.math cimport ceil, floor, modf, pow, round as c_round
 
 
-cdef inline double _rounding_factor(double size):
-    cdef int exponent = Decimal(str(size)).as_tuple().exponent
-    if exponent >= 0:
+cdef inline double _rounding_factor(double size) nogil:
+    cdef double int_part, frac_part
+    cdef int count = 0
+    cdef double s = size if size > 0 else -size
+
+    if s >= 1.0:
         return 1.0
-    return pow(10.0, -exponent)
+
+    while count < 20:
+        frac_part = modf(s, &int_part)
+        if frac_part < 1e-12:
+            break
+        s *= 10.0
+        count += 1
+
+    if count == 0:
+        return 1.0
+    return pow(10.0, count)
 
 class RounderConfig(msgspec.Struct):
     tick_size: float
