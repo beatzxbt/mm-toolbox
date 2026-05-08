@@ -14,6 +14,8 @@ class FileLogHandler(BaseLogHandler):
         Args:
             filepath (str): Path to the text file for appending logs.
                 Must end with ".txt".
+            create (bool): If True, create the file and parent directories
+                if they do not exist. Defaults to False.
 
         Raises:
             ValueError: If the provided filepath does not end with ".txt".
@@ -27,20 +29,43 @@ class FileLogHandler(BaseLogHandler):
                 f"{filepath}"
             )
 
-        # Check if file exists and create it if needed.
-        if create:
-            directory = os.path.dirname(filepath)
+        self.filepath = filepath
+        self._create = create
+        self._file = None
+
+    def open(self) -> None:
+        """Open the file for appending. Called by Logger."""
+        super().open()
+
+        if self._create:
+            directory = os.path.dirname(self.filepath)
             if directory and not os.path.exists(directory):
                 os.makedirs(directory, exist_ok=True)
-            if not os.path.exists(filepath):
-                with open(filepath, "w"):
-                    pass  # Create empty file
-        self.filepath = filepath
+            if not os.path.exists(self.filepath):
+                with open(self.filepath, "w"):
+                    pass
 
-    async def push(self, buffer) -> None:
-        # This isnt really async, but to keep dependencies low and
-        # keep the interface consistent, we'll keep it as is.
-        with open(self.filepath, "a") as file:
-            combined_logs = "\n".join(buffer) + "\n"
-            file.write(combined_logs)
-            file.flush()
+        self._file = open(self.filepath, "a")
+
+    def push(self, buffer: list[str]) -> None:
+        """Append buffered messages to the file.
+
+        Args:
+            buffer (list[str]): List of formatted log messages.
+
+        """
+        if self._file is None:
+            return
+        self._file.write("\n".join(buffer) + "\n")
+        self._file.flush()
+
+    def close(self) -> None:
+        """Close the file handle."""
+        if self._file is not None:
+            try:
+                self._file.flush()
+                self._file.close()
+            except Exception:
+                pass
+            self._file = None
+        super().close()

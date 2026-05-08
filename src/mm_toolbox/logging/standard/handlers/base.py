@@ -9,11 +9,9 @@ from typing import Callable
 import aiohttp
 import msgspec
 
-from mm_toolbox.logging.standard.config import LoggerConfig
-
 
 class BaseLogHandler(ABC):
-    """Abstract base class for log handlers, defining how log messages.
+    """Abstract base class for log handlers, defining how log messages
 
     should be pushed to their respective destinations.
     """
@@ -21,9 +19,8 @@ class BaseLogHandler(ABC):
     def __init__(self):
         self._json_encode = None
         self._http_session = None
-        self._ev_loop = None
-        self._primary_config = None
         self._on_error: Callable[[BaseException, str], None] | None = None
+        self._is_open = False
 
     @property
     def json_encode(self):
@@ -38,27 +35,6 @@ class BaseLogHandler(ABC):
         if self._http_session is None:
             self._http_session = aiohttp.ClientSession()
         return self._http_session
-
-    @property
-    def ev_loop(self):
-        """Lazily initialize the event loop."""
-        if self._ev_loop is None:
-            try:
-                self._ev_loop = asyncio.get_event_loop()
-            except RuntimeError:
-                # If there's no event loop in the current context, create one
-                self._ev_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(self._ev_loop)
-        return self._ev_loop
-
-    @property
-    def primary_config(self):
-        """Get the primary config."""
-        return self._primary_config
-
-    def add_primary_config(self, config: LoggerConfig):
-        """Add the primary configuration to the handler."""
-        self._primary_config = config
 
     def set_error_handler(
         self, handler: Callable[[BaseException, str], None] | None
@@ -89,34 +65,25 @@ class BaseLogHandler(ABC):
             "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
         )
 
-    def __del__(self):
-        """Clean up resources when the handler is garbage collected."""
+    def open(self) -> None:
+        """Called by Logger when handler is attached. Override for setup."""
+        self._is_open = True
+
+    def close(self) -> None:
+        """Close any async resources owned by the handler."""
         if self._http_session is not None and not self._http_session.closed:
             try:
-                if self._ev_loop is None or self._ev_loop.is_closed():
-                    loop = asyncio.new_event_loop()
+                loop = asyncio.new_event_loop()
+                try:
                     loop.run_until_complete(self._http_session.close())
+                finally:
                     loop.close()
-                else:
-                    if asyncio.get_event_loop_policy().get_event_loop().is_running():
-                        asyncio.create_task(self._http_session.close())
-                    else:
-                        self._ev_loop.run_until_complete(self._http_session.close())
             except Exception:
-                # Suppress exceptions during cleanup
                 pass
-
-    async def aclose(self) -> None:
-        """Close any async resources owned by the handler."""
-        try:
-            if self._http_session is not None and not self._http_session.closed:
-                await self._http_session.close()
-        except Exception:
-            # Never raise from a logger handler close
-            pass
+        self._is_open = False
 
     @abstractmethod
-    async def push(self, buffer: list[str]) -> None:
+    def push(self, buffer: list[str]) -> None:
         """Flushes the given buffer of log entries in some way.
 
         Args:

@@ -20,35 +20,79 @@ class TelegramLogHandler(BaseLogHandler):
         self.chat_id = chat_id
         self.url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         self.headers = {"Content-Type": "application/json"}
-        self.payload = {
-            "chat_id": self.chat_id,
-            "text": "",
-            "disable_web_page_preview": True,
-        }
 
-    async def push(self, buffer):
-        try:
-            tasks = [self._post(log_msg) for log_msg in buffer]
-        except Exception as e:
-            self._handle_exception(e, "push")
-            return
+    def push(self, buffer: list[str]) -> None:
+        """Batch messages into chunks and send to Telegram.
+
+        Args:
+            buffer (list[str]): List of formatted log messages.
+
+        """
+        chunks = self._chunk_messages(buffer, max_chars=4096)
+        asyncio.run(self._push_chunks(chunks))
+
+    def _chunk_messages(self, messages: list[str], max_chars: int) -> list[str]:
+        """Group messages into chunks that stay under max_chars.
+
+        Args:
+            messages (list[str]): Individual log messages.
+            max_chars (int): Maximum characters per chunk.
+
+        Returns:
+            list[str]: List of chunk strings.
+
+        """
+        chunks: list[str] = []
+        current: list[str] = []
+        current_len = 0
+
+        for msg in messages:
+            msg_len = len(msg)
+            if current and current_len + 1 + msg_len > max_chars:
+                chunks.append("\n".join(current))
+                current = [msg]
+                current_len = msg_len
+            else:
+                if current:
+                    current_len += 1 + msg_len
+                else:
+                    current_len = msg_len
+                current.append(msg)
+
+        if current:
+            chunks.append("\n".join(current))
+
+        return chunks
+
+    async def _push_chunks(self, chunks: list[str]) -> None:
+        """Send chunks concurrently via HTTP.
+
+        Args:
+            chunks (list[str]): Pre-batched message chunks.
+
+        """
+        tasks = [self._post(chunk) for chunk in chunks]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for res in results:
             if isinstance(res, Exception):
                 self._handle_exception(res, "push")
 
-    async def _post(self, log_msg: str) -> None:
-        """Send a single log message to Telegram.
+    async def _post(self, text: str) -> None:
+        """Send a single chunk to Telegram.
 
         Args:
-            log_msg (str): Formatted log message content.
+            text (str): Formatted log message content.
 
         """
-        payload = dict(self.payload)
-        payload["text"] = log_msg
+        payload = {
+            "chat_id": self.chat_id,
+            "text": text,
+            "disable_web_page_preview": True,
+        }
         resp = await self.http_session.post(
             url=self.url,
             headers=self.headers,
             data=self.json_encode(payload),
         )
         await resp.read()
+        resp.raise_for_status()
