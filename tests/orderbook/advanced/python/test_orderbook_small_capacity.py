@@ -28,10 +28,10 @@ from tests.orderbook.advanced.conftest import (
 class TestMinimumCapacityEnforcement:
     """Test that minimum orderbook size of 16 levels is enforced."""
 
-    @pytest.mark.parametrize("invalid_size", [0, 1, 2, 4, 8, 16, 32, 63])
+    @pytest.mark.parametrize("invalid_size", [0, 1, 2, 3])
     def test_reject_sizes_below_minimum(self, invalid_size: int):
-        """Orderbook creation fails for sizes below 16."""
-        with pytest.raises(ValueError, match="expected >=64"):
+        """Orderbook creation fails for sizes below 4."""
+        with pytest.raises(ValueError, match="expected >=4"):
             AdvancedOrderbook(
                 tick_size=TICK_SIZE,
                 lot_size=LOT_SIZE,
@@ -41,11 +41,11 @@ class TestMinimumCapacityEnforcement:
             )
 
     def test_accept_minimum_size(self):
-        """Orderbook creation succeeds at minimum size of 16."""
+        """Orderbook creation succeeds at minimum size of 4."""
         book = AdvancedOrderbook(
             tick_size=TICK_SIZE,
             lot_size=LOT_SIZE,
-            num_levels=64,
+            num_levels=4,
             delta_sortedness=PyOrderbookSortedness.UNKNOWN,
             snapshot_sortedness=PyOrderbookSortedness.UNKNOWN,
         )

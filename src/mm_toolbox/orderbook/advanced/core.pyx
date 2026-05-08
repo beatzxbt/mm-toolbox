@@ -45,8 +45,8 @@ cdef class CoreAdvancedOrderbook:
             raise ValueError(f"Invalid tick_size; expected >0 but got {tick_size}")
         if lot_size <= 0.0:
             raise ValueError(f"Invalid lot_size; expected >0 but got {lot_size}")
-        if num_levels < 64:
-            raise ValueError(f"Invalid num_levels; expected >=64 but got {num_levels}")
+        if num_levels < 4:
+            raise ValueError(f"Invalid num_levels; expected >=4 but got {num_levels}")
         self._tick_size = tick_size
         self._lot_size = lot_size
         self._tick_size_recip = 1.0 / tick_size
@@ -406,6 +406,8 @@ cdef class CoreAdvancedOrderbook:
                     break
                 while ask_idx < ask_count and asks_data.levels[ask_idx].ticks < ask_level.ticks:
                     ask_idx += 1
+                if ask_idx >= asks_data.max_levels:
+                    break
                 if ask_idx < ask_count and asks_data.levels[ask_idx].ticks == ask_level.ticks:
                     if ask_level.lots == 0:
                         self._asks.roll_left(ask_idx)
@@ -505,6 +507,8 @@ cdef class CoreAdvancedOrderbook:
                 break
             while bid_idx < bid_count and bids_data.levels[bid_idx].ticks > bid_level.ticks:
                 bid_idx += 1
+            if bid_idx >= bids_data.max_levels:
+                break
             if bid_idx < bid_count and bids_data.levels[bid_idx].ticks == bid_level.ticks:
                 if bid_level.lots == 0:
                     self._bids.roll_left(bid_idx)
