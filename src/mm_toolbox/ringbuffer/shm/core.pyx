@@ -5,9 +5,12 @@
 
 """SPSC shared-memory bytes ring buffer."""
 
+import ctypes
 import os
-import time
 from libc.stdint cimport uint64_t as u64
+
+_libc = ctypes.CDLL(None)
+_sched_yield = _libc.sched_yield
 from libc.string cimport memcpy
 from libc.stddef cimport size_t
 from libc.errno cimport errno
@@ -124,14 +127,14 @@ cdef class _SharedBytesRing:
         fd = open(path_b, O_CREAT | O_RDWR, 0o600)
         if fd < 0:
             raise OSError(errno, "open failed for shared ring")
-        if ftruncate(fd, <long>total_len) != 0:
+        if ftruncate(fd, <long long>total_len) != 0:
             close(fd)
             raise OSError(errno, "ftruncate failed for shared ring")
+        os.fsync(fd)
         base = mmap(NULL, total_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)
         if <long>base == -1:
             close(fd)
             try:
-                import os
                 os.unlink(path_b)
             except Exception:
                 pass
@@ -241,10 +244,7 @@ cdef class _SharedBytesRing:
             self._fd = -1
 
     def __dealloc__(self):
-        try:
-            self.close()
-        except Exception:
-            pass
+        self._close_map()
 
     cpdef void close(self):
         self._close_map()
@@ -273,14 +273,14 @@ cdef class _SharedBytesRing:
         cdef u64 ts
         with nogil:
             ts = atomic_load_acquire(&self._hdr.latest_insert_time_ns)
-        return <int>ts
+        return ts
 
     @property
     def latest_consume_time_ns(self) -> int:
         cdef u64 ts
         with nogil:
             ts = atomic_load_acquire(&self._hdr.latest_consume_time_ns)
-        return <int>ts
+        return ts
 
 
 cdef class SharedBytesRingBufferProducer(_SharedBytesRing):
@@ -334,7 +334,7 @@ cdef class SharedBytesRingBufferProducer(_SharedBytesRing):
         dropped_pos = read_pos
         while True:
             msg_len = read_u64_le(self._data, dropped_pos & mask, mask)
-            if msg_len > capacity or (dropped_pos + 8 + msg_len) < dropped_pos:
+            if msg_len > capacity or (8 + msg_len) > capacity:
                 return False
             dropped_pos += 8 + msg_len
             dropped_msgs[0] += 1
@@ -410,10 +410,10 @@ cdef class SharedBytesRingBufferProducer(_SharedBytesRing):
         return success == 1
 
     cpdef bint insert_batch(self, list[bytes] items):
-        """Insert multiple items with one commit.
+        """Insert multiple items with a single commit of write_pos.
 
         Args:
-            items: List of bytes payloads to insert atomically.
+            items: List of bytes payloads to insert.
 
         Returns:
             True if all items inserted, False if total size exceeds capacity.
@@ -462,15 +462,15 @@ cdef class SharedBytesRingBufferProducer(_SharedBytesRing):
         cdef:
             Py_ssize_t i, n = len(items)
             bytes it
-            Py_ssize_t alloc_len
             u64 total = 0
             u64 L64
             u64 capacity = self._capacity
-            bytearray buf
-            unsigned char* p
+            u64 mask = self._mask
+            u64 write_pos
+            u64 dropped = 0
+            u64 now_ns
             size_t off = 0
             Py_ssize_t L
-            u64 py_ssize_max = <u64>((<size_t>-1) >> 1)
         if n == 0:
             return True
         if capacity <= 8:
@@ -487,22 +487,32 @@ cdef class SharedBytesRingBufferProducer(_SharedBytesRing):
             return True
         if total > capacity - 8:
             return False
-        if total > py_ssize_max:
+        if not self._reserve(8 + total, &dropped):
             return False
-        alloc_len = <Py_ssize_t>total
-        buf = bytearray(alloc_len)
-        p = <unsigned char*>buf
+        write_pos = self._cached_write
+        # Write 8-byte header with total packed size
+        write_u64_le(self._data, write_pos & mask, mask, total)
+        write_pos += 8
+        # Write each item with 4-byte little-endian length prefix
         for i in range(n):
             it = items[i]
             L = len(it)
-            p[off + 0] = <unsigned char>(L & 0xFF)
-            p[off + 1] = <unsigned char>((L >> 8) & 0xFF)
-            p[off + 2] = <unsigned char>((L >> 16) & 0xFF)
-            p[off + 3] = <unsigned char>((L >> 24) & 0xFF)
-            off += 4
-            memcpy(p + off, <const unsigned char*>it, <size_t>L)
-            off += <size_t>L
-        return self.insert(bytes(buf))
+            self._data[(write_pos + 0) & mask] = <unsigned char>(L & 0xFF)
+            self._data[(write_pos + 1) & mask] = <unsigned char>((L >> 8) & 0xFF)
+            self._data[(write_pos + 2) & mask] = <unsigned char>((L >> 16) & 0xFF)
+            self._data[(write_pos + 3) & mask] = <unsigned char>((L >> 24) & 0xFF)
+            write_pos += 4
+            copy_into_ring(self._data, write_pos, mask, <const unsigned char*>it, <size_t>L, capacity)
+            write_pos += <u64>L
+        with nogil:
+            now_ns = <u64>c_time_monotonic_ns()
+            atomic_store_release(&self._hdr.write_pos, write_pos)
+            atomic_add(&self._hdr.msg_count, 1)
+            atomic_store_release(&self._hdr.latest_insert_time_ns, now_ns)
+        self._cached_write = write_pos
+        self._prod_ctx.cached_read = self._cached_read
+        self._prod_ctx.cached_write = write_pos
+        return True
 
 
 cdef class SharedBytesRingBufferConsumer(_SharedBytesRing):
@@ -562,7 +572,7 @@ cdef class SharedBytesRingBufferConsumer(_SharedBytesRing):
                 spin_count += 1
                 if spin_count < self._spin_wait:
                     continue
-                time.sleep(0.0001)
+                _sched_yield()
                 spin_count = 0
                 continue
             # Double-check read position hasn't changed
@@ -607,29 +617,33 @@ cdef class SharedBytesRingBufferConsumer(_SharedBytesRing):
 
     cpdef object peekright(self):
         """Peek at the most recently inserted item; returns None if empty."""
-        cdef u64 count
         cdef u64 w
-        cdef u64 last_len
-        cdef u64 total
-        cdef u64 start
+        cdef u64 r
+        cdef u64 msg_len
+        cdef u64 pos
+        cdef u64 next_pos
         cdef u64 mask = self._mask
         cdef u64 cap = self._capacity
-        with nogil:
-            count = atomic_load_acquire(&self._hdr.msg_count)
-        if count == 0:
-            return None
+        cdef bytes out
         with nogil:
             w = atomic_load_acquire(&self._hdr.write_pos)
-        if w < 8:
+            r = atomic_load_acquire(&self._hdr.read_pos)
+        if w - r < 8:
             return None
-        last_len = read_u64_le(self._data, (w - 8) & mask, mask)
-        if last_len > cap:
-            return None
-        total = 8 + last_len
-        start = w - total
-        cdef bytes out = bytes(<Py_ssize_t>last_len)
-        copy_from_ring(<unsigned char*>out, self._data, start + 8, mask, <size_t>last_len, cap)
-        return out
+        pos = r
+        while pos < w:
+            msg_len = read_u64_le(self._data, pos & mask, mask)
+            if msg_len > cap or 8 + msg_len > cap:
+                return None
+            next_pos = pos + 8 + msg_len
+            if next_pos > w:
+                return None
+            if next_pos == w:
+                out = bytes(<Py_ssize_t>msg_len)
+                copy_from_ring(<unsigned char*>out, self._data, pos + 8, mask, <size_t>msg_len, cap)
+                return out
+            pos = next_pos
+        return None
 
     cpdef list consume_all(self):
         """Drain all items currently available without blocking.

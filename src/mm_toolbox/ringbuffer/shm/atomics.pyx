@@ -25,9 +25,9 @@ cdef void atomic_store_release(u64* p, u64 v) nogil:
 
 cdef u64 atomic_add(u64* p, u64 delta) nogil:
     """Add delta and return the new value."""
-    return <u64>__atomic_add_fetch(<unsigned long long*>p, <unsigned long long>delta, _ATOMIC_ACQ_REL)
+    return <u64>__atomic_add_fetch(<unsigned long long*>p, <unsigned long long>delta, _ATOMIC_RELAXED)
 
 
 cdef u64 atomic_sub(u64* p, u64 delta) nogil:
     """Subtract delta and return the new value."""
-    return <u64>__atomic_sub_fetch(<unsigned long long*>p, <unsigned long long>delta, _ATOMIC_ACQ_REL)
+    return <u64>__atomic_sub_fetch(<unsigned long long*>p, <unsigned long long>delta, _ATOMIC_RELAXED)

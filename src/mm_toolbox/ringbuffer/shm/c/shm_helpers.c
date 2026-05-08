@@ -12,22 +12,8 @@ void shm_write_u64_le(unsigned char* base, uint64_t idx, uint64_t mask, uint64_t
     uint64_t pos = idx & mask;
     uint64_t capacity = mask + 1;
 
-    /* Fast path: no wrap and aligned */
     if (pos + 8 <= capacity) {
-        if ((pos & 7) == 0) {
-            /* 8-byte aligned - direct write */
-            *((uint64_t*)(base + pos)) = val;
-        } else {
-            /* Unaligned - byte-by-byte little-endian */
-            base[pos + 0] = (unsigned char)(val & 0xFF);
-            base[pos + 1] = (unsigned char)((val >> 8) & 0xFF);
-            base[pos + 2] = (unsigned char)((val >> 16) & 0xFF);
-            base[pos + 3] = (unsigned char)((val >> 24) & 0xFF);
-            base[pos + 4] = (unsigned char)((val >> 32) & 0xFF);
-            base[pos + 5] = (unsigned char)((val >> 40) & 0xFF);
-            base[pos + 6] = (unsigned char)((val >> 48) & 0xFF);
-            base[pos + 7] = (unsigned char)((val >> 56) & 0xFF);
-        }
+        memcpy(base + pos, &val, 8);
     } else {
         /* Wrap-around case - byte-by-byte with masking */
         base[(idx + 0) & mask] = (unsigned char)(val & 0xFF);
@@ -45,22 +31,10 @@ uint64_t shm_read_u64_le(const unsigned char* base, uint64_t idx, uint64_t mask)
     uint64_t pos = idx & mask;
     uint64_t capacity = mask + 1;
 
-    /* Fast path: no wrap and aligned */
     if (pos + 8 <= capacity) {
-        if ((pos & 7) == 0) {
-            /* 8-byte aligned - direct read */
-            return *((const uint64_t*)(base + pos));
-        } else {
-            /* Unaligned - byte-by-byte little-endian */
-            return ((uint64_t)base[pos + 0])
-                 | ((uint64_t)base[pos + 1] << 8)
-                 | ((uint64_t)base[pos + 2] << 16)
-                 | ((uint64_t)base[pos + 3] << 24)
-                 | ((uint64_t)base[pos + 4] << 32)
-                 | ((uint64_t)base[pos + 5] << 40)
-                 | ((uint64_t)base[pos + 6] << 48)
-                 | ((uint64_t)base[pos + 7] << 56);
-        }
+        uint64_t val;
+        memcpy(&val, base + pos, 8);
+        return val;
     } else {
         /* Wrap-around case - byte-by-byte with masking */
         return ((uint64_t)base[(idx + 0) & mask])

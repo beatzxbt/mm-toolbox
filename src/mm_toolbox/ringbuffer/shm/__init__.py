@@ -1,5 +1,7 @@
 """Shared-memory ring buffer helpers."""
 
+from __future__ import annotations
+
 from .config import ShmRingBufferConfig
 from .core import SharedBytesRingBufferConsumer, SharedBytesRingBufferProducer
 

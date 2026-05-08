@@ -8,30 +8,13 @@
 
 #include "shm_core.h"
 #include "shm_helpers.h"
-#include <time.h>
+#include "../../time/ctime_impl.h"
 
 /* Atomic operation memory orders (GCC builtin values) */
 #define ATOMIC_ACQUIRE 2
 #define ATOMIC_RELEASE 3
 #define ATOMIC_ACQ_REL 4
-
-/* Clock constant for monotonic timing */
-#ifndef CLOCK_MONOTONIC
-#define CLOCK_MONOTONIC 1
-#endif
-
-/**
- * Get monotonic time in nanoseconds using clock_gettime.
- *
- * @return Monotonic nanoseconds, or 0 on error.
- */
-static inline uint64_t get_monotonic_ns(void) {
-    struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) == -1) {
-        return 0;
-    }
-    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
-}
+#define ATOMIC_RELAXED 0
 
 int shm_producer_insert(ShmProducerContext* ctx, const unsigned char* payload,
                         size_t payload_len, uint64_t* dropped_out) {
@@ -66,7 +49,7 @@ int shm_producer_insert(ShmProducerContext* ctx, const unsigned char* payload,
             msg_len = shm_read_u64_le(ctx->data, dropped_pos & mask, mask);
 
             /* Sanity check for corruption */
-            if (msg_len > capacity || (dropped_pos + SHM_MSG_HEADER_SIZE + msg_len) < dropped_pos) {
+            if (msg_len > capacity || (SHM_MSG_HEADER_SIZE + msg_len) > capacity) {
                 return 0;
             }
 
@@ -78,7 +61,7 @@ int shm_producer_insert(ShmProducerContext* ctx, const unsigned char* payload,
                 /* Update read position atomically and decrement message count */
                 __atomic_store_n(&ctx->hdr->read_pos, dropped_pos, ATOMIC_RELEASE);
                 if (*dropped_out > 0) {
-                    __atomic_sub_fetch(&ctx->hdr->msg_count, *dropped_out, ATOMIC_ACQ_REL);
+                    __atomic_sub_fetch(&ctx->hdr->msg_count, *dropped_out, ATOMIC_RELAXED);
                 }
                 ctx->cached_read = dropped_pos;
                 break;
@@ -93,11 +76,11 @@ int shm_producer_insert(ShmProducerContext* ctx, const unsigned char* payload,
     write_pos += total_len;
 
     /* Get monotonic timestamp */
-    now_ns = get_monotonic_ns();
+    now_ns = c_time_monotonic_ns();
 
     /* Commit: update write_pos, msg_count, timestamp atomically */
     __atomic_store_n(&ctx->hdr->write_pos, write_pos, ATOMIC_RELEASE);
-    __atomic_add_fetch(&ctx->hdr->msg_count, 1, ATOMIC_ACQ_REL);
+    __atomic_add_fetch(&ctx->hdr->msg_count, 1, ATOMIC_RELAXED);
     __atomic_store_n(&ctx->hdr->latest_insert_time_ns, now_ns, ATOMIC_RELEASE);
 
     ctx->cached_write = write_pos;
@@ -141,11 +124,11 @@ int shm_consumer_consume(ShmConsumerContext* ctx, unsigned char* dst,
     read_pos += SHM_MSG_HEADER_SIZE + msg_len;
 
     /* Get monotonic timestamp */
-    now_ns = get_monotonic_ns();
+    now_ns = c_time_monotonic_ns();
 
     /* Commit: update read_pos, msg_count, timestamp atomically */
     __atomic_store_n(&ctx->hdr->read_pos, read_pos, ATOMIC_RELEASE);
-    __atomic_sub_fetch(&ctx->hdr->msg_count, 1, ATOMIC_ACQ_REL);
+    __atomic_sub_fetch(&ctx->hdr->msg_count, 1, ATOMIC_RELAXED);
     __atomic_store_n(&ctx->hdr->latest_consume_time_ns, now_ns, ATOMIC_RELEASE);
 
     return 1;
