@@ -17,9 +17,9 @@ from pathlib import Path
 import pytest
 
 from mm_toolbox.ringbuffer.shm import (
-    MpscSharedBytesRingBufferConsumer,
-    MpscSharedBytesRingBufferProducer,
-    MpscShmRingBufferConfig,
+    ShmMpscConsumer,
+    ShmMpscProducer,
+    ShmMpscConfig,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -52,9 +52,7 @@ def _mpsc_producer_proc(
         num_rings: Number of sub-rings used at creation time.
         msgs: List of byte messages to insert.
     """
-    prod = MpscSharedBytesRingBufferProducer(
-        path, capacity, num_rings=num_rings, create=False
-    )
+    prod = ShmMpscProducer(path, capacity, num_rings=num_rings, create=False)
     try:
         for msg in msgs:
             prod.insert(msg)
@@ -70,7 +68,7 @@ def _mpsc_consumer_proc(path: str, n: int, q: mp.Queue) -> None:
         n: Number of messages to consume.
         q: Multiprocessing queue used to return results.
     """
-    cons = MpscSharedBytesRingBufferConsumer(path, spin_wait=4096)
+    cons = ShmMpscConsumer(path, spin_wait=4096)
     try:
         got: list[bytes] = []
         for _ in range(n):
@@ -88,10 +86,10 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_basic_send_receive(self, shm_path: str) -> None:
         """Send one payload and confirm it round-trips correctly."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 16, num_rings=4, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             payload = b"hello-world"
             assert prod.insert(payload)
@@ -104,13 +102,11 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_multiple_producers_single_consumer(self, shm_path: str) -> None:
         """Two producers insert; single consumer receives both messages."""
-        prod1 = MpscSharedBytesRingBufferProducer(
+        prod1 = ShmMpscProducer(
             shm_path, 1 << 16, num_rings=4, create=True, unlink_on_close=False
         )
-        prod2 = MpscSharedBytesRingBufferProducer(
-            shm_path, 1 << 16, num_rings=4, create=False
-        )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        prod2 = ShmMpscProducer(shm_path, 1 << 16, num_rings=4, create=False)
+        cons = ShmMpscConsumer(shm_path)
         try:
             assert prod1.insert(b"from-prod1")
             assert prod2.insert(b"from-prod2")
@@ -125,10 +121,10 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_message_ordering_within_subring(self, shm_path: str) -> None:
         """With one ring, ordering is preserved like SPSC."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 14, num_rings=1, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             msgs = [f"m{i}".encode() for i in range(100)]
             for m in msgs:
@@ -141,10 +137,10 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_batch_and_drain(self, shm_path: str) -> None:
         """Insert a batch and drain in order on a single sub-ring."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 15, num_rings=1, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             msgs = [f"m{i}".encode() for i in range(1000)]
             assert prod.insert_batch(msgs)
@@ -156,10 +152,10 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_packed_roundtrip(self, shm_path: str) -> None:
         """Verify packed messages unpack correctly."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 14, num_rings=1, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             items = [b"a", b"bb", b"ccc", b"dddd"]
             assert prod.insert_packed(items)
@@ -173,10 +169,10 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_empty_payload_insert(self, shm_path: str) -> None:
         """Empty payload should insert and consume correctly."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             assert prod.insert(b"")
             got = cons.consume()
@@ -188,10 +184,10 @@ class TestMpscSharedBytesRingBuffer:
     def test_exact_capacity_message(self, shm_path: str) -> None:
         """Insert a message of exactly capacity - 8 bytes (the max)."""
         capacity = 1 << 12
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, capacity, num_rings=1, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             msg = b"x" * (capacity - 8)
             assert prod.insert(msg)
@@ -204,7 +200,7 @@ class TestMpscSharedBytesRingBuffer:
     def test_oversize_rejected(self, shm_path: str) -> None:
         """Reject inserts that exceed capacity."""
         capacity = 1 << 12
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, capacity, num_rings=1, create=True, unlink_on_close=True
         )
         try:
@@ -216,10 +212,10 @@ class TestMpscSharedBytesRingBuffer:
     def test_insert_overwrites_oldest(self, shm_path: str) -> None:
         """Ensure overwrites drop oldest items when capacity is exceeded."""
         capacity = 1 << 12
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, capacity, num_rings=1, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             msg = b"x" * (capacity // 8 - 8)
             total = 500
@@ -234,7 +230,7 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_insert_batch_empty_list(self, shm_path: str) -> None:
         """insert_batch with empty list returns True."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
         try:
@@ -244,7 +240,7 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_insert_packed_empty_list(self, shm_path: str) -> None:
         """insert_packed with empty list returns True."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
         try:
@@ -254,10 +250,10 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_consume_all_empty(self, shm_path: str) -> None:
         """consume_all on empty buffer returns empty list."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             assert cons.consume_all() == []
         finally:
@@ -266,10 +262,10 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_peekleft_empty_returns_none(self, shm_path: str) -> None:
         """peekleft on empty buffer returns None."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             assert cons.peekleft() is None
         finally:
@@ -278,10 +274,10 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_peekright_empty_returns_none(self, shm_path: str) -> None:
         """peekright on empty buffer returns None."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             assert cons.peekright() is None
         finally:
@@ -293,10 +289,10 @@ class TestMpscSharedBytesRingBuffer:
 
         Uses a single ring so ordering is deterministic.
         """
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=1, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             assert prod.insert(b"first")
             assert prod.insert(b"second")
@@ -312,10 +308,10 @@ class TestMpscSharedBytesRingBuffer:
 
         Uses a single ring so ordering is deterministic.
         """
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=1, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             assert prod.insert(b"first")
             assert prod.insert(b"second")
@@ -329,29 +325,29 @@ class TestMpscSharedBytesRingBuffer:
     # --- Config validation ---
 
     def test_config_validation_empty_path(self) -> None:
-        """MpscShmRingBufferConfig with empty path raises ValueError."""
+        """ShmMpscConfig with empty path raises ValueError."""
         with pytest.raises(ValueError):
-            MpscShmRingBufferConfig(path="", capacity_bytes=1024)
+            ShmMpscConfig(path="", capacity_bytes=1024)
 
     def test_config_validation_zero_capacity(self) -> None:
-        """MpscShmRingBufferConfig with zero capacity raises ValueError."""
+        """ShmMpscConfig with zero capacity raises ValueError."""
         with pytest.raises(ValueError):
-            MpscShmRingBufferConfig(path="/tmp/x", capacity_bytes=0)
+            ShmMpscConfig(path="/tmp/x", capacity_bytes=0)
 
     def test_config_validation_negative_num_rings(self) -> None:
-        """MpscShmRingBufferConfig with negative num_rings raises ValueError."""
+        """ShmMpscConfig with negative num_rings raises ValueError."""
         with pytest.raises(ValueError):
-            MpscShmRingBufferConfig(path="/tmp/x", capacity_bytes=1024, num_rings=-1)
+            ShmMpscConfig(path="/tmp/x", capacity_bytes=1024, num_rings=-1)
 
     def test_config_validation_zero_spin_wait(self) -> None:
-        """MpscShmRingBufferConfig with spin_wait=0 raises ValueError."""
+        """ShmMpscConfig with spin_wait=0 raises ValueError."""
         with pytest.raises(ValueError):
-            MpscShmRingBufferConfig(path="/tmp/x", capacity_bytes=1024, spin_wait=0)
+            ShmMpscConfig(path="/tmp/x", capacity_bytes=1024, spin_wait=0)
 
     def test_config_validation_unlink_without_create(self) -> None:
-        """MpscShmRingBufferConfig with unlink_on_close=True and create=False raises ValueError."""
+        """ShmMpscConfig with unlink_on_close=True and create=False raises ValueError."""
         with pytest.raises(ValueError):
-            MpscShmRingBufferConfig(
+            ShmMpscConfig(
                 path="/tmp/x",
                 capacity_bytes=1024,
                 create=False,
@@ -359,8 +355,8 @@ class TestMpscSharedBytesRingBuffer:
             )
 
     def test_config_default(self) -> None:
-        """MpscShmRingBufferConfig.default() returns valid config with expected defaults."""
-        cfg = MpscShmRingBufferConfig.default()
+        """ShmMpscConfig.default() returns valid config with expected defaults."""
+        cfg = ShmMpscConfig.default()
         assert cfg.path == "/tmp/shm_mpsc_ring.bin"
         assert cfg.capacity_bytes == 1 << 20
         assert cfg.num_rings == 0
@@ -370,7 +366,7 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_config_kwargs(self) -> None:
         """producer_kwargs and consumer_kwargs return correct dicts."""
-        cfg = MpscShmRingBufferConfig(
+        cfg = ShmMpscConfig(
             path="/tmp/x", capacity_bytes=2048, num_rings=2, spin_wait=512
         )
         pkw = cfg.producer_kwargs()
@@ -385,7 +381,7 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_num_rings_auto_detects(self, shm_path: str) -> None:
         """num_rings=0 auto-detects CPU count."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 16, num_rings=0, create=True, unlink_on_close=True
         )
         try:
@@ -398,10 +394,10 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_num_rings_one(self, shm_path: str) -> None:
         """num_rings=1 degrades to SPSC-like behavior."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 16, num_rings=1, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             assert prod.insert(b"solo")
             assert cons.consume() == b"solo"
@@ -413,7 +409,7 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_idempotent_close(self, shm_path: str) -> None:
         """Calling close twice should not crash."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
         prod.close()
@@ -422,7 +418,7 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_context_manager_producer(self, shm_path: str) -> None:
         """Use producer as a context manager and verify auto-close."""
-        with MpscSharedBytesRingBufferProducer(
+        with ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         ) as prod:
             assert prod.insert(b"ctx")
@@ -430,12 +426,10 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_context_manager_consumer(self, shm_path: str) -> None:
         """Use consumer as a context manager and verify auto-close."""
-        prod = MpscSharedBytesRingBufferProducer(
-            shm_path, 1 << 12, num_rings=2, create=True
-        )
+        prod = ShmMpscProducer(shm_path, 1 << 12, num_rings=2, create=True)
         try:
             prod.insert(b"ctx")
-            with MpscSharedBytesRingBufferConsumer(shm_path) as cons:
+            with ShmMpscConsumer(shm_path) as cons:
                 assert cons.consume() == b"ctx"
         finally:
             prod.close()
@@ -443,10 +437,10 @@ class TestMpscSharedBytesRingBuffer:
     def test_len_property(self, shm_path: str) -> None:
         """Verify len(producer) behavior across inserts, consumes, and overwrites."""
         capacity = 1 << 12
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, capacity, num_rings=1, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             assert len(prod) == 0
             assert prod.insert(b"a")
@@ -463,7 +457,7 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_unlink_on_close_false(self, shm_path: str) -> None:
         """Close producer with unlink_on_close=False; file still exists."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=False
         )
         prod.close()
@@ -475,20 +469,18 @@ class TestMpscSharedBytesRingBuffer:
     def test_invalid_path_oserror(self) -> None:
         """Invalid path raises OSError."""
         with pytest.raises(OSError):
-            MpscSharedBytesRingBufferProducer(
-                "/nonexistent/dir/file", 1 << 12, create=True
-            )
+            ShmMpscProducer("/nonexistent/dir/file", 1 << 12, create=True)
 
     def test_truncated_file_rejected(self, shm_path: str) -> None:
         """File smaller than 64 bytes is rejected on consumer attach."""
         with open(shm_path, "wb") as f:
             f.write(b"\x00" * 32)
         with pytest.raises(RuntimeError):
-            MpscSharedBytesRingBufferConsumer(shm_path)
+            ShmMpscConsumer(shm_path)
 
     def test_corrupted_header_rejected(self, shm_path: str) -> None:
         """Reject attaching to a ringbuffer with a corrupted header."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=False
         )
         prod.close()
@@ -497,23 +489,19 @@ class TestMpscSharedBytesRingBuffer:
                 f.seek(8)
                 f.write(struct.pack("Q", 0))
             with pytest.raises(RuntimeError):
-                MpscSharedBytesRingBufferConsumer(shm_path)
+                ShmMpscConsumer(shm_path)
         finally:
             if os.path.exists(shm_path):
                 os.unlink(shm_path)
 
     def test_create_false_attach(self, shm_path: str) -> None:
         """Create with create=True, then attach a second producer with create=False."""
-        prod1 = MpscSharedBytesRingBufferProducer(
-            shm_path, 1 << 12, num_rings=2, create=True
-        )
+        prod1 = ShmMpscProducer(shm_path, 1 << 12, num_rings=2, create=True)
         try:
-            prod2 = MpscSharedBytesRingBufferProducer(
-                shm_path, 1 << 12, num_rings=2, create=False
-            )
+            prod2 = ShmMpscProducer(shm_path, 1 << 12, num_rings=2, create=False)
             try:
                 assert prod2.insert(b"attached")
-                cons = MpscSharedBytesRingBufferConsumer(shm_path)
+                cons = ShmMpscConsumer(shm_path)
                 try:
                     assert cons.consume() == b"attached"
                 finally:
@@ -527,7 +515,7 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_capacity_bytes_zero_handled(self, shm_path: str) -> None:
         """capacity_bytes=0 uses pow2_at_least(1) and does not crash."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 0, num_rings=1, create=True, unlink_on_close=False
         )
         prod.close()
@@ -540,10 +528,10 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_timestamp_properties(self, shm_path: str) -> None:
         """Timestamps are non-zero and monotonically increase."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             assert prod.latest_insert_time_ns == 0
             assert prod.latest_consume_time_ns == 0
@@ -570,13 +558,11 @@ class TestMpscSharedBytesRingBuffer:
     def test_two_producers_in_threads(self, shm_path: str) -> None:
         """Two threads producing via separate instances, one thread consuming."""
         n = 500
-        prod1 = MpscSharedBytesRingBufferProducer(
+        prod1 = ShmMpscProducer(
             shm_path, 1 << 18, num_rings=4, create=True, unlink_on_close=False
         )
-        prod2 = MpscSharedBytesRingBufferProducer(
-            shm_path, 1 << 18, num_rings=4, create=False
-        )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        prod2 = ShmMpscProducer(shm_path, 1 << 18, num_rings=4, create=False)
+        cons = ShmMpscConsumer(shm_path)
         received: list[bytes] = []
 
         def p1() -> None:
@@ -613,10 +599,10 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_different_message_sizes(self, shm_path: str) -> None:
         """Producers with different message sizes."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 16, num_rings=4, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             msgs = [b"a", b"b" * 10, b"c" * 100, b"d" * 1000]
             for m in msgs:
@@ -632,9 +618,7 @@ class TestMpscSharedBytesRingBuffer:
         n_per_prod = 500
         num_prods = 4
         total = n_per_prod * num_prods
-        prod_init = MpscSharedBytesRingBufferProducer(
-            shm_path, 1 << 20, num_rings=4, create=True
-        )
+        prod_init = ShmMpscProducer(shm_path, 1 << 20, num_rings=4, create=True)
         prod_init.close()
 
         procs = []
@@ -647,7 +631,7 @@ class TestMpscSharedBytesRingBuffer:
             p.start()
             procs.append(p)
 
-        cons = MpscSharedBytesRingBufferConsumer(shm_path, spin_wait=4096)
+        cons = ShmMpscConsumer(shm_path, spin_wait=4096)
         try:
             received: list[bytes] = []
             for _ in range(total):
@@ -668,9 +652,7 @@ class TestMpscSharedBytesRingBuffer:
         n_per_prod = 1000
         num_prods = 8
         total = n_per_prod * num_prods
-        prod_init = MpscSharedBytesRingBufferProducer(
-            shm_path, 1 << 22, num_rings=8, create=True
-        )
+        prod_init = ShmMpscProducer(shm_path, 1 << 22, num_rings=8, create=True)
         prod_init.close()
 
         procs = []
@@ -687,7 +669,7 @@ class TestMpscSharedBytesRingBuffer:
             p.start()
             procs.append(p)
 
-        cons = MpscSharedBytesRingBufferConsumer(shm_path, spin_wait=4096)
+        cons = ShmMpscConsumer(shm_path, spin_wait=4096)
         try:
             received = 0
             for _ in range(total):
@@ -709,9 +691,7 @@ class TestMpscSharedBytesRingBuffer:
     def test_multiprocess_consumer_producers_main(self, shm_path: str) -> None:
         """Consumer in separate process, producers in main process."""
         n = 1000
-        prod = MpscSharedBytesRingBufferProducer(
-            shm_path, 1 << 20, num_rings=4, create=True
-        )
+        prod = ShmMpscProducer(shm_path, 1 << 20, num_rings=4, create=True)
         try:
             q: mp.Queue = mp.Queue()
             p = mp.Process(target=_mpsc_consumer_proc, args=(shm_path, n, q))
@@ -735,9 +715,7 @@ class TestMpscSharedBytesRingBuffer:
         n_per_prod = 250
         num_prods = 4
         total = n_per_prod * num_prods
-        prod_init = MpscSharedBytesRingBufferProducer(
-            shm_path, 1 << 20, num_rings=4, create=True
-        )
+        prod_init = ShmMpscProducer(shm_path, 1 << 20, num_rings=4, create=True)
         prod_init.close()
 
         procs = []
@@ -773,9 +751,7 @@ class TestMpscSharedBytesRingBuffer:
         """High-throughput test: 100K messages across 4 producers."""
         n = 100_000
         num_prods = 4
-        prod_init = MpscSharedBytesRingBufferProducer(
-            shm_path, 1 << 22, num_rings=4, create=True
-        )
+        prod_init = ShmMpscProducer(shm_path, 1 << 22, num_rings=4, create=True)
         prod_init.close()
 
         procs = []
@@ -788,7 +764,7 @@ class TestMpscSharedBytesRingBuffer:
             p.start()
             procs.append(p)
 
-        cons = MpscSharedBytesRingBufferConsumer(shm_path, spin_wait=4096)
+        cons = ShmMpscConsumer(shm_path, spin_wait=4096)
         try:
             received = 0
             for _ in range(n):
@@ -808,10 +784,10 @@ class TestMpscSharedBytesRingBuffer:
     def test_large_messages_16kb(self, shm_path: str) -> None:
         """Large message test: 16KB messages."""
         capacity = 1 << 16
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, capacity, num_rings=2, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             msg = b"x" * (16 * 1024)
             assert prod.insert(msg)
@@ -824,7 +800,7 @@ class TestMpscSharedBytesRingBuffer:
     def test_insert_batch_exceeds_capacity(self, shm_path: str) -> None:
         """Batch whose total size exceeds capacity returns False."""
         capacity = 1 << 8
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, capacity, num_rings=1, create=True, unlink_on_close=True
         )
         try:
@@ -835,7 +811,7 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_insert_packed_oversized_item(self, shm_path: str) -> None:
         """Item with len > 0xFFFFFFFF returns False."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 20, num_rings=2, create=True, unlink_on_close=True
         )
         try:
@@ -846,7 +822,7 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_consume_packed_corrupted(self, shm_path: str) -> None:
         """Corrupted length prefix inside packed message raises ValueError."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 14, num_rings=1, create=True, unlink_on_close=False
         )
         prod.insert_packed([b"a", b"bb"])
@@ -856,7 +832,7 @@ class TestMpscSharedBytesRingBuffer:
                 # Global header 64 bytes + sub header 64 bytes = 128 bytes offset
                 f.seek(128 + 8)
                 f.write(struct.pack("<I", 0x7FFFFFFF))
-            cons = MpscSharedBytesRingBufferConsumer(shm_path)
+            cons = ShmMpscConsumer(shm_path)
             try:
                 with pytest.raises(ValueError):
                     cons.consume_packed()
@@ -868,7 +844,7 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_spin_wait_small(self, shm_path: str) -> None:
         """Producer and consumer with spin_wait=1 work correctly."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path,
             1 << 12,
             num_rings=2,
@@ -876,7 +852,7 @@ class TestMpscSharedBytesRingBuffer:
             spin_wait=1,
             unlink_on_close=True,
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path, spin_wait=1)
+        cons = ShmMpscConsumer(shm_path, spin_wait=1)
         try:
             assert prod.insert(b"small")
             assert cons.consume() == b"small"
@@ -886,7 +862,7 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_spin_wait_large(self, shm_path: str) -> None:
         """Producer and consumer with spin_wait=65536 work correctly."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path,
             1 << 12,
             num_rings=2,
@@ -894,7 +870,7 @@ class TestMpscSharedBytesRingBuffer:
             spin_wait=65536,
             unlink_on_close=True,
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path, spin_wait=65536)
+        cons = ShmMpscConsumer(shm_path, spin_wait=65536)
         try:
             assert prod.insert(b"large")
             assert cons.consume() == b"large"
@@ -904,7 +880,7 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_mismatched_spin_wait(self, shm_path: str) -> None:
         """Producer and consumer with different spin_wait values interoperate."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path,
             1 << 12,
             num_rings=2,
@@ -912,7 +888,7 @@ class TestMpscSharedBytesRingBuffer:
             spin_wait=100,
             unlink_on_close=True,
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path, spin_wait=10000)
+        cons = ShmMpscConsumer(shm_path, spin_wait=10000)
         try:
             assert prod.insert(b"mismatch")
             assert cons.consume() == b"mismatch"
@@ -922,10 +898,10 @@ class TestMpscSharedBytesRingBuffer:
 
     def test_insert_char_roundtrip(self, shm_path: str) -> None:
         """insert_char(b'hello', 5) should round-trip through consume()."""
-        prod = MpscSharedBytesRingBufferProducer(
+        prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
-        cons = MpscSharedBytesRingBufferConsumer(shm_path)
+        cons = ShmMpscConsumer(shm_path)
         try:
             assert prod.insert_char(b"hello", 5)
             got = cons.consume()

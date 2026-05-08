@@ -38,8 +38,8 @@ except ModuleNotFoundError:
         BenchmarkRunner,
     )
 from mm_toolbox.ringbuffer.shm import (
-    MpscSharedBytesRingBufferConsumer,
-    MpscSharedBytesRingBufferProducer,
+    ShmMpscConsumer,
+    ShmMpscProducer,
 )
 
 
@@ -57,7 +57,9 @@ class MPSCSHMBenchmarkConfig(BaseBenchmarkConfig):
     run_scalability: bool = True
     run_fairness: bool = True
     throughput_producer_counts: list[int] = field(default_factory=lambda: [1, 2, 4, 8])
-    scalability_producer_counts: list[int] = field(default_factory=lambda: [1, 2, 4, 8, 16])
+    scalability_producer_counts: list[int] = field(
+        default_factory=lambda: [1, 2, 4, 8, 16]
+    )
 
 
 def latency_benchmark_insert(
@@ -72,7 +74,7 @@ def latency_benchmark_insert(
     single-producer behavior.
     """
     num_rings = 1
-    producer = MpscSharedBytesRingBufferProducer(
+    producer = ShmMpscProducer(
         path, capacity_bytes, num_rings=num_rings, create=True, unlink_on_close=True
     )
     payload = b"x" * payload_size
@@ -81,7 +83,7 @@ def latency_benchmark_insert(
     for _ in range(min(1000, num_iterations // 10)):
         producer.insert(payload)
 
-    producer = MpscSharedBytesRingBufferProducer(
+    producer = ShmMpscProducer(
         path, capacity_bytes, num_rings=num_rings, create=True, unlink_on_close=True
     )
 
@@ -105,7 +107,7 @@ def latency_benchmark_consume(
     messages are available for consumption.
     """
     num_rings = 1
-    producer = MpscSharedBytesRingBufferProducer(
+    producer = ShmMpscProducer(
         path, capacity_bytes, num_rings=num_rings, create=True, unlink_on_close=True
     )
     payload = b"x" * payload_size
@@ -113,7 +115,7 @@ def latency_benchmark_consume(
     for _ in range(num_iterations):
         producer.insert(payload)
 
-    consumer = MpscSharedBytesRingBufferConsumer(path)
+    consumer = ShmMpscConsumer(path)
     latencies = np.zeros(num_iterations, dtype=np.int64)
 
     for i in range(num_iterations):
@@ -135,7 +137,7 @@ def _producer_process(
     producer_id: int = 0,
 ) -> None:
     """Producer process for throughput benchmark."""
-    producer = MpscSharedBytesRingBufferProducer(
+    producer = ShmMpscProducer(
         path, capacity_bytes, num_rings=num_rings, create=False, unlink_on_close=False
     )
     payload = bytes([producer_id & 0xFF]) + b"x" * (payload_size - 1)
@@ -169,7 +171,7 @@ def _consumer_process(
     """Consumer process for throughput benchmark."""
     barrier.wait()
 
-    consumer = MpscSharedBytesRingBufferConsumer(path)
+    consumer = ShmMpscConsumer(path)
 
     start_ns = time.perf_counter_ns()
     end_time_ns = start_ns + int(duration_sec * 1e9)
@@ -204,7 +206,7 @@ def throughput_benchmark(
         Tuple of (consumer_ns, consumer_count, list of (producer_id, producer_ns, producer_count)).
     """
     # Create the ring in the main process so child processes can attach
-    creator = MpscSharedBytesRingBufferProducer(
+    creator = ShmMpscProducer(
         path, capacity_bytes, num_rings=num_rings, create=True, unlink_on_close=False
     )
     creator.close()
@@ -272,7 +274,7 @@ def fairness_benchmark(
                   list of (producer_id, producer_ns, producer_count)).
     """
     # Create the ring in the main process so child processes can attach
-    creator = MpscSharedBytesRingBufferProducer(
+    creator = ShmMpscProducer(
         path, capacity_bytes, num_rings=num_rings, create=True, unlink_on_close=False
     )
     creator.close()
@@ -478,12 +480,14 @@ class MPSCSHMRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
             self._cleanup_path(fair_path)
             payload_size = 128
             try:
-                cons_ns, cons_count, per_producer_counts, prod_results = fairness_benchmark(
-                    config.capacity_bytes,
-                    config.num_rings,
-                    payload_size,
-                    config.throughput_duration_sec,
-                    fair_path,
+                cons_ns, cons_count, per_producer_counts, prod_results = (
+                    fairness_benchmark(
+                        config.capacity_bytes,
+                        config.num_rings,
+                        payload_size,
+                        config.throughput_duration_sec,
+                        fair_path,
+                    )
                 )
                 total_prod_count = sum(c for _, _, c in prod_results)
                 self._record_throughput_sample(
@@ -637,8 +641,12 @@ def main() -> None:
         throughput_duration_sec=args.duration,
         run_latency=run_latency,
         run_throughput=run_throughput,
-        run_scalability=run_throughput and not args.skip_scalability and args.producers is None,
-        run_fairness=run_throughput and not args.skip_fairness and args.producers is None,
+        run_scalability=run_throughput
+        and not args.skip_scalability
+        and args.producers is None,
+        run_fairness=run_throughput
+        and not args.skip_fairness
+        and args.producers is None,
         throughput_producer_counts=throughput_counts,
         scalability_producer_counts=_parse_int_list(args.scalability_producer_counts),
     )

@@ -115,14 +115,48 @@ def get_ringbuffer_extensions():
             sources=["src/mm_toolbox/ringbuffer/bytes.pyx"],
             include_dirs=[np.get_include(), "src/mm_toolbox/ringbuffer", "src"],
         ),
-        # SHM ringbuffer (shared memory SPSC queue)
+        # SHM ringbuffer (shared memory SPSC/MPSC queues)
         get_extension(
-            name="mm_toolbox.ringbuffer.shm.core",
+            name="mm_toolbox.ringbuffer.shm._shm",
             sources=[
                 "src/mm_toolbox/time/ctime_impl.c",
                 "src/mm_toolbox/ringbuffer/shm/c/shm_helpers.c",
                 "src/mm_toolbox/ringbuffer/shm/c/shm_core.c",
-                "src/mm_toolbox/ringbuffer/shm/core.pyx",
+                "src/mm_toolbox/ringbuffer/shm/_shm.pyx",
+            ],
+            include_dirs=[
+                np.get_include(),
+                "src/mm_toolbox/ringbuffer/shm",
+                "src/mm_toolbox/ringbuffer/shm/c",
+                "src/mm_toolbox/ringbuffer",
+                "src/mm_toolbox/time",
+                "src",
+            ],
+        ),
+        get_extension(
+            name="mm_toolbox.ringbuffer.shm.spsc",
+            sources=[
+                "src/mm_toolbox/time/ctime_impl.c",
+                "src/mm_toolbox/ringbuffer/shm/c/shm_helpers.c",
+                "src/mm_toolbox/ringbuffer/shm/c/shm_core.c",
+                "src/mm_toolbox/ringbuffer/shm/spsc.pyx",
+            ],
+            include_dirs=[
+                np.get_include(),
+                "src/mm_toolbox/ringbuffer/shm",
+                "src/mm_toolbox/ringbuffer/shm/c",
+                "src/mm_toolbox/ringbuffer",
+                "src/mm_toolbox/time",
+                "src",
+            ],
+        ),
+        get_extension(
+            name="mm_toolbox.ringbuffer.shm.mpsc",
+            sources=[
+                "src/mm_toolbox/time/ctime_impl.c",
+                "src/mm_toolbox/ringbuffer/shm/c/shm_helpers.c",
+                "src/mm_toolbox/ringbuffer/shm/c/shm_core.c",
+                "src/mm_toolbox/ringbuffer/shm/mpsc.pyx",
             ],
             include_dirs=[
                 np.get_include(),

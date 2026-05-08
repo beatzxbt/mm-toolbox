@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-from .config import MpscShmRingBufferConfig, ShmRingBufferConfig
-from .core import (
-    MpscSharedBytesRingBufferConsumer,
-    MpscSharedBytesRingBufferProducer,
-    SharedBytesRingBufferConsumer,
-    SharedBytesRingBufferProducer,
-)
+from .config import ShmMpscConfig, ShmSpscConfig
+from .mpsc import ShmMpscConsumer, ShmMpscProducer
+from .spsc import ShmSpscConsumer, ShmSpscProducer
 
 __all__ = [
-    "SharedBytesRingBufferProducer",
-    "SharedBytesRingBufferConsumer",
-    "MpscSharedBytesRingBufferProducer",
-    "MpscSharedBytesRingBufferConsumer",
-    "ShmRingBufferConfig",
-    "MpscShmRingBufferConfig",
+    "ShmSpscProducer",
+    "ShmSpscConsumer",
+    "ShmSpscConfig",
+    "ShmMpscProducer",
+    "ShmMpscConsumer",
+    "ShmMpscConfig",
 ]

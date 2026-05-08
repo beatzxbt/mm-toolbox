@@ -3,7 +3,7 @@
 from msgspec import Struct
 
 
-class ShmRingBufferConfig(Struct):
+class ShmSpscConfig(Struct):
     """Configuration for shared-memory bytes ring buffer."""
 
     path: str
@@ -24,7 +24,7 @@ class ShmRingBufferConfig(Struct):
             raise ValueError("unlink_on_close requires create=True")
 
     @classmethod
-    def default(cls) -> "ShmRingBufferConfig":
+    def default(cls) -> "ShmSpscConfig":
         """Create a default shared-memory configuration."""
         return cls(
             path="/tmp/shm_ring.bin",
@@ -35,7 +35,7 @@ class ShmRingBufferConfig(Struct):
         )
 
     def producer_kwargs(self) -> dict[str, object]:
-        """Return kwargs suitable for SharedBytesRingBufferProducer."""
+        """Return kwargs suitable for ShmSpscProducer."""
         return {
             "path": self.path,
             "capacity_bytes": self.capacity_bytes,
@@ -45,14 +45,14 @@ class ShmRingBufferConfig(Struct):
         }
 
     def consumer_kwargs(self) -> dict[str, object]:
-        """Return kwargs suitable for SharedBytesRingBufferConsumer."""
+        """Return kwargs suitable for ShmSpscConsumer."""
         return {
             "path": self.path,
             "spin_wait": self.spin_wait,
         }
 
 
-class MpscShmRingBufferConfig(Struct):
+class ShmMpscConfig(Struct):
     """Configuration for MPSC shared-memory bytes ring buffer."""
 
     path: str
@@ -76,7 +76,7 @@ class MpscShmRingBufferConfig(Struct):
             raise ValueError("unlink_on_close requires create=True")
 
     @classmethod
-    def default(cls) -> "MpscShmRingBufferConfig":
+    def default(cls) -> "ShmMpscConfig":
         """Create a default MPSC shared-memory configuration."""
         return cls(
             path="/tmp/shm_mpsc_ring.bin",
@@ -88,7 +88,7 @@ class MpscShmRingBufferConfig(Struct):
         )
 
     def producer_kwargs(self) -> dict[str, object]:
-        """Return kwargs suitable for MpscSharedBytesRingBufferProducer."""
+        """Return kwargs suitable for ShmMpscProducer."""
         return {
             "path": self.path,
             "capacity_bytes": self.capacity_bytes,
@@ -99,7 +99,7 @@ class MpscShmRingBufferConfig(Struct):
         }
 
     def consumer_kwargs(self) -> dict[str, object]:
-        """Return kwargs suitable for MpscSharedBytesRingBufferConsumer."""
+        """Return kwargs suitable for ShmMpscConsumer."""
         return {
             "path": self.path,
             "spin_wait": self.spin_wait,

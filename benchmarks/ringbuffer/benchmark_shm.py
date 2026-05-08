@@ -37,8 +37,8 @@ except ModuleNotFoundError:
         BenchmarkRunner,
     )
 from mm_toolbox.ringbuffer.shm import (
-    SharedBytesRingBufferConsumer,
-    SharedBytesRingBufferProducer,
+    ShmSpscConsumer,
+    ShmSpscProducer,
 )
 
 
@@ -65,7 +65,7 @@ def latency_benchmark_insert(
     payload = b"x" * payload_size
     latencies = np.zeros(num_iterations, dtype=np.int64)
 
-    with SharedBytesRingBufferProducer(
+    with ShmSpscProducer(
         path, required_capacity, create=True, unlink_on_close=True
     ) as producer:
         for _ in range(min(1000, num_iterations // 10)):
@@ -89,13 +89,13 @@ def latency_benchmark_consume(
     required_capacity = max(capacity_bytes, num_iterations * (8 + payload_size))
     payload = b"x" * payload_size
 
-    with SharedBytesRingBufferProducer(
+    with ShmSpscProducer(
         path, required_capacity, create=True, unlink_on_close=True
     ) as producer:
         for _ in range(num_iterations):
             producer.insert(payload)
 
-        with SharedBytesRingBufferConsumer(path) as consumer:
+        with ShmSpscConsumer(path) as consumer:
             latencies = np.zeros(num_iterations, dtype=np.int64)
             for i in range(num_iterations):
                 start = time.perf_counter_ns()
@@ -116,7 +116,7 @@ def _producer_process(
     """Producer process for throughput benchmark."""
     payload = b"x" * payload_size
 
-    with SharedBytesRingBufferProducer(
+    with ShmSpscProducer(
         path, capacity_bytes, create=True, unlink_on_close=False
     ) as producer:
         barrier.wait()
@@ -148,7 +148,7 @@ def _consumer_process(
     """Consumer process for throughput benchmark."""
     barrier.wait()
 
-    with SharedBytesRingBufferConsumer(path) as consumer:
+    with ShmSpscConsumer(path) as consumer:
         start_ns = time.perf_counter_ns()
         end_time_ns = start_ns + int(duration_sec * 1e9)
         count = 0

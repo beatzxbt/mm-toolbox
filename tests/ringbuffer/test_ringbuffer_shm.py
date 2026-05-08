@@ -16,9 +16,9 @@ from pathlib import Path
 import pytest
 
 from mm_toolbox.ringbuffer.shm import (
-    SharedBytesRingBufferConsumer,
-    SharedBytesRingBufferProducer,
-    ShmRingBufferConfig,
+    ShmSpscConsumer,
+    ShmSpscProducer,
+    ShmSpscConfig,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -48,7 +48,7 @@ def _consumer_proc(path: str, n: int, q: mp.Queue) -> None:
         n: Number of messages to consume.
         q: Multiprocessing queue used to return results.
     """
-    cons = SharedBytesRingBufferConsumer(path, spin_wait=4096)
+    cons = ShmSpscConsumer(path, spin_wait=4096)
     try:
         got: list[bytes] = []
         for _ in range(n):
@@ -68,10 +68,8 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(
-            shm_path, 1 << 16, create=True, unlink_on_close=True
-        )
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, 1 << 16, create=True, unlink_on_close=True)
+        cons = ShmSpscConsumer(shm_path)
         try:
             payload = b"hello-world"
             assert prod.insert(payload)
@@ -88,8 +86,8 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 15, create=True)
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, 1 << 15, create=True)
+        cons = ShmSpscConsumer(shm_path)
         try:
             msgs = [f"m{i}".encode() for i in range(1000)]
             assert prod.insert_batch(msgs)
@@ -106,8 +104,8 @@ class TestSharedBytesRingBuffer:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
         capacity = 1 << 12
-        prod = SharedBytesRingBufferProducer(shm_path, capacity, create=True)
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, capacity, create=True)
+        cons = ShmSpscConsumer(shm_path)
         try:
             msg = b"x" * (capacity // 8 - 8)
             total = 500
@@ -126,8 +124,8 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 14, create=True)
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, 1 << 14, create=True)
+        cons = ShmSpscConsumer(shm_path)
         try:
             items = [b"a", b"bb", b"ccc", b"dddd"]
             assert prod.insert_packed(items)
@@ -144,8 +142,8 @@ class TestSharedBytesRingBuffer:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
         capacity = 1 << 12
-        prod = SharedBytesRingBufferProducer(shm_path, capacity, create=True)
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, capacity, create=True)
+        cons = ShmSpscConsumer(shm_path)
         try:
             oversize = b"z" * (capacity - 7)  # +8 header exceeds
             assert not prod.insert(oversize)
@@ -159,8 +157,8 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 14, create=True)
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, 1 << 14, create=True)
+        cons = ShmSpscConsumer(shm_path)
         try:
             msgs = [f"m{i}".encode() for i in range(32)]
             assert prod.insert_batch(msgs)
@@ -177,8 +175,8 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 12, create=True)
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
+        cons = ShmSpscConsumer(shm_path)
         try:
             assert prod.insert(b"")
             got = cons.consume()
@@ -194,8 +192,8 @@ class TestSharedBytesRingBuffer:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
         capacity = 1 << 12
-        prod = SharedBytesRingBufferProducer(shm_path, capacity, create=True)
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, capacity, create=True)
+        cons = ShmSpscConsumer(shm_path)
         try:
             msg = b"x" * (capacity - 8)
             assert prod.insert(msg)
@@ -211,8 +209,8 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 12, create=True)
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
+        cons = ShmSpscConsumer(shm_path)
         try:
             assert cons.peekleft() is None
         finally:
@@ -225,8 +223,8 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 12, create=True)
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
+        cons = ShmSpscConsumer(shm_path)
         try:
             assert cons.peekright() is None
         finally:
@@ -239,7 +237,7 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 12, create=True)
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         try:
             assert prod.insert_batch([])
         finally:
@@ -251,7 +249,7 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 12, create=True)
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         try:
             assert prod.insert_packed([])
         finally:
@@ -263,9 +261,7 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(
-            shm_path, 1 << 12, create=True, unlink_on_close=True
-        )
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True, unlink_on_close=True)
         prod.close()
         prod.close()
         assert not os.path.exists(shm_path)
@@ -276,8 +272,8 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 12, create=True)
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
+        cons = ShmSpscConsumer(shm_path)
         try:
             payload = b"hello"
             assert prod.insert(payload)
@@ -293,16 +289,14 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(
-            shm_path, 1 << 12, create=True, unlink_on_close=False
-        )
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True, unlink_on_close=False)
         prod.close()
         try:
             with open(shm_path, "r+b") as handle:
                 handle.seek(16)  # mask offset
                 handle.write(struct.pack("Q", 123))
             with pytest.raises(RuntimeError):
-                SharedBytesRingBufferConsumer(shm_path)
+                ShmSpscConsumer(shm_path)
         finally:
             if os.path.exists(shm_path):
                 os.unlink(shm_path)
@@ -314,7 +308,7 @@ class TestSharedBytesRingBuffer:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
         n = 2000
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 18, create=True)
+        prod = ShmSpscProducer(shm_path, 1 << 18, create=True)
         try:
             q: mp.Queue = mp.Queue()
             p = mp.Process(target=_consumer_proc, args=(shm_path, n, q))
@@ -342,8 +336,8 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 12, create=True)
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
+        cons = ShmSpscConsumer(shm_path)
         try:
             assert prod.insert_char(b"hello", 5)
             got = cons.consume()
@@ -358,12 +352,12 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod1 = SharedBytesRingBufferProducer(shm_path, 1 << 12, create=True)
+        prod1 = ShmSpscProducer(shm_path, 1 << 12, create=True)
         try:
-            prod2 = SharedBytesRingBufferProducer(shm_path, 1 << 12, create=False)
+            prod2 = ShmSpscProducer(shm_path, 1 << 12, create=False)
             try:
                 assert prod2.insert(b"attached")
-                cons = SharedBytesRingBufferConsumer(shm_path)
+                cons = ShmSpscConsumer(shm_path)
                 try:
                     assert cons.consume() == b"attached"
                 finally:
@@ -379,7 +373,7 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        with SharedBytesRingBufferProducer(
+        with ShmSpscProducer(
             shm_path, 1 << 12, create=True, unlink_on_close=True
         ) as prod:
             assert prod.insert(b"ctx")
@@ -391,10 +385,10 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 12, create=True)
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         try:
             prod.insert(b"ctx")
-            with SharedBytesRingBufferConsumer(shm_path) as cons:
+            with ShmSpscConsumer(shm_path) as cons:
                 assert cons.consume() == b"ctx"
         finally:
             prod.close()
@@ -406,8 +400,8 @@ class TestSharedBytesRingBuffer:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
         capacity = 1 << 12
-        prod = SharedBytesRingBufferProducer(shm_path, capacity, create=True)
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, capacity, create=True)
+        cons = ShmSpscConsumer(shm_path)
         try:
             assert len(prod) == 0
             assert prod.insert(b"a")
@@ -433,8 +427,8 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 12, create=True)
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
+        cons = ShmSpscConsumer(shm_path)
         try:
             assert prod.insert(b"first")
             assert prod.insert(b"second")
@@ -451,8 +445,8 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 12, create=True)
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
+        cons = ShmSpscConsumer(shm_path)
         try:
             assert prod.insert(b"first")
             assert prod.insert(b"second")
@@ -464,24 +458,24 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_config_validation_empty_path(self) -> None:
-        """ShmRingBufferConfig with empty path raises ValueError."""
+        """ShmSpscConfig with empty path raises ValueError."""
         with pytest.raises(ValueError):
-            ShmRingBufferConfig(path="", capacity_bytes=1024)
+            ShmSpscConfig(path="", capacity_bytes=1024)
 
     def test_config_validation_zero_capacity(self) -> None:
-        """ShmRingBufferConfig with zero capacity raises ValueError."""
+        """ShmSpscConfig with zero capacity raises ValueError."""
         with pytest.raises(ValueError):
-            ShmRingBufferConfig(path="/tmp/x", capacity_bytes=0)
+            ShmSpscConfig(path="/tmp/x", capacity_bytes=0)
 
     def test_config_validation_zero_spin_wait(self) -> None:
-        """ShmRingBufferConfig with spin_wait=0 raises ValueError."""
+        """ShmSpscConfig with spin_wait=0 raises ValueError."""
         with pytest.raises(ValueError):
-            ShmRingBufferConfig(path="/tmp/x", capacity_bytes=1024, spin_wait=0)
+            ShmSpscConfig(path="/tmp/x", capacity_bytes=1024, spin_wait=0)
 
     def test_config_validation_unlink_without_create(self) -> None:
-        """ShmRingBufferConfig with unlink_on_close=True and create=False raises ValueError."""
+        """ShmSpscConfig with unlink_on_close=True and create=False raises ValueError."""
         with pytest.raises(ValueError):
-            ShmRingBufferConfig(
+            ShmSpscConfig(
                 path="/tmp/x",
                 capacity_bytes=1024,
                 create=False,
@@ -489,8 +483,8 @@ class TestSharedBytesRingBuffer:
             )
 
     def test_config_default(self) -> None:
-        """ShmRingBufferConfig.default() returns valid config with expected defaults."""
-        cfg = ShmRingBufferConfig.default()
+        """ShmSpscConfig.default() returns valid config with expected defaults."""
+        cfg = ShmSpscConfig.default()
         assert cfg.path == "/tmp/shm_ring.bin"
         assert cfg.capacity_bytes == 1 << 16
         assert cfg.create is True
@@ -499,7 +493,7 @@ class TestSharedBytesRingBuffer:
 
     def test_config_kwargs(self) -> None:
         """producer_kwargs and consumer_kwargs return correct dicts."""
-        cfg = ShmRingBufferConfig(path="/tmp/x", capacity_bytes=2048, spin_wait=512)
+        cfg = ShmSpscConfig(path="/tmp/x", capacity_bytes=2048, spin_wait=512)
         pkw = cfg.producer_kwargs()
         assert pkw["path"] == "/tmp/x"
         assert pkw["capacity_bytes"] == 2048
@@ -518,7 +512,7 @@ class TestSharedBytesRingBuffer:
         with open(shm_path, "wb") as f:
             f.write(b"\x00" * 32)
         with pytest.raises(RuntimeError):
-            SharedBytesRingBufferConsumer(shm_path)
+            ShmSpscConsumer(shm_path)
 
     # --- P1 Important ---
 
@@ -528,10 +522,8 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(
-            shm_path, 1 << 12, create=True, spin_wait=1
-        )
-        cons = SharedBytesRingBufferConsumer(shm_path, spin_wait=1)
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True, spin_wait=1)
+        cons = ShmSpscConsumer(shm_path, spin_wait=1)
         try:
             assert prod.insert(b"small")
             assert cons.consume() == b"small"
@@ -545,10 +537,8 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(
-            shm_path, 1 << 12, create=True, spin_wait=65536
-        )
-        cons = SharedBytesRingBufferConsumer(shm_path, spin_wait=65536)
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True, spin_wait=65536)
+        cons = ShmSpscConsumer(shm_path, spin_wait=65536)
         try:
             assert prod.insert(b"large")
             assert cons.consume() == b"large"
@@ -562,10 +552,8 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(
-            shm_path, 1 << 12, create=True, spin_wait=100
-        )
-        cons = SharedBytesRingBufferConsumer(shm_path, spin_wait=10000)
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True, spin_wait=100)
+        cons = ShmSpscConsumer(shm_path, spin_wait=10000)
         try:
             assert prod.insert(b"mismatch")
             assert cons.consume() == b"mismatch"
@@ -580,7 +568,7 @@ class TestSharedBytesRingBuffer:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
         capacity = 1 << 8
-        prod = SharedBytesRingBufferProducer(shm_path, capacity, create=True)
+        prod = ShmSpscProducer(shm_path, capacity, create=True)
         try:
             msgs = [b"x" * (capacity - 7)]
             assert not prod.insert_batch(msgs)
@@ -593,7 +581,7 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 20, create=True)
+        prod = ShmSpscProducer(shm_path, 1 << 20, create=True)
         try:
             oversized = b"x" * (0xFFFFFFFF + 1)
             assert not prod.insert_packed([oversized])
@@ -606,9 +594,7 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(
-            shm_path, 1 << 14, create=True, unlink_on_close=False
-        )
+        prod = ShmSpscProducer(shm_path, 1 << 14, create=True, unlink_on_close=False)
         prod.insert_packed([b"a", b"bb"])
         prod.close()
         try:
@@ -618,7 +604,7 @@ class TestSharedBytesRingBuffer:
                 f.seek(64 + 8)
                 # Corrupt length to a huge value
                 f.write(struct.pack("<I", 0x7FFFFFFF))
-            cons = SharedBytesRingBufferConsumer(shm_path)
+            cons = ShmSpscConsumer(shm_path)
             try:
                 with pytest.raises(ValueError):
                     cons.consume_packed()
@@ -634,9 +620,7 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(
-            shm_path, 1 << 12, create=True, unlink_on_close=False
-        )
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True, unlink_on_close=False)
         prod.close()
         assert os.path.exists(shm_path)
         os.unlink(shm_path)
@@ -647,8 +631,8 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 12, create=True)
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
+        cons = ShmSpscConsumer(shm_path)
         try:
             assert prod.latest_insert_time_ns == 0
             assert prod.latest_consume_time_ns == 0
@@ -677,8 +661,8 @@ class TestSharedBytesRingBuffer:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
         n = 1000
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 18, create=True)
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, 1 << 18, create=True)
+        cons = ShmSpscConsumer(shm_path)
         received: list[bytes] = []
 
         def consumer_thread() -> None:
@@ -702,8 +686,8 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(shm_path, 1 << 12, create=True)
-        cons = SharedBytesRingBufferConsumer(shm_path)
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
+        cons = ShmSpscConsumer(shm_path)
         try:
             assert cons.consume_all() == []
         finally:
@@ -715,7 +699,7 @@ class TestSharedBytesRingBuffer:
     def test_invalid_path_oserror(self) -> None:
         """Invalid path raises OSError."""
         with pytest.raises(OSError):
-            SharedBytesRingBufferProducer("/nonexistent/dir/file", 1 << 12, create=True)
+            ShmSpscProducer("/nonexistent/dir/file", 1 << 12, create=True)
 
     def test_capacity_bytes_zero_handled(self, shm_path: str) -> None:
         """capacity_bytes=0 uses pow2_at_least(1) and does not crash.
@@ -723,9 +707,7 @@ class TestSharedBytesRingBuffer:
         Args:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
-        prod = SharedBytesRingBufferProducer(
-            shm_path, 0, create=True, unlink_on_close=False
-        )
+        prod = ShmSpscProducer(shm_path, 0, create=True, unlink_on_close=False)
         prod.close()
         # Header (64 bytes) + 1 byte capacity
         assert os.path.getsize(shm_path) == 65
