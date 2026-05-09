@@ -325,7 +325,15 @@ class BinanceDataProcessor:
         )
 
         # Initialize SHM SPSC consumer for data
-        self.data_consumer = ShmSpscConsumer(path=data_path)
+        # Retry briefly in case the producer hasn't finished creating the file yet
+        for _ in range(100):
+            try:
+                self.data_consumer = ShmSpscConsumer(path=data_path)
+                break
+            except (OSError, RuntimeError):
+                time.sleep(0.01)
+        else:
+            raise RuntimeError(f"Failed to attach to data ringbuffer at {data_path}")
 
         # Initialize time candles (1 second candles)
         self.time_candles = TimeCandles(secs_per_bucket=1.0, num_candles=100)
@@ -560,13 +568,15 @@ def stream_process_entry(
     startup_event_path: str,
 ) -> None:
     """Entry point for stream process."""
+    # Create processor (and SHM producer backing file) first before waiting
+    processor = BinanceStreamProcessor(symbol, logger_path, data_path)
+
     # Wait for processing process to initialize MasterLogger and snapshot
     startup = StartupEvent(startup_event_path)
     if not startup.wait(timeout=10.0):
         print("Timeout waiting for processing process to start", file=sys.stderr)
         sys.exit(1)
 
-    processor = BinanceStreamProcessor(symbol, logger_path, data_path)
     processor.run()
 
 
@@ -624,9 +634,10 @@ def main() -> None:
         daemon=True,
     )
 
-    # Start processing first so MasterLogger creates shared memory before WorkerLogger attaches
-    processing_proc.start()
+    # Start stream first so the SHM producer creates the backing file before
+    # the processing process tries to attach its consumer.
     stream_proc.start()
+    processing_proc.start()
 
     print(f"Started stream and processing processes for {symbol}")
     print("Press Ctrl+C to stop...")
