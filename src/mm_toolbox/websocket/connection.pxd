@@ -57,10 +57,6 @@ cdef class WsConnection(WSListener):
     cpdef object        get_config(self)
     cpdef object        get_state(self)
 
-    # Internal dispatch helpers
-    cdef void           _dispatch_on_loop(self, object func, tuple args)
-    cpdef void          _exec_if_connected(self, object func, tuple args)
-
     # PicoWs should add void returns to these methods, but since they didnt
     # we cannot add them here as then it won't compile.
     cpdef               on_ws_connected(self, WSTransport transport) 

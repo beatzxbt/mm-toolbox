@@ -64,9 +64,6 @@ class WsConnection(WSListener):
     def get_state(self) -> ConnectionState:
         """Returns the current connection state."""
         ...
-    def _exec_if_connected(self, func: Any, args: tuple[Any, ...]) -> None:
-        """Execute func only if still connected (called on event loop)."""
-        ...
     def on_ws_connected(self, transport: WSTransport) -> Any:
         """Called when the handshake completes successfully."""
         ...

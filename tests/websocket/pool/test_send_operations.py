@@ -108,12 +108,12 @@ class TestWsPoolSendOperations:
                 after = len(basic_server.get_received_messages())
                 assert after - before == pool_config.num_connections
 
-    async def test_send_data_requires_running_loop(
+    async def test_send_data_requires_connected_state(
         self,
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure send_data raises when event loop is not running.
+        """Ensure send_data raises when pool is not connected.
 
         Args:
             basic_server: Fixture providing a basic echo server.
@@ -128,43 +128,5 @@ class TestWsPoolSendOperations:
             pool = await WsPool.new(
                 config, on_message=noop_message_handler, pool_config=pool_config
             )
-            with pytest.raises(RuntimeError):
+            with pytest.raises(RuntimeError, match="Connection not running"):
                 pool.send_data(b"fail", only_fastest=False)
-
-    async def test_send_data_thread_safety(
-        self,
-        basic_server,
-        connection_config_factory,
-    ) -> None:
-        """Ensure send_data is safe from multiple threads.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
-        from concurrent.futures import ThreadPoolExecutor
-
-        async with basic_server:
-            config = connection_config_factory(basic_server)
-            pool_config = WsPoolConfig(num_connections=3, evict_interval_s=60)
-            pool = await WsPool.new(
-                config, on_message=noop_message_handler, pool_config=pool_config
-            )
-            async with pool:
-                await wait_for_pool_connections(pool, pool_config.num_connections)
-
-                def _send_batch(idx: int) -> None:
-                    for n in range(20):
-                        pool.send_data(f"t{idx}-m{n}".encode())
-
-                with ThreadPoolExecutor(max_workers=5) as executor:
-                    futures = [executor.submit(_send_batch, i) for i in range(5)]
-                    for f in futures:
-                        f.result(timeout=5.0)
-
-                await asyncio.sleep(0.3)
-                received = basic_server.get_received_messages()
-                assert len(received) == 100

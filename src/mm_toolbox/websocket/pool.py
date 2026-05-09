@@ -280,14 +280,11 @@ class WsPool:
         only be sent through one connection.
         """
         if self._pool_state != ConnectionState.CONNECTED:
-            raise RuntimeError("Connection not running; cannot send data")
+            raise RuntimeError("Connection not running")
         if self.get_connection_count() == 0:
-            raise RuntimeError("No live connections in pool; cannot send data")
+            raise RuntimeError("No live connections")
 
-        loop = self._loop
-        if loop is None or loop.is_closed():
-            raise RuntimeError("Event loop not running; cannot send data")
-        loop.call_soon_threadsafe(self._send_data_now, msg, only_fastest)
+        self._send_data_now(msg, only_fastest)
 
     @classmethod
     async def new(

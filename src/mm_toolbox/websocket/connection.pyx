@@ -186,27 +186,6 @@ cdef class WsConnection(WSListener):
         self._config.on_connect = on_connect
         self._on_connect = on_connect
 
-    cdef void _dispatch_on_loop(self, object func, tuple args):
-        """Dispatch a callable onto the connection's event loop thread-safely."""
-        cdef object loop = self._loop
-        if loop is None:
-            return
-        try:
-            if asyncio.get_running_loop() is loop:
-                if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
-                    func(*args)
-                return
-        except RuntimeError:
-            pass
-        loop.call_soon_threadsafe(
-            lambda: self._exec_if_connected(func, args)
-        )
-
-    cpdef void _exec_if_connected(self, object func, tuple args):
-        """Execute func only if still connected (called on event loop)."""
-        if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
-            func(*args)
-
     cpdef void send_ping(self, bytes msg=b""):
         """
         Sends a PING frame to the remote endpoint.
@@ -214,7 +193,8 @@ cdef class WsConnection(WSListener):
         Args:
             msg (bytes, optional): Optional payload for the PING frame.
         """
-        self._dispatch_on_loop(getattr(self._transport, "send_ping", None), (msg,))
+        if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
+            self._transport.send_ping(msg)
 
     cpdef void send_pong(self, bytes msg=b""):
         """
@@ -223,7 +203,8 @@ cdef class WsConnection(WSListener):
         Args:
             msg (bytes, optional): Optional payload for the PONG frame.
         """
-        self._dispatch_on_loop(getattr(self._transport, "send_pong", None), (msg,))
+        if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
+            self._transport.send_pong(msg)
 
     cpdef void send_data(self, bytes msg):
         """
@@ -232,7 +213,8 @@ cdef class WsConnection(WSListener):
         Args:
             msg (bytes): The data to send as TEXT.
         """
-        self._dispatch_on_loop(getattr(self._transport, "send", None), (WSMsgType.TEXT, msg))
+        if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
+            self._transport.send(WSMsgType.TEXT, msg)
 
     cpdef void send_data_bytearray(self, bytearray msg):
         """
@@ -248,10 +230,8 @@ cdef class WsConnection(WSListener):
         msg_len = len(msg)
         transport_buffer = bytearray(14 + msg_len)
         transport_buffer[14:] = msg
-        self._dispatch_on_loop(
-            getattr(self._transport, "send_reuse_external_bytearray", None),
-            (WSMsgType.TEXT, transport_buffer, 14)
-        )
+        if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
+            self._transport.send_reuse_external_bytearray(WSMsgType.TEXT, transport_buffer, 14)
 
     cpdef void close(self):
         """Closes the Websocket connection."""

@@ -5,7 +5,6 @@ This module provides comprehensive E2E coverage across:
 - WsSingle wrapper (async context manager, iteration)
 - WsPool management (multiple connections, deduplication, fastest vs multicast)
 - Message flow (bursts, large payloads, fragmentation, empty payloads)
-- Concurrency (multi-thread sends, rapid ping during bursts)
 - Reconnection (auto-reconnect, server restart)
 - Latency (ping/pong timing)
 - Error resilience (malformed frames, close during flight, callback exceptions)
@@ -19,7 +18,6 @@ import gc
 import resource
 import time
 import tracemalloc
-from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -381,87 +379,6 @@ class TestMessageFlowE2E:
                     # Only test one disconnect/reconnect cycle
                     break
 
-
-# --------------------------------------------------------------------------- #
-# Concurrent
-# --------------------------------------------------------------------------- #
-
-
-@pytest.mark.asyncio
-class TestConcurrentE2E:
-    """E2E tests for concurrent and multi-threaded usage."""
-
-    async def test_multi_thread_sends_same_connection(
-        self,
-        basic_server,
-        connection_factory,
-    ) -> None:
-        """Send 100 messages from 10 threads via the same connection.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
-        async with basic_server:
-            conn = await connection_factory(basic_server)
-
-            def _send_batch(conn_ref: WsConnection, start: int) -> None:
-                """Send 10 numbered messages."""
-                for i in range(10):
-                    conn_ref.send_data(f"t-{start}-{i}".encode("utf-8"))
-
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = [executor.submit(_send_batch, conn, t) for t in range(10)]
-                for fut in futures:
-                    fut.result()
-
-            await asyncio.sleep(0.5)
-            received = basic_server.get_received_messages()
-            assert len(received) == 100
-            conn.close()
-
-    async def test_pool_sends_from_multiple_threads(
-        self,
-        basic_server,
-        connection_config_factory,
-    ) -> None:
-        """Send 100 messages from 5 threads via a WsPool.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
-        async with basic_server:
-            pool_config = WsPoolConfig(num_connections=3, evict_interval_s=60)
-            config = connection_config_factory(basic_server)
-            pool = await WsPool.new(
-                config, on_message=_noop_handler, pool_config=pool_config
-            )
-            async with pool:
-                await asyncio.sleep(0.3)
-
-                def _send_batch(pool_ref: WsPool, start: int) -> None:
-                    """Send 20 numbered messages through the pool."""
-                    for i in range(20):
-                        pool_ref.send_data(
-                            f"p-{start}-{i}".encode("utf-8"), only_fastest=True
-                        )
-
-                with ThreadPoolExecutor(max_workers=5) as executor:
-                    futures = [executor.submit(_send_batch, pool, t) for t in range(5)]
-                    for fut in futures:
-                        fut.result()
-
-                await asyncio.sleep(0.5)
-                received = basic_server.get_received_messages()
-                assert len(received) == 100
-
     async def test_rapid_ping_during_message_burst(
         self,
         basic_server,
@@ -507,6 +424,11 @@ class TestConcurrentE2E:
             assert len(collected) == 500
             assert conn.get_state() == ConnectionState.CONNECTED
             conn.close()
+
+
+# --------------------------------------------------------------------------- #
+# Reconnection
+# --------------------------------------------------------------------------- #
 
 
 # --------------------------------------------------------------------------- #
