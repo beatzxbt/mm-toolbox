@@ -371,84 +371,6 @@ class _LiveBinanceHarness:
         return latencies_ms, keyed_latencies_ms, bins, counts
 
 
-class LiveBinanceBenchmarkReporter(BenchmarkReporter):
-    """Custom reporter with dedicated tables for throughput and latency."""
-
-    THROUGHPUT_SCALE = 1_000_000
-
-    def print_incoming_data_table(self, stats) -> None:
-        """Print throughput-per-second percentile table."""
-        print("Incoming Data Stats")
-        print("-" * 100)
-        print(
-            f"{'Operation':<36} {'Count':>8} {'Mean msg/s':>13} "
-            f"{'P50':>10} {'P90':>10} {'P95':>10} {'P99':>10}"
-        )
-
-        metrics = stats.get_operation("incoming_msgs_per_sec")
-        if metrics is None or not metrics.latencies_ns:
-            print(
-                f"{'incoming_msgs_per_sec':<36} {0:>8} {0.0:>13.1f} {0.0:>10.1f} {0.0:>10.1f} {0.0:>10.1f} {0.0:>10.1f}"
-            )
-            print("=" * 100)
-            return
-
-        pcts = metrics.compute_percentiles()
-
-        def unscale(value: float) -> float:
-            return value / self.THROUGHPUT_SCALE
-
-        print(
-            f"{'incoming_msgs_per_sec':<36} "
-            f"{pcts['count']:>8} "
-            f"{unscale(pcts['mean']):>13.1f} "
-            f"{unscale(pcts['p50']):>10.1f} "
-            f"{unscale(pcts['p90']):>10.1f} "
-            f"{unscale(pcts['p95']):>10.1f} "
-            f"{unscale(pcts['p99']):>10.1f}"
-        )
-        print("=" * 100)
-
-    def print_latency_table(self, stats) -> None:
-        """Print latency summary table in milliseconds for single/pool/delta."""
-        print("Latency Stats (ms)")
-        print("-" * 100)
-        print(
-            f"{'Path':<28} {'Count':>8} {'Mean ms':>11} {'P50':>10} "
-            f"{'P90':>10} {'P95':>10} {'P99':>10} {'Min':>8} {'Max':>8}"
-        )
-
-        def print_row(label: str, op_name: str) -> None:
-            metrics = stats.get_operation(op_name)
-            if metrics is None or not metrics.latencies_ns:
-                print(
-                    f"{label:<28} {0:>8} {0.0:>11.2f} {0.0:>10.2f} "
-                    f"{0.0:>10.2f} {0.0:>10.2f} {0.0:>10.2f} {0.0:>8.2f} {0.0:>8.2f}"
-                )
-                return
-
-            pcts = metrics.compute_percentiles()
-            min_ms = min(metrics.latencies_ns) / 1_000_000
-            max_ms = max(metrics.latencies_ns) / 1_000_000
-
-            print(
-                f"{label:<28} "
-                f"{pcts['count']:>8} "
-                f"{(pcts['mean'] / 1_000_000):>11.2f} "
-                f"{(pcts['p50'] / 1_000_000):>10.2f} "
-                f"{(pcts['p90'] / 1_000_000):>10.2f} "
-                f"{(pcts['p95'] / 1_000_000):>10.2f} "
-                f"{(pcts['p99'] / 1_000_000):>10.2f} "
-                f"{min_ms:>8.2f} "
-                f"{max_ms:>8.2f}"
-            )
-
-        print_row("single", "single.event_latency")
-        print_row("pool", "pool.event_latency")
-        print_row("single_vs_pool", "single_vs_pool.delta_latency")
-        print("=" * 100)
-
-
 class LiveBinanceWebSocketBenchmark(
     _LiveBinanceHarness, BenchmarkRunner[LiveBinanceBenchmarkConfig]
 ):
@@ -692,7 +614,7 @@ def main() -> None:
     benchmark = LiveBinanceWebSocketBenchmark(config)
     stats = benchmark.run()
 
-    reporter = LiveBinanceBenchmarkReporter(
+    reporter = BenchmarkReporter(
         "Live Binance WebSocket Benchmark Results",
         {
             "Symbols": ",".join(config.symbols),
@@ -701,10 +623,7 @@ def main() -> None:
             "Sample window (s)": config.sample_window_s,
         },
     )
-    reporter.print_header(stats, warmup=config.warmup_operations)
-    reporter.print_incoming_data_table(stats)
-    print()
-    reporter.print_latency_table(stats)
+    reporter.print_full_report(stats, warmup=config.warmup_operations)
 
 
 if __name__ == "__main__":
