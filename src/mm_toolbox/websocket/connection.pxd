@@ -57,12 +57,9 @@ cdef class WsConnection(WSListener):
     cpdef object        get_config(self)
     cpdef object        get_state(self)
 
-    # Internal thread-safe send helpers
-    cpdef void          _send_ping_safe(self, bytes msg)
-    cpdef void          _send_pong_safe(self, bytes msg)
-    cpdef void          _send_data_safe(self, bytes msg)
-    cpdef void          _send_data_bytearray_safe(self, bytearray msg)
+    # Internal dispatch helpers
     cdef void           _dispatch_on_loop(self, object func, tuple args)
+    cpdef void          _exec_if_connected(self, object func, tuple args)
 
     # PicoWs should add void returns to these methods, but since they didnt
     # we cannot add them here as then it won't compile.
