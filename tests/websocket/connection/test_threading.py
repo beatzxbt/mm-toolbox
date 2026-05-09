@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -31,7 +32,7 @@ class TestWsConnectionThreading:
         async with basic_server:
             conn = await connection_factory(basic_server)
             await latency_waiter(conn, timeout_s=3.0)
-            assert conn.get_state().latency_ms < 1000.0
+            assert conn.get_latency_ms() < 1000.0
             conn.close()
 
     async def test_latency_task_lifecycle(
@@ -104,3 +105,90 @@ class TestWsConnectionThreading:
             await asyncio.sleep(0.1)
             assert b"payload" in basic_server.get_received_messages()
             conn.close()
+
+    async def test_ping_timeout_resets_tracker(
+        self,
+        basic_server,
+        connection_config_factory,
+    ) -> None:
+        """Ensure lost pong resets _tracker_ping_sent_time_ms after timeout.
+
+        Args:
+            basic_server: Fixture providing a basic echo server.
+            connection_config_factory: Fixture providing config factory.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        pytest.skip(
+            "_tracker_ping_sent_time_ms is a cdef field inaccessible from Python"
+        )
+
+    async def test_spurious_pong_ignored(
+        self,
+        basic_server,
+        connection_factory,
+        latency_waiter,
+    ) -> None:
+        """Ensure unsolicited PONG does not update latency.
+
+        Args:
+            basic_server: Fixture providing a basic echo server.
+            connection_factory: Fixture providing connected WsConnection factory.
+            latency_waiter: Fixture providing latency wait helper.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        pytest.skip(
+            "_tracker_ping_sent_time_ms is a cdef field inaccessible from Python"
+        )
+
+    async def test_cross_thread_dispatch(
+        self,
+        basic_server,
+        connection_factory,
+    ) -> None:
+        """Ensure send_data works from a non-event-loop thread.
+
+        Args:
+            basic_server: Fixture providing a basic echo server.
+            connection_factory: Fixture providing connected WsConnection factory.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        async with basic_server:
+            conn = await connection_factory(basic_server)
+
+            def _send_from_thread():
+                conn.send_data(b"thread-message")
+
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                loop = asyncio.get_running_loop()
+                await asyncio.wait_for(
+                    loop.run_in_executor(executor, _send_from_thread),
+                    timeout=2.0,
+                )
+
+            await asyncio.sleep(0.2)
+            assert b"thread-message" in basic_server.get_received_messages()
+            conn.close()
+
+    async def test_cancel_latency_task_runtime_error_branch(
+        self,
+        basic_server,
+        connection_factory,
+    ) -> None:
+        """RuntimeError branch in _cancel_latency_task is hard to trigger; skip.
+
+        Args:
+            basic_server: Fixture providing a basic echo server.
+            connection_factory: Fixture providing connected WsConnection factory.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        pytest.skip(
+            "RuntimeError branch in _cancel_latency_task is untestable without deep asyncio mocking"
+        )

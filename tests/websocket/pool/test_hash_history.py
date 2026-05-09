@@ -208,3 +208,73 @@ class TestWsPoolHashHistory:
                     await asyncio.wait_for(pool_b.__anext__(), timeout=1.0)
                     == b"restart-check"
                 )
+
+    async def test_hash_history_ringbuffer_overflow(
+        self,
+        basic_server,
+        connection_config_factory,
+    ) -> None:
+        """Ensure old hashes are evicted when capacity is exceeded.
+
+        Args:
+            basic_server: Fixture providing a basic echo server.
+            connection_config_factory: Fixture providing config factory.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        async with basic_server:
+            config = connection_config_factory(basic_server)
+            pool = await WsPool.new(
+                config,
+                on_message=noop_message_handler,
+                pool_config=WsPoolConfig(
+                    num_connections=2,
+                    evict_interval_s=60,
+                    hash_capacity=4,
+                ),
+            )
+            async with pool:
+                await wait_for_pool_connections(pool, expected=2)
+                payloads = [b"a", b"b", b"c", b"d", b"e"]
+                for payload in payloads:
+                    await basic_server.send_to_all_clients(payload)
+                    msg = await asyncio.wait_for(pool.__anext__(), timeout=1.0)
+                    assert msg == payload
+
+                await basic_server.send_to_all_clients(b"a")
+                msg = await asyncio.wait_for(pool.__anext__(), timeout=1.0)
+                assert msg == b"a"
+
+    async def test_empty_payload_hash_deduplication(
+        self,
+        basic_server,
+        connection_config_factory,
+    ) -> None:
+        """Ensure empty payload is deduplicated across connections.
+
+        Args:
+            basic_server: Fixture providing a basic echo server.
+            connection_config_factory: Fixture providing config factory.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        async with basic_server:
+            config = connection_config_factory(basic_server)
+            pool = await WsPool.new(
+                config,
+                on_message=noop_message_handler,
+                pool_config=WsPoolConfig(
+                    num_connections=3,
+                    evict_interval_s=60,
+                    hash_capacity=1024,
+                ),
+            )
+            async with pool:
+                await wait_for_pool_connections(pool, expected=3)
+                await basic_server.send_to_all_clients(b"")
+                first = await asyncio.wait_for(pool.__anext__(), timeout=1.0)
+                assert first == b""
+                with pytest.raises(asyncio.TimeoutError):
+                    await asyncio.wait_for(pool.__anext__(), timeout=0.3)

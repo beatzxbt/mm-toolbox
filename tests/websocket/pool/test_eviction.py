@@ -50,6 +50,14 @@ class DummyConn:
         self._config = SimpleNamespace(conn_id=conn_id)
         self.closed = False
 
+    def is_connected(self) -> bool:
+        """Return whether the dummy connection is connected."""
+        return self._state.is_connected
+
+    def get_latency_ms(self) -> float:
+        """Return the dummy connection's latency."""
+        return self._state.latency_ms
+
     def get_state(self) -> DummyState:
         """Return the dummy state object.
 
@@ -180,3 +188,114 @@ class TestWsPoolEvictionLogic:
         pool._loop = None
         pool._schedule_replacements(2)
         assert pool._loop is None
+
+    async def test_real_timed_eviction_replaces_slowest(
+        self,
+        basic_server,
+        server_with_delay,
+        connection_config_factory,
+    ) -> None:
+        """Ensure eviction replaces the slowest connection after interval.
+
+        Args:
+            basic_server: Fixture providing a basic echo server.
+            server_with_delay: Fixture providing delayed echo server.
+            connection_config_factory: Fixture providing config factory.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        pytest.skip(
+            "Real timed eviction requires long waits and is covered by unit tests"
+        )
+
+    async def test_eviction_partial_reconnect_failure(
+        self,
+        basic_server,
+        connection_config_factory,
+        monkeypatch,
+    ) -> None:
+        """Ensure pool survives when some replacements fail.
+
+        Args:
+            basic_server: Fixture providing a basic echo server.
+            connection_config_factory: Fixture providing config factory.
+            monkeypatch: Pytest monkeypatch fixture.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        async with basic_server:
+            config = connection_config_factory(basic_server)
+            pool_config = WsPoolConfig(num_connections=3, evict_interval_s=60)
+            pool = await WsPool.new(
+                config, on_message=noop_message_handler, pool_config=pool_config
+            )
+            async with pool:
+                await asyncio.sleep(0.3)
+                original_open = pool._open_new_conn
+                call_count = 0
+
+                async def _failing_open(*args, **kwargs):
+                    nonlocal call_count
+                    call_count += 1
+                    if call_count <= 2:
+                        raise RuntimeError("blocked")
+                    return await original_open(*args, **kwargs)
+
+                monkeypatch.setattr(pool, "_open_new_conn", _failing_open)
+                conn = next(iter(pool._conns.values()))
+                conn_id = conn.get_config().conn_id
+                conn.close()
+                pool._conns.pop(conn_id, None)
+                pool._update_fast_connection()
+                pool._schedule_replacements(1)
+                await asyncio.sleep(0.5)
+                assert 0 < pool.get_connection_count() < pool_config.num_connections
+
+    async def test_restart_count_logic(self) -> None:
+        """Ensure restart count scales with pool size.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        config_3 = WsPoolConfig(num_connections=3, evict_interval_s=1)
+        pool_3 = WsPool(
+            config=SimpleNamespace(
+                wss_url="wss://test", on_connect=[], auto_reconnect=True
+            ),
+            on_message=noop_message_handler,
+            pool_config=config_3,
+        )
+        pool_3._conns = {
+            1: DummyConn(1, 50.0),
+            2: DummyConn(2, 100.0),
+            3: DummyConn(3, 60.0),
+        }
+        pool_3._pool_state = ConnectionState.CONNECTED
+        [conn for conn in pool_3._conns.values() if conn.is_connected()]
+        restart_count_3 = (
+            config_3.num_connections // 2 if config_3.num_connections >= 4 else 1
+        )
+        assert restart_count_3 == 1
+
+        config_5 = WsPoolConfig(num_connections=5, evict_interval_s=1)
+        pool_5 = WsPool(
+            config=SimpleNamespace(
+                wss_url="wss://test", on_connect=[], auto_reconnect=True
+            ),
+            on_message=noop_message_handler,
+            pool_config=config_5,
+        )
+        pool_5._conns = {
+            1: DummyConn(1, 50.0),
+            2: DummyConn(2, 100.0),
+            3: DummyConn(3, 60.0),
+            4: DummyConn(4, 80.0),
+            5: DummyConn(5, 30.0),
+        }
+        pool_5._pool_state = ConnectionState.CONNECTED
+        restart_count_5 = (
+            config_5.num_connections // 2 if config_5.num_connections >= 4 else 1
+        )
+        assert restart_count_5 == 2

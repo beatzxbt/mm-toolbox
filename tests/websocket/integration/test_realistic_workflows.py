@@ -76,11 +76,11 @@ class TestWebSocketWorkflows:
             iterator = conn_iter.__aiter__()
 
             conn1 = await iterator.__anext__()
-            assert conn1.get_state().state == ConnectionState.CONNECTED
+            assert conn1.get_state() == ConnectionState.CONNECTED
             conn1.close()
 
             conn2 = await iterator.__anext__()
-            assert conn2.get_state().state == ConnectionState.CONNECTED
+            assert conn2.get_state() == ConnectionState.CONNECTED
             conn2.send_data(b"reconnected")
             await asyncio.sleep(0.2)
             assert b"reconnected" in basic_server.get_received_messages()
@@ -117,6 +117,6 @@ class TestWebSocketWorkflows:
             async with basic_server:
                 config.wss_url = basic_server.uri
                 conn2 = await iterator.__anext__()
-                assert conn2.get_state().state == ConnectionState.CONNECTED
+                assert conn2.get_state() == ConnectionState.CONNECTED
                 conn2.close()
             await iterator.aclose()

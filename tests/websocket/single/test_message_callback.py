@@ -253,3 +253,86 @@ class TestWsSingleMessageCallbacks:
             assert received_iter == [b"shared"]
             assert received_cb
             await shutdown_ws_task(ws_cb, task_cb)
+
+    async def test_consume_callbacks_state_check(
+        self,
+        basic_server,
+        connection_config_factory,
+    ) -> None:
+        """Ensure _consume_callbacks exits when connection is closed.
+
+        Args:
+            basic_server: Fixture providing a basic echo server.
+            connection_config_factory: Fixture providing config factory.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        async with basic_server:
+            config = connection_config_factory(basic_server)
+            ws = WsSingle(config)
+            task = asyncio.create_task(ws.start())
+            await asyncio.sleep(0.2)
+            await shutdown_ws_task(ws, task)
+
+    async def test_set_on_connect_propagates(
+        self,
+        basic_server,
+        connection_config_factory,
+    ) -> None:
+        """Ensure set_on_connect updates current and future connections.
+
+        Args:
+            basic_server: Fixture providing a basic echo server.
+            connection_config_factory: Fixture providing config factory.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        async with basic_server:
+            config = connection_config_factory(basic_server)
+            async with WsSingle(config) as ws:
+                await asyncio.sleep(0.2)
+                assert ws.get_state() == ConnectionState.CONNECTED
+                new_payload = [b'{"sub": "test"}']
+                ws.set_on_connect(new_payload)
+                assert ws.get_config().on_connect == new_payload
+                assert ws._ws_conn is not None
+                assert ws._ws_conn.get_config().on_connect == new_payload
+
+    async def test_empty_message_callback(
+        self,
+        basic_server,
+        connection_config_factory,
+    ) -> None:
+        """Ensure empty payload reaches the callback.
+
+        Args:
+            basic_server: Fixture providing a basic echo server.
+            connection_config_factory: Fixture providing config factory.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        async with basic_server:
+            config = connection_config_factory(basic_server)
+            received: list[bytes] = []
+
+            def on_message(msg: bytes) -> None:
+                """Collect all messages including empty.
+
+                Args:
+                    msg (bytes): Incoming message.
+
+                Returns:
+                    None: This callback does not return a value.
+                """
+                received.append(msg)
+
+            ws = WsSingle(config, on_message=on_message)
+            task = asyncio.create_task(ws.start())
+            await asyncio.sleep(0.2)
+            await basic_server.send_to_all_clients(b"")
+            await asyncio.sleep(0.2)
+            assert b"" in received
+            await shutdown_ws_task(ws, task)

@@ -5,7 +5,6 @@ from typing import Any, Self
 import msgspec
 from picows.picows import WSFrame, WSListener, WSTransport
 
-from mm_toolbox.moving_average.ema import ExponentialMovingAverage as Ema
 from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
 
 class ConnectionState(IntEnum):
@@ -31,30 +30,16 @@ class WsConnectionConfig(msgspec.Struct):
         latency_ping_interval_ms: int | None = None,
     ) -> WsConnectionConfig: ...
 
-class LatencyTrackerState(msgspec.Struct):
-    latency_ema: Ema
-    latency_ms: float
-    @classmethod
-    def default(cls) -> LatencyTrackerState: ...
-
-class WsConnectionState(msgspec.Struct):
-    seq_id: int
-    state: ConnectionState
-    ringbuffer: BytesRingBuffer
-    latency: LatencyTrackerState
-    @property
-    def is_connected(self) -> bool: ...
-    @property
-    def latency_ms(self) -> float: ...
-    @property
-    def recent_message(self) -> bytes: ...
-
 class WsConnection(WSListener):
     """Abstract Websocket connection class, wrapping PicoWs."""
 
     def __init__(self, ringbuffer: BytesRingBuffer, config: WsConnectionConfig) -> None:
         """Initializes a new Websocket connection."""
         ...
+    def get_seq_id(self) -> int: ...
+    def get_latency_ms(self) -> float: ...
+    def is_connected(self) -> bool: ...
+    def get_ringbuffer(self) -> BytesRingBuffer: ...
     def set_on_connect(self, on_connect: list[bytes]) -> None:
         """Sets the on_connect list."""
         ...
@@ -67,13 +52,16 @@ class WsConnection(WSListener):
     def send_data(self, msg: bytes) -> None:
         """Sends data as a TEXT frame over the Websocket connection."""
         ...
+    def send_data_bytearray(self, msg: bytearray) -> None:
+        """Sends a bytearray as a TEXT frame over the Websocket connection."""
+        ...
     def close(self) -> None:
         """Closes the Websocket connection."""
         ...
     def get_config(self) -> WsConnectionConfig:
         """Returns the current connection config."""
         ...
-    def get_state(self) -> WsConnectionState:
+    def get_state(self) -> ConnectionState:
         """Returns the current connection state."""
         ...
     def on_ws_connected(self, transport: WSTransport) -> Any:

@@ -149,3 +149,58 @@ class TestWsPoolAsyncIteration:
                     collect_task.cancel()
                     with pytest.raises(asyncio.CancelledError):
                         await collect_task
+
+    async def test_anext_stop_async_iteration(
+        self,
+        basic_server,
+        connection_config_factory,
+    ) -> None:
+        """Ensure __anext__ raises StopAsyncIteration after pool.close().
+
+        Args:
+            basic_server: Fixture providing a basic echo server.
+            connection_config_factory: Fixture providing config factory.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        async with basic_server:
+            config = connection_config_factory(basic_server)
+            pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
+            pool = await WsPool.new(
+                config, on_message=noop_message_handler, pool_config=pool_config
+            )
+            async with pool:
+                await asyncio.sleep(0.2)
+                pool.close()
+                with pytest.raises(StopAsyncIteration):
+                    await pool.__anext__()
+
+    async def test_anext_timeout_behavior(
+        self,
+        basic_server,
+        connection_config_factory,
+    ) -> None:
+        """Ensure __anext__ returns within a reasonable timeout window.
+
+        Args:
+            basic_server: Fixture providing a basic echo server.
+            connection_config_factory: Fixture providing config factory.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        async with basic_server:
+            config = connection_config_factory(basic_server)
+            pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
+            pool = await WsPool.new(
+                config, on_message=noop_message_handler, pool_config=pool_config
+            )
+            async with pool:
+                await asyncio.sleep(0.2)
+                start = asyncio.get_running_loop().time()
+                pool.close()
+                with pytest.raises(StopAsyncIteration):
+                    await pool.__anext__()
+                elapsed = asyncio.get_running_loop().time() - start
+                assert elapsed < 1.5

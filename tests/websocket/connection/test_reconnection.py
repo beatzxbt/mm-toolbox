@@ -68,7 +68,7 @@ class TestWsConnectionReconnection:
             conn1 = await iterator.__anext__()
             conn1.close()
             conn2 = await iterator.__anext__()
-            assert conn2.get_state().state == ConnectionState.CONNECTED
+            assert conn2.get_state() == ConnectionState.CONNECTED
             conn2.close()
             await iterator.aclose()
 
@@ -123,6 +123,6 @@ class TestWsConnectionReconnection:
 
             conn = await iterator.__anext__()
             await asyncio.sleep(0.1)
-            assert conn.get_state().state == ConnectionState.DISCONNECTED
+            assert conn.get_state() == ConnectionState.DISCONNECTED
             conn.close()
             await iterator.aclose()

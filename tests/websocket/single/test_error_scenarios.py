@@ -172,3 +172,52 @@ class TestWsSingleErrorScenarios:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+
+    async def test_start_auto_reconnect_continues_after_disconnect(
+        self,
+        server_send_close_frame,
+        basic_server,
+        connection_config_factory,
+    ) -> None:
+        """Ensure auto-reconnect resumes after server closes connection.
+
+        Args:
+            server_send_close_frame: Fixture providing close-frame server.
+            basic_server: Fixture providing a basic echo server.
+            connection_config_factory: Fixture providing config factory.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        async with server_send_close_frame:
+            config = connection_config_factory(
+                server_send_close_frame, auto_reconnect=True
+            )
+            ws = WsSingle(config)
+            task = asyncio.create_task(ws.start())
+            await asyncio.sleep(0.2)
+            ws.send_data(b"trigger-close")
+            await asyncio.sleep(0.3)
+
+        async with basic_server:
+            config.wss_url = basic_server.uri
+            ws._config.wss_url = basic_server.uri
+            await asyncio.sleep(2.5)
+            ws.send_data(b"after-reconnect")
+            await asyncio.sleep(0.3)
+            assert b"after-reconnect" in basic_server.get_received_messages()
+            ws.close()
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    async def test_send_data_no_op_when_none(self) -> None:
+        """Ensure send_data does not raise when no connection exists.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        config = WsConnectionConfig.default("wss://test.com")
+        ws = WsSingle(config)
+        ws.send_data(b"no-op")
+        assert ws._ws_conn is None

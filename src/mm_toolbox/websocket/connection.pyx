@@ -72,38 +72,6 @@ class WsConnectionConfig(Struct):
             ),
         )
 
-class LatencyTrackerState(Struct):
-    latency_ema: Ema
-    latency_ms: float
-    
-    @classmethod
-    def default(cls) -> LatencyTrackerState:
-        return LatencyTrackerState(
-            latency_ema=Ema(
-                window=60,
-                is_fast=False,
-            ),
-            latency_ms=1000.0,
-        )
-    
-class WsConnectionState(Struct):
-    seq_id: int
-    state: ConnectionState
-    ringbuffer: BytesRingBuffer
-    latency: LatencyTrackerState
-
-    @property
-    def is_connected(self) -> bool:
-        return self.state == ConnectionState.CONNECTED
-
-    @property
-    def latency_ms(self) -> float:
-        return self.latency.latency_ms
-
-    @property
-    def recent_message(self) -> bytes:
-        return self.ringbuffer.peekright()
-
 cdef class WsConnection(WSListener):
     """Abstract Websocket connection class, wrapping PicoWs."""
 
@@ -113,20 +81,18 @@ cdef class WsConnection(WSListener):
         object config,
     ):
         """Initializes a new Websocket connection."""
-        # Single source of truth for state - no duplicate state variables
+        self._config = cast('WsConnectionConfig', config)
+
+        # Flatten hot-path state into cdef primitives
+        self._conn_state = ConnectionState.DISCONNECTED
         self._seq_id = 0
         self._ringbuffer = ringbuffer
-        self._latency_tracker = LatencyTrackerState.default()
+        self._latency_ms = 1000.0
+        self._latency_ema = Ema(window=60, is_fast=False)
+        self._max_frame_size = self._config.max_frame_size
+        self._latency_ping_interval_s = self._config.latency_ping_interval_ms / 1000.0
+        self._on_connect = self._config.on_connect
 
-        self._state = WsConnectionState(
-            seq_id=0,
-            state=ConnectionState.DISCONNECTED,
-            ringbuffer=ringbuffer,
-            latency=self._latency_tracker,
-        )
-
-        self._config = cast('WsConnectionConfig', config)
-        
         # Use atomic-like operations for ping/pong tracking (single writes)
         self._tracker_ping_sent_time_ms = 0.0  # 0.0 means no ping sent
         self._tracker_pong_recv_time_ms = 0.0  # 0.0 means no pong received
@@ -134,12 +100,27 @@ cdef class WsConnection(WSListener):
         self._unfin_msg_buffer = bytearray()
         self._unfin_msg_size = 0  # Track buffer size for memory safety
 
-        self._transport: Optional[WSTransport] = None
-        self._reconnect_attempts: int = 0
+        self._transport = None
         self._should_stop = False  # Lightweight stop signal
         self._loop = None
 
         self._latency_task = None
+
+    cpdef int get_seq_id(self):
+        """Returns the current sequence ID."""
+        return self._seq_id
+
+    cpdef double get_latency_ms(self):
+        """Returns the current latency in milliseconds."""
+        return self._latency_ms
+
+    cpdef bint is_connected(self):
+        """Returns whether the connection is currently connected."""
+        return self._conn_state == ConnectionState.CONNECTED
+
+    cpdef object get_ringbuffer(self):
+        """Returns the ringbuffer for message storage."""
+        return self._ringbuffer
 
     def _start_latency_task(self):
         """Starts periodic internal latency pings on the connection loop."""
@@ -170,7 +151,8 @@ cdef class WsConnection(WSListener):
 
     async def _latency_loop(self) -> None:
         """Periodically sends ping and updates latency when pong arrives."""
-        cdef double interval_s = self._config.latency_ping_interval_ms / 1000.0
+        cdef double interval_s = self._latency_ping_interval_s
+        cdef double ping_timeout_ms = interval_s * 3000.0
 
         try:
             while not self._should_stop:
@@ -178,12 +160,15 @@ cdef class WsConnection(WSListener):
 
                 if (
                     self._should_stop
-                    or self._state.state != ConnectionState.CONNECTED
+                    or self._conn_state != ConnectionState.CONNECTED
                     or self._transport is None
                 ):
                     continue
 
                 if self._tracker_ping_sent_time_ms > 0.0:
+                    # Reset if pong was lost (prevents stalling forever)
+                    if time_ms() - self._tracker_ping_sent_time_ms > ping_timeout_ms:
+                        self._tracker_ping_sent_time_ms = 0.0
                     continue
 
                 try:
@@ -199,6 +184,20 @@ cdef class WsConnection(WSListener):
         Sets the on_connect list.
         """
         self._config.on_connect = on_connect
+        self._on_connect = on_connect
+
+    cdef void _dispatch_on_loop(self, object func, tuple args):
+        """Dispatch a callable onto the connection's event loop thread-safely."""
+        cdef object loop = self._loop
+        if loop is None:
+            return
+        try:
+            if asyncio.get_running_loop() is loop:
+                func(*args)
+                return
+        except RuntimeError:
+            pass
+        loop.call_soon_threadsafe(func, *args)
 
     cpdef void send_ping(self, bytes msg=b""):
         """
@@ -207,15 +206,12 @@ cdef class WsConnection(WSListener):
         Args:
             msg (bytes, optional): Optional payload for the PING frame.
         """
-        if self._state.state == ConnectionState.CONNECTED and self._transport is not None:
-            if self._loop is not None and self._loop.is_running():
-                self._loop.call_soon_threadsafe(self._send_ping_safe, msg)
-            else:
-                self._transport.send_ping(msg)
+        if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
+            self._dispatch_on_loop(self._send_ping_safe, (msg,))
 
-    def _send_ping_safe(self, bytes msg):
+    cpdef void _send_ping_safe(self, bytes msg):
         """Send ping on the event loop thread to avoid cross-thread transport access."""
-        if self._state.state == ConnectionState.CONNECTED and self._transport is not None:
+        if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
             self._transport.send_ping(msg)
 
     cpdef void send_pong(self, bytes msg=b""):
@@ -225,7 +221,12 @@ cdef class WsConnection(WSListener):
         Args:
             msg (bytes, optional): Optional payload for the PONG frame.
         """
-        if self._state.state == ConnectionState.CONNECTED and self._transport is not None:
+        if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
+            self._dispatch_on_loop(self._send_pong_safe, (msg,))
+
+    cpdef void _send_pong_safe(self, bytes msg):
+        """Send pong on the event loop thread."""
+        if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
             self._transport.send_pong(msg)
 
     cpdef void send_data(self, bytes msg):
@@ -235,7 +236,12 @@ cdef class WsConnection(WSListener):
         Args:
             msg (bytes): The data to send as TEXT.
         """
-        if self._state.state == ConnectionState.CONNECTED and self._transport is not None:
+        if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
+            self._dispatch_on_loop(self._send_data_safe, (msg,))
+
+    cpdef void _send_data_safe(self, bytes msg):
+        """Send data on the event loop thread."""
+        if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
             self._transport.send(
                 msg_type=WSMsgType.TEXT, 
                 message=msg,
@@ -248,11 +254,16 @@ cdef class WsConnection(WSListener):
         Args:
             msg (bytearray): The data to send as TEXT.
         """
+        if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
+            self._dispatch_on_loop(self._send_data_bytearray_safe, (msg,))
+
+    cpdef void _send_data_bytearray_safe(self, bytearray msg):
+        """Send bytearray on the event loop thread."""
         cdef:
             bytearray transport_buffer
             Py_ssize_t msg_len
 
-        if self._state.state == ConnectionState.CONNECTED and self._transport is not None:
+        if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
             msg_len = len(msg)
             transport_buffer = bytearray(14 + msg_len)
             transport_buffer[14:] = msg
@@ -266,20 +277,24 @@ cdef class WsConnection(WSListener):
         """Closes the Websocket connection."""
         # Signal task to stop first (cheapest operation)
         self._should_stop = True
-        self._state.state = ConnectionState.DISCONNECTED
+        self._conn_state = ConnectionState.DISCONNECTED
         self._cancel_latency_task()
+        
+        # Clear any incomplete message state
+        self._unfin_msg_buffer.clear()
+        self._unfin_msg_size = 0
         
         # Disconnect transport if available
         if self._transport is not None:
             self._transport.disconnect(graceful=True)
 
     cpdef object get_config(self):
-        """Returns the current connection state."""
+        """Returns the current connection config."""
         return self._config
 
     cpdef object get_state(self):
         """Returns the current connection state."""
-        return self._state
+        return self._conn_state
 
     # ---------- WSListener Callbacks ---------- #
 
@@ -288,28 +303,37 @@ cdef class WsConnection(WSListener):
         self._should_stop = False
         self._seq_id = 0
         self._transport = transport
-        self._reconnect_attempts = 0
-        self._state.state = ConnectionState.CONNECTED
+        self._conn_state = ConnectionState.CONNECTED
         self._loop = asyncio.get_running_loop()
         self._tracker_ping_sent_time_ms = 0.0
         self._tracker_pong_recv_time_ms = 0.0
+        
+        # Clear any stale fragmented message state
+        self._unfin_msg_buffer.clear()
+        self._unfin_msg_size = 0
+        
         self._start_latency_task()
 
-        for payload in self._config.on_connect:
-            self.send_data(payload)
+        # Send on_connect payloads directly via transport (skip redundant state check)
+        for payload in self._on_connect:
+            transport.send(msg_type=WSMsgType.TEXT, message=payload)
 
     cpdef on_ws_frame(self, WSTransport transport, WSFrame frame):
         """Called upon receiving a new frame."""
+        # Guard against processing frames after close/disconnect
+        if self._should_stop or self._conn_state != ConnectionState.CONNECTED:
+            return
+
         cdef: 
-            WSMsgType frame_msg_type = frame.msg_type
-            bint      frame_unfinished = frame.fin == 0
-            bint      frame_is_data = _is_data_frame_type(frame_msg_type)
-            int       frame_size = 0
-            int       max_frame_size = self._config.max_frame_size
-            double    pong_recv_time_ms = 0.0
-            double    ping_sent_time_ms = 0.0
-            double    latency_ms = 0.0
-            object    frame_payload_mv
+            WSMsgType  frame_msg_type = frame.msg_type
+            bint       frame_unfinished = frame.fin == 0
+            bint       frame_is_data = _is_data_frame_type(frame_msg_type)
+            Py_ssize_t frame_size = 0
+            Py_ssize_t max_frame_size = self._max_frame_size
+            double     pong_recv_time_ms = 0.0
+            double     ping_sent_time_ms = 0.0
+            double     latency_ms = 0.0
+            object     frame_payload_mv
 
         if frame_msg_type == WSMsgType.PONG:
             pong_recv_time_ms = time_ms()
@@ -317,23 +341,24 @@ cdef class WsConnection(WSListener):
             self._tracker_pong_recv_time_ms = pong_recv_time_ms
             if ping_sent_time_ms > 0.0 and pong_recv_time_ms >= ping_sent_time_ms:
                 latency_ms = pong_recv_time_ms - ping_sent_time_ms
-                self._latency_tracker.latency_ema.update(latency_ms)
-                self._latency_tracker.latency_ms = latency_ms
+                self._latency_ema.update(latency_ms)
+                self._latency_ms = latency_ms
                 self._tracker_ping_sent_time_ms = 0.0
             return
 
         if frame_msg_type == WSMsgType.PING:
-            try:
+            if frame.payload_size > 0:
                 frame_payload_mv = frame.get_payload_as_memoryview()
-                if self._state.state == ConnectionState.CONNECTED and self._transport is not None:
+                if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
                     self._transport.send_pong(frame_payload_mv)
-            except Exception:
-                pass  # Ignore pong send errors
+            else:
+                if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
+                    self._transport.send_pong(b"")
             return
 
         if frame_msg_type == WSMsgType.CLOSE:
             self._should_stop = True
-            self._state.state = ConnectionState.DISCONNECTED
+            self._conn_state = ConnectionState.DISCONNECTED
             self._cancel_latency_task()
             if self._transport is not None:
                 try:
@@ -360,7 +385,9 @@ cdef class WsConnection(WSListener):
             not frame_unfinished
             and self._unfin_msg_size == 0
         ):
-            self._ringbuffer.insert(frame.get_payload_as_bytes())
+            # Fast path: single complete frame — avoid picows internal copy
+            frame_payload_mv = frame.get_payload_as_memoryview()
+            self._ringbuffer.insert(bytes(frame_payload_mv))
             self._seq_id += 1
             return
 
@@ -378,14 +405,18 @@ cdef class WsConnection(WSListener):
 
     cpdef on_ws_disconnected(self, WSTransport transport):
         """Called when the Websocket connection is closed."""
-        # In the future, maybe add some default bytes message sent 
+        # In the future, maybe add some default bytes message sent
         # downstream to indicate the connection is closed. For now,
         # just close the stream without any downstream signal.
         self._should_stop = True
-        self._state.state = ConnectionState.DISCONNECTED
+        self._conn_state = ConnectionState.DISCONNECTED
         self._cancel_latency_task()
         self._transport = None  # Clear transport reference
         self._loop = None
+        
+        # Clear any incomplete message state
+        self._unfin_msg_buffer.clear()
+        self._unfin_msg_size = 0
 
     # ---------- Connection Management ---------- #
 

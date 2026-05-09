@@ -13,7 +13,7 @@ import asyncio
 import contextlib
 import random
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Awaitable, Callable, Iterable, Iterator
+from typing import Any, AsyncIterator, Awaitable, Callable, Iterable
 
 import pytest
 import websockets
@@ -353,28 +353,6 @@ class LocalWebSocketServer:
             self._clients.discard(websocket)
 
 
-@contextlib.contextmanager
-def mock_latency(conn: WsConnection, latency_ms: float) -> Iterator[None]:
-    """Temporarily override latency metrics for deterministic eviction tests.
-
-    Args:
-        conn (WsConnection): Connection to modify.
-        latency_ms (float): Latency value to inject.
-
-    Returns:
-        Iterator[None]: Context manager iterator.
-    """
-    state = conn.get_state()
-    original_latency = state.latency.latency_ms
-    try:
-        state.latency.latency_ms = latency_ms
-        with contextlib.suppress(Exception):
-            state.latency.latency_ema.update(latency_ms)
-        yield
-    finally:
-        state.latency.latency_ms = original_latency
-
-
 async def chaotic_tasks(
     operations: Iterable[Callable[[], Awaitable[Any]]],
     seed: int | None = None,
@@ -471,7 +449,7 @@ async def wait_for_connection_state(
     """
     start = asyncio.get_running_loop().time()
     while (asyncio.get_running_loop().time() - start) < timeout_s:
-        if conn.get_state().state == expected:
+        if conn.get_state() == expected:
             return
         await asyncio.sleep(0.01)
     raise AssertionError(f"Timed out waiting for {expected}")
@@ -496,29 +474,11 @@ async def wait_for_latency_update(
     """
     loop = asyncio.get_running_loop()
     start = loop.time()
-    probe_window_s = min(1.0, timeout_s / 2.0)
-    while (loop.time() - start) < probe_window_s:
-        if conn.get_state().latency_ms != 1000.0:
+    start + timeout_s
+    while (loop.time() - start) < timeout_s:
+        if conn.get_latency_ms() != 1000.0:
             return
-        await asyncio.sleep(0.2)
-
-    probe = f"latency-probe-{int(loop.time() * 1_000_000)}".encode("ascii")
-    probe_sent = loop.time()
-    conn.send_data(probe)
-    ringbuffer = conn.get_state().ringbuffer
-    deadline = start + timeout_s
-    while loop.time() < deadline:
-        timeout = max(0.0, deadline - loop.time())
-        try:
-            msg = await asyncio.wait_for(ringbuffer.aconsume(), timeout=timeout)
-        except asyncio.TimeoutError:
-            break
-        if msg == probe:
-            latency_ms = (loop.time() - probe_sent) * 1000.0
-            state = conn.get_state()
-            state.latency.latency_ema.update(latency_ms)
-            state.latency.latency_ms = latency_ms
-            return
+        await asyncio.sleep(0.05)
     raise AssertionError("Timed out waiting for latency update")
 
 

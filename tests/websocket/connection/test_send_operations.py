@@ -93,7 +93,7 @@ class TestWsConnectionSendOperations:
             conn = await connection_factory(basic_server)
             conn.send_ping()
             await asyncio.sleep(0.2)
-            assert conn.get_state().state == ConnectionState.CONNECTED
+            assert conn.get_state() == ConnectionState.CONNECTED
             conn.close()
 
     async def test_send_pong_response(
@@ -174,4 +174,49 @@ class TestWsConnectionSendOperations:
             await asyncio.sleep(0.1)
             received = basic_server.get_received_messages()
             assert set(payloads).issubset(set(received))
+            conn.close()
+
+    async def test_send_pong_with_payload(
+        self,
+        basic_server,
+        connection_factory,
+    ) -> None:
+        """Ensure send_pong does not crash with a custom payload.
+
+        Args:
+            basic_server: Fixture providing a basic echo server.
+            connection_factory: Fixture providing connected WsConnection factory.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        async with basic_server:
+            conn = await connection_factory(basic_server)
+            conn.send_pong(b"custom")
+            await asyncio.sleep(0.1)
+            assert conn.get_state() == ConnectionState.CONNECTED
+            conn.close()
+
+    async def test_send_data_bytearray_safe_allocation(
+        self,
+        basic_server,
+        connection_factory,
+    ) -> None:
+        """Ensure send_data_bytearray works with various sizes.
+
+        Args:
+            basic_server: Fixture providing a basic echo server.
+            connection_factory: Fixture providing connected WsConnection factory.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        async with basic_server:
+            conn = await connection_factory(basic_server)
+            for size in [0, 1, 128, 1024, 4096]:
+                payload = bytearray(b"x" * size)
+                conn.send_data_bytearray(payload)
+            await asyncio.sleep(0.2)
+            received = basic_server.get_received_messages()
+            assert len(received) >= 5
             conn.close()

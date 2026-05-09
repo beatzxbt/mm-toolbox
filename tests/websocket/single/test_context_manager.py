@@ -192,7 +192,7 @@ class TestWsSingleAsyncContextManager:
                         """Return the underlying connection state.
 
                         Returns:
-                            WsConnectionState: Current state snapshot.
+                            ConnectionState: Current state snapshot.
                         """
                         return self._conn.get_state()
 
@@ -253,3 +253,34 @@ class TestWsSingleAsyncContextManager:
                     ws, ConnectionState.CONNECTED, timeout_s=2.0
                 )
             assert ws.get_state() == ConnectionState.DISCONNECTED
+
+    async def test_aenter_fallback_when_reconnect_fails(
+        self,
+        basic_server,
+        connection_config_factory,
+        monkeypatch,
+    ) -> None:
+        """Ensure __aenter__ creates a single connection when reconnect fails.
+
+        Args:
+            basic_server: Fixture providing a basic echo server.
+            connection_config_factory: Fixture providing config factory.
+            monkeypatch: Pytest monkeypatch fixture.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        async with basic_server:
+            config = connection_config_factory(basic_server, auto_reconnect=True)
+
+            async def _raising_reconnect(*args, **kwargs):
+                raise RuntimeError("reconnect fail")
+
+            monkeypatch.setattr(
+                "mm_toolbox.websocket.connection.ws_connect",
+                _raising_reconnect,
+            )
+            ws = WsSingle(config)
+            with pytest.raises(RuntimeError):
+                async with ws:
+                    pass

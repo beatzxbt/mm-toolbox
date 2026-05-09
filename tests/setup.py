@@ -67,8 +67,25 @@ orderbook_advanced_extensions = [
     ),
 ]
 
+WEBSOCKET_INCLUDE_DIRS = [
+    np.get_include(),
+    "../src",
+    ".",
+]
+
+websocket_extensions = [
+    Extension(
+        name="cython_test_websocket_connection",
+        sources=["websocket/connection/test_native.pyx"],
+        include_dirs=WEBSOCKET_INCLUDE_DIRS,
+        extra_compile_args=EXTRA_COMPILE_ARGS,
+        extra_link_args=EXTRA_LINK_ARGS,
+    ),
+]
+
 all_extensions: list[Extension] = []
 all_extensions.extend(orderbook_advanced_extensions)
+all_extensions.extend(websocket_extensions)
 
 # Collect all .pyx source files from extensions before cythonization
 pyx_files: list[str] = []

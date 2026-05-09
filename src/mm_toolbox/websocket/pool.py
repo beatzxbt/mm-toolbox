@@ -2,7 +2,9 @@
 
 import asyncio
 import inspect
+import logging
 from collections.abc import Callable
+from heapq import nlargest
 from typing import Any, Self, get_type_hints
 
 import xxhash
@@ -20,6 +22,7 @@ from mm_toolbox.websocket.connection import (
 )
 
 UINT64_MASK = (1 << 64) - 1
+_logger = logging.getLogger(__name__)
 
 
 class WsPoolConfig(Struct):
@@ -61,7 +64,7 @@ class WsPool:
     def __init__(
         self,
         config: WsConnectionConfig,
-        on_message: Callable[[bytes], None],
+        on_message: Callable[[bytes], None] | None = None,
         pool_config: WsPoolConfig | None = None,
     ) -> None:
         """Initialize WebSocket pool with configuration and message handler."""
@@ -127,20 +130,24 @@ class WsPool:
                 self._pool_state != ConnectionState.CONNECTED
                 or time_s() < next_eviction_time
             ):
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.5)
                 continue
 
-            fast_to_slow_conns = sorted(
-                self._conns.values(), key=lambda x: x.get_state().latency_ms
-            )
-            restart_count = (
-                self._pool_config.num_connections // 2
-                if self._pool_config.num_connections >= 4
-                else 1
-            )
-            restart_conns = (
-                fast_to_slow_conns[-restart_count:] if fast_to_slow_conns else []
-            )
+            connected_conns = [
+                conn for conn in self._conns.values() if conn.is_connected()
+            ]
+            restart_conns: list[WsConnection] = []
+            if connected_conns:
+                restart_count = (
+                    self._pool_config.num_connections // 2
+                    if self._pool_config.num_connections >= 4
+                    else 1
+                )
+                restart_conns = nlargest(
+                    restart_count,
+                    connected_conns,
+                    key=lambda x: x.get_latency_ms(),
+                )
 
             # Queue connection replacements instead of blocking
             for old_conn in restart_conns:
@@ -159,8 +166,8 @@ class WsPool:
             self._fast_conn = None
             return
         self._fast_conn = min(
-            (conn for conn in self._conns.values() if conn.get_state().is_connected),
-            key=lambda x: x.get_state().latency_ms,
+            (conn for conn in self._conns.values() if conn.is_connected()),
+            key=lambda x: x.get_latency_ms(),
             default=None,
         )
 
@@ -222,11 +229,10 @@ class WsPool:
             None: This method does not return a value.
         """
         fast_conn = self._fast_conn
-        conns_snapshot = list(self._conns.values())
         if only_fastest and fast_conn is not None:
             fast_conn.send_data(msg)
         else:
-            for conn in conns_snapshot:
+            for conn in self._conns.values():
                 conn.send_data(msg)
 
     async def _open_new_conn(self) -> None:
@@ -255,8 +261,8 @@ class WsPool:
                 return
             self._conns[config.conn_id] = new_conn
             self._update_fast_connection()
-        except Exception:
-            pass  # Silently ignore connection failures to avoid crashing pool
+        except Exception as exc:
+            _logger.warning("WebSocket connection failed: %s", exc)
 
     def set_on_connect(self, on_connect: list[bytes]) -> None:
         """Sets the on_connect callback for all connections in the pool."""
@@ -275,6 +281,8 @@ class WsPool:
         """
         if self._pool_state != ConnectionState.CONNECTED:
             raise RuntimeError("Connection not running; cannot send data")
+        if self.get_connection_count() == 0:
+            raise RuntimeError("No live connections in pool; cannot send data")
 
         loop = self._loop
         if loop is None or loop.is_closed():
@@ -285,7 +293,7 @@ class WsPool:
     async def new(
         cls,
         config: WsConnectionConfig,
-        on_message: Callable[[bytes], None],
+        on_message: Callable[[bytes], None] | None = None,
         pool_config: WsPoolConfig | None = None,
     ) -> Self:
         """Starts all WebSocket connections in the pool."""
@@ -300,9 +308,33 @@ class WsPool:
         """Returns the current pool state."""
         return self._pool_state
 
+    def get_config(self) -> WsConnectionConfig:
+        """Get connection configuration."""
+        return self._config
+
     def get_connection_count(self) -> int:
-        """Returns the number of active connections."""
-        return sum(1 for conn in self._conns.values() if conn.get_state().is_connected)
+        """Get number of active connections."""
+        return sum(1 for conn in self._conns.values() if conn.is_connected())
+
+    def get_latency_ms(self) -> float:
+        """Return minimum latency across all active connections."""
+        if not self._conns:
+            return 0.0
+        latencies = [
+            conn.get_latency_ms()
+            for conn in self._conns.values()
+            if conn.is_connected()
+        ]
+        return min(latencies) if latencies else 0.0
+
+    def get_seq_id(self) -> int:
+        """Return maximum seq_id across all active connections."""
+        if not self._conns:
+            return 0
+        seq_ids = [
+            conn.get_seq_id() for conn in self._conns.values() if conn.is_connected()
+        ]
+        return max(seq_ids) if seq_ids else 0
 
     def close(self) -> None:
         """Shuts down all WebSocket connections and stops the eviction task."""
@@ -330,7 +362,10 @@ class WsPool:
             tasks = [
                 self._open_new_conn() for _ in range(self._pool_config.num_connections)
             ]
-            await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            successes = [r for r in results if not isinstance(r, Exception)]
+            if not successes:
+                raise RuntimeError("Failed to establish any WebSocket connections")
             self._pool_state = ConnectionState.CONNECTED
 
             # Set initial fast connection
@@ -350,7 +385,12 @@ class WsPool:
     async def __anext__(self) -> bytes:
         """Returns the next hash-filtered message from the pool ringbuffer."""
         while True:
-            msg = await self._ringbuffer.aconsume()
+            try:
+                msg = await asyncio.wait_for(self._ringbuffer.aconsume(), timeout=1.0)
+            except asyncio.TimeoutError:
+                if self._should_stop:
+                    raise StopAsyncIteration
+                continue
             if self._is_seen_hash(msg):
                 continue
             return msg

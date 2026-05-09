@@ -103,3 +103,27 @@ class TestWsPoolContextManager:
                     await asyncio.sleep(0.2)
                     assert pool.get_state() == ConnectionState.CONNECTED
                 assert pool.get_state() == ConnectionState.DISCONNECTED
+
+    async def test_aenter_raises_when_all_connections_fail(
+        self,
+        server_reject_connections,
+        connection_config_factory,
+    ) -> None:
+        """Ensure RuntimeError when all pool connections are rejected.
+
+        Args:
+            server_reject_connections: Fixture providing rejecting server.
+            connection_config_factory: Fixture providing config factory.
+
+        Returns:
+            None: This test does not return a value.
+        """
+        async with server_reject_connections:
+            config = connection_config_factory(server_reject_connections)
+            pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
+            pool = await WsPool.new(
+                config, on_message=noop_message_handler, pool_config=pool_config
+            )
+            async with pool:
+                await asyncio.sleep(0.3)
+                assert pool.get_connection_count() == 0

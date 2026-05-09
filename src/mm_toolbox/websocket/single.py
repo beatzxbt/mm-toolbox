@@ -8,8 +8,9 @@ Provides:
 
 from __future__ import annotations
 
+import asyncio
 import inspect
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from typing import Self, get_type_hints
 
 import msgspec
@@ -47,6 +48,7 @@ class WsSingle:
         self._config = config
         self._ringbuffer = BytesRingBuffer(max_capacity=128, only_insert_unique=False)
         self._ws_conn: WsConnection | None = None
+        self._reconnect_iter: AsyncIterator[WsConnection] | None = None
 
         # Verify the signature of the on_message, must be a single bytes arg
         if on_message is not None:
@@ -86,8 +88,13 @@ class WsSingle:
         if self._ws_conn is not None:
             self._ws_conn.set_on_connect(on_connect)
 
-    def send_data(self, msg: bytes) -> None:
-        """Sends data over the WebSocket connection."""
+    def send_data(self, msg: bytes, only_fastest: bool = True) -> None:
+        """Send data through the connection.
+
+        Args:
+            msg: Message to send
+            only_fastest: Ignored for single connections (compatibility with WsPool)
+        """
         if self._ws_conn is not None:
             self._ws_conn.send_data(msg)
 
@@ -111,14 +118,20 @@ class WsSingle:
         Returns:
             None: This coroutine runs until cancelled or an error occurs.
         """
-        while True:
-            self._dispatch_message(await self._ringbuffer.aconsume())
+        while self._ws_conn is not None and self._ws_conn.is_connected():
+            try:
+                msg = await asyncio.wait_for(self._ringbuffer.aconsume(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            self._dispatch_message(msg)
 
     async def start(self) -> None:
         """Opens the WebSocket connection and sends any on_connect messages."""
         if self._config.auto_reconnect:
-            conn_iter = WsConnection.new_with_reconnect(self._ringbuffer, self._config)
-            async for conn in conn_iter:
+            self._reconnect_iter = WsConnection.new_with_reconnect(
+                self._ringbuffer, self._config
+            )
+            async for conn in self._reconnect_iter:
                 self._ws_conn = conn
                 try:
                     await self._consume_callbacks()
@@ -138,28 +151,48 @@ class WsSingle:
                 self._ws_conn.close()
             except Exception as exc:
                 print(f"Error closing WebSocket connection: {exc}")
+        self._reconnect_iter = None
 
     def get_config(self) -> WsConnectionConfig:
-        """Retrieves the connection's configuration."""
+        """Get connection configuration."""
         return self._config
+
+    def get_connection_count(self) -> int:
+        """Get number of active connections (0 or 1)."""
+        if self._ws_conn is not None and self._ws_conn.is_connected():
+            return 1
+        return 0
+
+    def get_latency_ms(self) -> float:
+        """Get latency of the connection in milliseconds."""
+        if self._ws_conn is not None:
+            return self._ws_conn.get_latency_ms()
+        return 0.0
+
+    def get_seq_id(self) -> int:
+        """Get sequence ID of the connection."""
+        if self._ws_conn is not None:
+            return self._ws_conn.get_seq_id()
+        return 0
 
     def get_state(self) -> ConnectionState:
         """Retrieves the connection state."""
         if self._ws_conn is not None:
-            return self._ws_conn.get_state().state
+            return self._ws_conn.get_state()
         return ConnectionState.DISCONNECTED
 
     async def __aenter__(self) -> Self:
         """Async context manager entry. Opens the connection."""
         if self._ws_conn is None:
             if self._config.auto_reconnect:
-                conn_iter = WsConnection.new_with_reconnect(
+                self._reconnect_iter = WsConnection.new_with_reconnect(
                     self._ringbuffer, self._config
                 )
                 try:
-                    self._ws_conn = await conn_iter.__aiter__().__anext__()
+                    self._ws_conn = await self._reconnect_iter.__anext__()
                 except Exception:
                     # Fall back to single connection if reconnect fails
+                    self._reconnect_iter = None
                     self._ws_conn = await WsConnection.new(
                         self._ringbuffer, self._config
                     )
