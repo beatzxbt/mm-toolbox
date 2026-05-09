@@ -102,10 +102,21 @@ class OrderbookDelta(msgspec.Struct):
     asks: list[tuple[float, float]]
 
 
+class TradeUpdate(msgspec.Struct):
+    """Aggregated trade update message."""
+
+    event_time: int
+    symbol: str
+    price: float
+    quantity: float
+    trade_time: int
+    is_buyer_maker: bool
+
+
 class StreamMessage(msgspec.Struct):
     """Wrapper for stream messages."""
 
-    msg_type: str  # "bbo", "snapshot", "delta"
+    msg_type: str  # "bbo", "trade"
     data: dict[str, Any]
 
 
@@ -148,7 +159,8 @@ class BinanceStreamProcessor:
 
         # WebSocket pools
         self.bbo_pool: WsPool | None = None
-        self.orderbook_pool: WsPool | None = None
+        self.trade_pool: WsPool | None = None
+        self._trade_sent_count = 0
 
     def _process_bbo_message(self, msg: bytes) -> None:
         """Process bookTicker (BBO) messages."""
@@ -167,35 +179,25 @@ class BinanceStreamProcessor:
         except Exception as e:
             self.logger.error(f"Error processing BBO message: {e}".encode("utf-8"))
 
-    def _process_orderbook_message(self, msg: bytes) -> None:
-        """Process orderbook depth messages."""
+    def _process_trade_message(self, msg: bytes) -> None:
+        """Process aggregated trade messages."""
         try:
             decoded = msgspec.json.decode(msg, type=dict)
-            if "lastUpdateId" in decoded:
-                # Snapshot
-                snapshot = OrderbookSnapshot(
-                    last_update_id=decoded["lastUpdateId"],
-                    bids=[[float(p), float(q)] for p, q in decoded["bids"]],
-                    asks=[[float(p), float(q)] for p, q in decoded["asks"]],
-                )
-                stream_msg = StreamMessage(
-                    msg_type="snapshot", data=msgspec.to_builtins(snapshot)
-                )
-            else:
-                # Delta update
-                # Binance format: U = first_update_id, u = final_update_id
-                delta = OrderbookDelta(
-                    final_update_id=decoded["u"],
-                    first_update_id=decoded["U"],
-                    bids=[[float(p), float(q)] for p, q in decoded["b"]],
-                    asks=[[float(p), float(q)] for p, q in decoded["a"]],
-                )
-                stream_msg = StreamMessage(
-                    msg_type="delta", data=msgspec.to_builtins(delta)
-                )
+            trade = TradeUpdate(
+                event_time=decoded["E"],
+                symbol=decoded["s"],
+                price=float(decoded["p"]),
+                quantity=float(decoded["q"]),
+                trade_time=decoded["T"],
+                is_buyer_maker=decoded["m"],
+            )
+            stream_msg = StreamMessage(msg_type="trade", data=msgspec.to_builtins(trade))
             self.data_producer.insert(self.encoder.encode(stream_msg), copy=False)
+            self._trade_sent_count += 1
+            if self._trade_sent_count % 50 == 0:
+                self.logger.info(f"Sent {self._trade_sent_count} trades".encode("utf-8"))
         except Exception as e:
-            self.logger.error(f"Error processing orderbook message: {e}".encode("utf-8"))
+            self.logger.error(f"Error processing trade message: {e}".encode("utf-8"))
 
     async def _run_streams(self) -> None:
         """Run WebSocket streams."""
@@ -207,33 +209,31 @@ class BinanceStreamProcessor:
         )
         self.bbo_pool = await WsPool.new(
             config=bbo_config,
-            on_message=self._process_bbo_message,
             pool_config=WsPoolConfig.default(),
         )
 
-        # Orderbook stream
-        orderbook_config = WsConnectionConfig.default(
-            wss_url=f"wss://fstream.binance.com/ws/{self.symbol.lower()}@depth@100ms"
+        # Trade stream
+        trade_config = WsConnectionConfig.default(
+            wss_url=f"wss://fstream.binance.com/ws/{self.symbol.lower()}@trade"
         )
-        self.orderbook_pool = await WsPool.new(
-            config=orderbook_config,
-            on_message=self._process_orderbook_message,
+        self.trade_pool = await WsPool.new(
+            config=trade_config,
             pool_config=WsPoolConfig.default(),
         )
 
-        async with self.bbo_pool, self.orderbook_pool:
-            self.logger.info("Streams connected, processing messages...".encode("utf-8"))
+        async with self.bbo_pool, self.trade_pool:
+            self.logger.info("Streams connected, processing BBO + trades...".encode("utf-8"))
             try:
 
                 async def consume_bbo():
-                    async for _ in self.bbo_pool:
-                        pass
+                    async for msg in self.bbo_pool:
+                        self._process_bbo_message(msg)
 
-                async def consume_orderbook():
-                    async for _ in self.orderbook_pool:
-                        pass
+                async def consume_trades():
+                    async for msg in self.trade_pool:
+                        self._process_trade_message(msg)
 
-                await asyncio.gather(consume_bbo(), consume_orderbook())
+                await asyncio.gather(consume_bbo(), consume_trades())
             except KeyboardInterrupt:
                 self.logger.info("Stream interrupted, shutting down...".encode("utf-8"))
 
@@ -250,14 +250,14 @@ class BinanceStreamProcessor:
         """Shutdown the stream processor."""
         if self.bbo_pool is not None:
             self.bbo_pool.close()
-        if self.orderbook_pool is not None:
-            self.orderbook_pool.close()
+        if self.trade_pool is not None:
+            self.trade_pool.close()
         self.data_producer.stop()
         self.logger.shutdown()
 
 
 class BinanceDataProcessor:
-    """Handles data processing, orderbook building, and candle generation."""
+    """Handles data processing and candle generation from BBO + trades."""
 
     def __init__(
         self,
@@ -294,13 +294,6 @@ class BinanceDataProcessor:
             )
         )
 
-        # Initialize orderbook
-        self.orderbook = Orderbook(
-            tick_size=tick_size,
-            lot_size=lot_size,
-            size=500,
-        )
-
         # Initialize time candles (1 second candles)
         self.time_candles = TimeCandles(secs_per_bucket=1.0, num_candles=100)
 
@@ -308,115 +301,75 @@ class BinanceDataProcessor:
         self.decoder = msgspec.json.Decoder(type=StreamMessage)
 
         # State
-        self.snapshot_received = False
         self._last_candle_timestamp = -1.0
-
-    def _handle_snapshot(self, snapshot_data: OrderbookSnapshot) -> None:
-        """Handle orderbook snapshot."""
-        bids = [
-            OrderbookLevel(price=price, size=size, norders=1, ticks=-1, lots=-1)
-            for price, size in snapshot_data.bids
-        ]
-        asks = [
-            OrderbookLevel(price=price, size=size, norders=1, ticks=-1, lots=-1)
-            for price, size in snapshot_data.asks
-        ]
-        self.orderbook.consume_snapshot(asks=asks, bids=bids)
-        self.snapshot_received = True
-        self.logger.info(
-            f"Orderbook snapshot received: {len(bids)} bids, {len(asks)} asks".encode("utf-8")
-        )
-
-    def _handle_delta(self, delta_data: OrderbookDelta) -> None:
-        """Handle orderbook delta update."""
-        if not self.snapshot_received:
-            return
-
-        bids = [
-            OrderbookLevel(price=price, size=size, norders=1, ticks=-1, lots=-1)
-            for price, size in delta_data.bids
-        ]
-        asks = [
-            OrderbookLevel(price=price, size=size, norders=1, ticks=-1, lots=-1)
-            for price, size in delta_data.asks
-        ]
-        self.orderbook.consume_deltas(asks=asks, bids=bids)
+        self._bbo_count = 0
+        self._trade_count = 0
 
     def _handle_bbo(self, bbo_data: BBOUpdate) -> None:
-        """Handle BBO update."""
-        if not self.snapshot_received:
-            return
+        """Handle BBO update - log mid price periodically."""
+        mid_price = (bbo_data.best_bid_price + bbo_data.best_ask_price) / 2.0
 
-        # Update BBO
-        bid_level = OrderbookLevel(
-            price=bbo_data.best_bid_price,
-            size=bbo_data.best_bid_qty,
-            norders=1,
-            ticks=-1,
-            lots=-1,
-        )
-        ask_level = OrderbookLevel(
-            price=bbo_data.best_ask_price,
-            size=bbo_data.best_ask_qty,
-            norders=1,
-            ticks=-1,
-            lots=-1,
-        )
-        self.orderbook.consume_bbo(ask=ask_level, bid=bid_level)
+        self._bbo_count += 1
+        if self._bbo_count % 50 == 0:
+            self.logger.info(
+                f"BBO #{self._bbo_count}: Bid={bbo_data.best_bid_price:.2f} "
+                f"Ask={bbo_data.best_ask_price:.2f} Mid={mid_price:.2f}".encode("utf-8")
+            )
 
-        # Get mid price and log it
-        mid_price = self.orderbook.get_mid_price()
-        self.logger.info(f"Mid price: {mid_price:.2f}".encode("utf-8"))
+    def _handle_trade(self, trade_data: TradeUpdate) -> None:
+        """Handle trade update - build candles with real size."""
+        self._trade_count += 1
+        if self._trade_count % 100 == 0:
+            side = "SELL" if trade_data.is_buyer_maker else "BUY"
+            self.logger.info(
+                f"Trade #{self._trade_count}: {side} {trade_data.quantity:.4f} @ {trade_data.price:.2f}".encode("utf-8")
+            )
 
-        # Create a trade-like object for candles (using mid price)
-        current_time_ms = int(time.time() * 1000)
+        # Create trade object with real size from exchange
         trade = Trade(
-            time_ms=current_time_ms,
-            is_buy=True,  # Doesn't matter for mid price
-            price=mid_price,
-            size=0.0,  # No size for mid price
+            time_ms=trade_data.trade_time,
+            is_buy=not trade_data.is_buyer_maker,  # buyer is maker = seller is taker
+            price=trade_data.price,
+            size=trade_data.quantity,
         )
 
         # Process trade for candles
         self.time_candles.process_trade(trade)
 
-        # Check if a new candle was completed using timestamp
+        # Check if a new candle was completed
         if len(self.time_candles) > 0:
             current_candle = self.time_candles[-1]
+            current_open_time = current_candle.open_time_ms
             if (
-                current_candle.timestamp != self._last_candle_timestamp
+                current_open_time != self._last_candle_timestamp
                 and self._last_candle_timestamp >= 0
             ):
-                # New candle started, previous one is complete
-                completed_candle = self.time_candles[-2] if len(self.time_candles) > 1 else None
-                if completed_candle is not None and completed_candle.num_trades > 0:
-                    self.logger.info(
-                        f"1s Candle: O={completed_candle.open_price:.2f} "
-                        f"H={completed_candle.high_price:.2f} "
-                        f"L={completed_candle.low_price:.2f} "
-                        f"C={completed_candle.close_price:.2f} "
-                        f"VWAP={completed_candle.vwap:.2f}".encode("utf-8")
-                    )
-            self._last_candle_timestamp = current_candle.timestamp
+                # New candle bucket started, previous one is complete
+                if len(self.time_candles) > 1:
+                    completed_candle = self.time_candles[-2]
+                    if completed_candle.num_trades > 0:
+                        self.logger.info(
+                            f"1s Candle: O={completed_candle.open_price:.2f} "
+                            f"H={completed_candle.high_price:.2f} "
+                            f"L={completed_candle.low_price:.2f} "
+                            f"C={completed_candle.close_price:.2f} "
+                            f"VWAP={completed_candle.vwap:.2f} "
+                            f"| Trades={completed_candle.num_trades} "
+                            f"| Vol={completed_candle.buy_size + completed_candle.sell_size:.4f}".encode("utf-8")
+                        )
+            self._last_candle_timestamp = current_open_time
 
     def _process_message(self, msg_bytes: bytes) -> None:
         """Process a single message."""
         try:
             stream_msg = self.decoder.decode(msg_bytes)
 
-            if stream_msg.msg_type == "snapshot":
-                snapshot_data = msgspec.structs.from_dict(
-                    OrderbookSnapshot, stream_msg.data
-                )
-                self._handle_snapshot(snapshot_data)
-
-            elif stream_msg.msg_type == "delta":
-                delta_data = msgspec.structs.from_dict(OrderbookDelta, stream_msg.data)
-                self._handle_delta(delta_data)
-
-            elif stream_msg.msg_type == "bbo":
-                bbo_data = msgspec.structs.from_dict(BBOUpdate, stream_msg.data)
+            if stream_msg.msg_type == "bbo":
+                bbo_data = msgspec.convert(stream_msg.data, type=BBOUpdate)
                 self._handle_bbo(bbo_data)
+            elif stream_msg.msg_type == "trade":
+                trade_data = msgspec.convert(stream_msg.data, type=TradeUpdate)
+                self._handle_trade(trade_data)
 
         except Exception as e:
             self.logger.error(f"Error processing message: {e}".encode("utf-8"))
@@ -424,7 +377,6 @@ class BinanceDataProcessor:
     def run(self) -> None:
         """Run the data processor."""
         self.logger.info(f"Processing process started for {self.symbol}".encode("utf-8"))
-        self.logger.info("Waiting for orderbook snapshot...".encode("utf-8"))
 
         try:
             while True:
@@ -462,8 +414,15 @@ def stream_process_entry(
     lot_size: float,
     logger_path: str,
     data_path: str,
+    startup_event_path: str,
 ) -> None:
     """Entry point for stream process."""
+    # Wait for processing process to initialize MasterLogger
+    startup = StartupEvent(startup_event_path)
+    if not startup.wait(timeout=10.0):
+        print("Timeout waiting for processing process to start", file=sys.stderr)
+        sys.exit(1)
+
     processor = BinanceStreamProcessor(symbol, logger_path, data_path)
     processor.run()
 
@@ -474,11 +433,17 @@ def processing_process_entry(
     lot_size: float,
     logger_path: str,
     data_path: str,
+    startup_event_path: str,
 ) -> None:
     """Entry point for processing process."""
     processor = BinanceDataProcessor(
         symbol, tick_size, lot_size, logger_path, data_path
     )
+
+    # Signal that MasterLogger is ready
+    startup = StartupEvent(startup_event_path)
+    startup.set()
+
     processor.run()
 
 
@@ -488,25 +453,32 @@ def main() -> None:
     tick_size = 0.01
     lot_size = 0.001
 
-    # IPC paths
-    logger_path = "ipc:///tmp/binance_logger"
+    # Paths - logger uses POSIX shared memory (raw filesystem path), not ZMQ IPC
+    logger_path = "/tmp/binance_logger"
     data_path = "ipc:///tmp/binance_data"
+    startup_event_path = "/tmp/binance_startup_ready"
+
+    # Clean up any stale startup signal
+    try:
+        os.remove(startup_event_path)
+    except FileNotFoundError:
+        pass
 
     # Create processes
     stream_proc = multiprocessing.Process(
         target=stream_process_entry,
-        args=(symbol, tick_size, lot_size, logger_path, data_path),
+        args=(symbol, tick_size, lot_size, logger_path, data_path, startup_event_path),
         daemon=True,
     )
     processing_proc = multiprocessing.Process(
         target=processing_process_entry,
-        args=(symbol, tick_size, lot_size, logger_path, data_path),
+        args=(symbol, tick_size, lot_size, logger_path, data_path, startup_event_path),
         daemon=True,
     )
 
-    # Start processes
-    stream_proc.start()
+    # Start processing first so MasterLogger creates shared memory before WorkerLogger attaches
     processing_proc.start()
+    stream_proc.start()
 
     print(f"Started stream and processing processes for {symbol}")
     print("Press Ctrl+C to stop...")
