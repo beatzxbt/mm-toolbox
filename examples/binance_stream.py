@@ -198,11 +198,15 @@ class BinanceStreamProcessor:
                 trade_time=decoded["T"],
                 is_buyer_maker=decoded["m"],
             )
-            stream_msg = StreamMessage(msg_type="trade", data=msgspec.to_builtins(trade))
+            stream_msg = StreamMessage(
+                msg_type="trade", data=msgspec.to_builtins(trade)
+            )
             self.data_producer.insert(self.encoder.encode(stream_msg), copy=False)
             self._trade_sent_count += 1
             if self._trade_sent_count % 50 == 0:
-                self.logger.info(f"Sent {self._trade_sent_count} trades".encode("utf-8"))
+                self.logger.info(
+                    f"Sent {self._trade_sent_count} trades".encode("utf-8")
+                )
         except Exception as e:
             self.logger.error(f"Error processing trade message: {e}".encode("utf-8"))
 
@@ -274,9 +278,7 @@ class BinanceStreamProcessor:
 
                 await asyncio.gather(consume_bbo(), consume_trades(), consume_depth())
             except KeyboardInterrupt:
-                self.logger.info(
-                    "Stream interrupted, shutting down...".encode("utf-8")
-                )
+                self.logger.info("Stream interrupted, shutting down...".encode("utf-8"))
 
     def run(self) -> None:
         """Run the stream processor."""
@@ -362,10 +364,7 @@ class BinanceDataProcessor:
 
     def _fetch_snapshot(self) -> None:
         """Fetch initial orderbook snapshot via REST."""
-        url = (
-            f"https://fapi.binance.com/fapi/v1/depth"
-            f"?symbol={self.symbol}&limit=100"
-        )
+        url = f"https://fapi.binance.com/fapi/v1/depth?symbol={self.symbol}&limit=100"
         with urllib.request.urlopen(url, timeout=20) as resp:
             data = resp.read()
 
@@ -420,7 +419,9 @@ class BinanceDataProcessor:
         if self._trade_count % 100 == 0:
             side = "SELL" if trade_data.is_buyer_maker else "BUY"
             self.logger.info(
-                f"Trade #{self._trade_count}: {side} {trade_data.quantity:.4f} @ {trade_data.price:.2f}".encode("utf-8")
+                f"Trade #{self._trade_count}: {side} {trade_data.quantity:.4f} @ {trade_data.price:.2f}".encode(
+                    "utf-8"
+                )
             )
 
         # Create trade object with real size from exchange
@@ -453,7 +454,9 @@ class BinanceDataProcessor:
                             f"C={completed_candle.close_price:.2f} "
                             f"VWAP={completed_candle.vwap:.2f} "
                             f"| Trades={completed_candle.num_trades} "
-                            f"| Vol={completed_candle.buy_size + completed_candle.sell_size:.4f}".encode("utf-8")
+                            f"| Vol={completed_candle.buy_size + completed_candle.sell_size:.4f}".encode(
+                                "utf-8"
+                            )
                         )
             self._last_candle_timestamp = current_open_time
 
@@ -524,7 +527,9 @@ class BinanceDataProcessor:
 
     def run(self) -> None:
         """Run the data processor."""
-        self.logger.info(f"Processing process started for {self.symbol}".encode("utf-8"))
+        self.logger.info(
+            f"Processing process started for {self.symbol}".encode("utf-8")
+        )
 
         try:
             while True:
@@ -544,9 +549,7 @@ class BinanceDataProcessor:
                     )
                     break
                 except Exception as e:
-                    self.logger.error(
-                        f"Error in processing loop: {e}".encode("utf-8")
-                    )
+                    self.logger.error(f"Error in processing loop: {e}".encode("utf-8"))
                     time.sleep(0.1)
 
         except KeyboardInterrupt:

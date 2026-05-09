@@ -16,13 +16,14 @@ from dataclasses import dataclass
 
 import websockets
 
-from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
 from mm_toolbox.websocket.connection import ConnectionState, WsConnectionConfig
 
 
 def _noop_handler(msg: bytes) -> None:
     """No-op message handler for benchmarks."""
     pass
+
+
 from mm_toolbox.websocket.pool import WsPool, WsPoolConfig
 from mm_toolbox.websocket.single import WsSingle
 
@@ -39,6 +40,7 @@ except ModuleNotFoundError:
 # ---------------------------------------------------------------------------
 # Echo server
 # ---------------------------------------------------------------------------
+
 
 async def _echo_handler(websocket: websockets.WebSocketServerProtocol) -> None:
     """Echo all messages back to client."""
@@ -78,6 +80,7 @@ class EchoServer:
 # Benchmark configuration
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class BenchmarkConfig:
     """Configuration for local websocket benchmark."""
@@ -94,6 +97,7 @@ class BenchmarkConfig:
 # Single benchmark
 # ---------------------------------------------------------------------------
 
+
 async def _benchmark_single(config: BenchmarkConfig) -> dict:
     """Benchmark WsSingle operations."""
     server = EchoServer(config.server_host, config.server_port)
@@ -106,12 +110,14 @@ async def _benchmark_single(config: BenchmarkConfig) -> dict:
         # Benchmark: connect
         connect_latencies = []
         for _ in range(100):
-            ws = WsSingle(WsConnectionConfig(
-                conn_id=1,
-                wss_url=url,
-                on_connect=[],
-                auto_reconnect=False,
-            ))
+            ws = WsSingle(
+                WsConnectionConfig(
+                    conn_id=1,
+                    wss_url=url,
+                    on_connect=[],
+                    auto_reconnect=False,
+                )
+            )
             start = time.perf_counter_ns()
             task = asyncio.create_task(ws.start())
             # Wait for connection
@@ -129,12 +135,14 @@ async def _benchmark_single(config: BenchmarkConfig) -> dict:
                 pass
 
         # Benchmark: send throughput
-        ws = WsSingle(WsConnectionConfig(
-            conn_id=1,
-            wss_url=url,
-            on_connect=[],
-            auto_reconnect=False,
-        ))
+        ws = WsSingle(
+            WsConnectionConfig(
+                conn_id=1,
+                wss_url=url,
+                on_connect=[],
+                auto_reconnect=False,
+            )
+        )
         task = asyncio.create_task(ws.start())
         # Wait for connection
         for _ in range(500):
@@ -178,6 +186,7 @@ def _run_single_benchmark(config_dict: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Pool benchmark
 # ---------------------------------------------------------------------------
+
 
 async def _benchmark_pool(config: BenchmarkConfig) -> dict:
     """Benchmark WsPool operations."""
@@ -282,6 +291,7 @@ def _run_pool_benchmark(config_dict: dict) -> dict:
 # Results printing
 # ---------------------------------------------------------------------------
 
+
 def _print_results(title: str, results: dict, num_messages: int) -> None:
     """Print benchmark results."""
     print(f"\n{title}")
@@ -301,12 +311,15 @@ def _print_results(title: str, results: dict, num_messages: int) -> None:
             total_ns = latencies[0]
             total_s = total_ns / 1_000_000_000
             msg_per_s = num_messages / total_s
-            print(f"  {op_name:20s}: {msg_per_s:10,.0f} msg/s  ({total_s:.3f}s for {num_messages:,} msgs)")
+            print(
+                f"  {op_name:20s}: {msg_per_s:10,.0f} msg/s  ({total_s:.3f}s for {num_messages:,} msgs)"
+            )
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     """Main entry point."""
