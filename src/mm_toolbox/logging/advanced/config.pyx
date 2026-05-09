@@ -10,9 +10,7 @@ cdef class LoggerConfig:
         str path="/tmp/hft_logger.shm", 
         double flush_interval_s=1.0,
         bint emit_internal=False,
-        int ipc_linger_ms=1000,
         int shm_capacity_bytes=67108864,
-        int shm_num_rings=0,
         int max_batch_messages=10000,
         int max_batch_bytes=1048576,
     ):
@@ -29,9 +27,7 @@ cdef class LoggerConfig:
             path (str): The connection path for the transport protocol. Defaults to '/tmp/hft_logger.shm'.
             flush_interval_s (float): Positive interval (seconds) to pace flush cycles. Defaults to 1.0.
             emit_internal (bool): If True, emit internal startup/shutdown logs. Defaults to False.
-            ipc_linger_ms (int): ZMQ linger (milliseconds) for IPC sockets. Defaults to 1000.
             shm_capacity_bytes (int): Shared memory ring buffer capacity in bytes. Defaults to 64MB.
-            shm_num_rings (int): Number of sub-rings for MPSC. 0 = auto (cpu_count * 2). Defaults to 0.
             max_batch_messages (int): Max messages before forced flush. Defaults to 10000.
             max_batch_bytes (int): Max bytes before forced flush. Defaults to 1MB.
         """
@@ -53,17 +49,10 @@ cdef class LoggerConfig:
             raise ValueError(f"Invalid flush interval; expected a positive number but got '{self.flush_interval_s}'")
 
         self.emit_internal = emit_internal
-        self.ipc_linger_ms = ipc_linger_ms
-        if self.ipc_linger_ms < 0:
-            raise ValueError(f"Invalid ipc_linger_ms; expected >=0 but got '{self.ipc_linger_ms}'")
 
         self.shm_capacity_bytes = shm_capacity_bytes
         if self.shm_capacity_bytes <= 0:
             raise ValueError(f"Invalid shm_capacity_bytes; expected >0 but got '{self.shm_capacity_bytes}'")
-
-        self.shm_num_rings = shm_num_rings
-        if self.shm_num_rings < 0:
-            raise ValueError(f"Invalid shm_num_rings; expected >=0 but got '{self.shm_num_rings}'")
 
         self.max_batch_messages = max_batch_messages
         if self.max_batch_messages <= 0:

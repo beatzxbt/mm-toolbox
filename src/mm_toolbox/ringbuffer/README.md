@@ -1,7 +1,7 @@
 # Ring buffers
 
-High-performance ring buffers for in-process queues and inter-process transport.
-The module includes byte, numeric, generic, IPC, and shared-memory variants with
+High-performance ring buffers for in-process queues and shared-memory transport.
+The module includes byte, numeric, generic, and shared-memory variants with
 consistent insert/consume semantics.
 
 ## Architecture overview
@@ -39,23 +39,6 @@ slots (fixed size)
   tail                head
 
 insert() -> memcpy into slot[head], advance head
-```
-
-### IPC transport (ZMQ)
-
-IPC buffers use PUSH/PULL sockets with a configurable backlog and simple
-topologies (SPSC/MPSC/SPMC, but not MPMC).
-
-```
-Producers                         Consumer
-┌──────────────┐                  ┌──────────────┐
-│ insert(bytes)│                  │ consume()    │
-└──────┬───────┘                  └──────┬───────┘
-       │                                ▲
-       ▼                                │
-┌───────────────────────────┐          │
-│ ZMQ PUSH/PULL channel     │──────────┘
-└───────────────────────────┘
 ```
 
 ### Shared memory (SPSC)
@@ -100,14 +83,6 @@ Producer                       Consumer
 - Accepts `int`/`uint` (1/2/4/8 bytes) and `float` (4/8 bytes).
 - Best for numeric streams where NumPy interop and slicing are important.
 
-## IPC buffer (ZMQ)
-
-### IPCRingBufferProducer / IPCRingBufferConsumer
-- PUSH/PULL sockets with high-water-mark backlog.
-- Supports SPSC, MPSC, or SPMC (not MPMC).
-- `insert_packed` / `consume_packed` batch multiple messages into one frame.
-- `should_producer_bind()` decides bind/connect to avoid multiple binders.
-
 ## Shared memory buffer (SPSC)
 
 ### shm
@@ -142,17 +117,6 @@ rb.insert(2.0)
 values = rb.unwrapped()
 ```
 
-### IPC ring buffer
-
-```python
-from mm_toolbox.ringbuffer import IPCRingBufferConfig, IPCRingBufferProducer
-
-config = IPCRingBufferConfig.default()
-producer = IPCRingBufferProducer(config)
-producer.insert(b"payload")
-producer.stop()
-```
-
 ## Behavior notes
 
 - Capacity rounds up to the next power of two for fast masking.
@@ -160,4 +124,3 @@ producer.stop()
 - In-process buffers use FIFO consume semantics: `consume()` pops the oldest item.
 - `unwrapped()` returns items from oldest to newest.
 - Async helpers (`aconsume`, `aconsume_iterable`) block until new data arrives.
-- IPC buffers are transport-backed (ZMQ), not shared memory; use `shm` for SPSC.

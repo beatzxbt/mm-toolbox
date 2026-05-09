@@ -8,9 +8,7 @@ cdef class LoggerConfig:
         public str          path
         public double       flush_interval_s
         public bint         emit_internal
-        public int          ipc_linger_ms
         public int          shm_capacity_bytes
-        public int          shm_num_rings
         public int          max_batch_messages
         public int          max_batch_bytes
 

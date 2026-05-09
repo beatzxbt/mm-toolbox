@@ -31,7 +31,6 @@ dependencies = [
     "picows",
     "ciso8601",
     "msgspec",
-    "zmq",
     "aiohttp",
     "xxhash>=3.6.0",
 ]

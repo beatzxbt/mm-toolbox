@@ -71,7 +71,7 @@ class TestLoggerConfig:
         with pytest.raises((ValueError, TypeError)):
             LoggerConfig(str_format=invalid_format)
 
-    @pytest.mark.parametrize("path", ["ipc:///tmp/test", "tcp://127.0.0.1:5555"])
+    @pytest.mark.parametrize("path", ["/tmp/test.shm", "/tmp/hft_logger.shm"])
     def test_valid_path(self, path):
         config = LoggerConfig(path=path)
         assert config.path == path
@@ -91,16 +91,59 @@ class TestLoggerConfig:
         with pytest.raises((ValueError, TypeError)):
             LoggerConfig(flush_interval_s=invalid_interval)
 
+    @pytest.mark.parametrize("shm_capacity_bytes", [1, 1024, 67108864])
+    def test_valid_shm_capacity_bytes(self, shm_capacity_bytes):
+        config = LoggerConfig(shm_capacity_bytes=shm_capacity_bytes)
+        assert config.shm_capacity_bytes == shm_capacity_bytes
+
+    @pytest.mark.parametrize("invalid_shm_capacity_bytes", [0, -1, -1024])
+    def test_invalid_shm_capacity_bytes(self, invalid_shm_capacity_bytes):
+        with pytest.raises(ValueError):
+            LoggerConfig(shm_capacity_bytes=invalid_shm_capacity_bytes)
+
+    @pytest.mark.parametrize("max_batch_messages", [1, 100, 10000])
+    def test_valid_max_batch_messages(self, max_batch_messages):
+        config = LoggerConfig(max_batch_messages=max_batch_messages)
+        assert config.max_batch_messages == max_batch_messages
+
+    @pytest.mark.parametrize("invalid_max_batch_messages", [0, -1, -100])
+    def test_invalid_max_batch_messages(self, invalid_max_batch_messages):
+        with pytest.raises(ValueError):
+            LoggerConfig(max_batch_messages=invalid_max_batch_messages)
+
+    @pytest.mark.parametrize("max_batch_bytes", [1, 1024, 1048576])
+    def test_valid_max_batch_bytes(self, max_batch_bytes):
+        config = LoggerConfig(max_batch_bytes=max_batch_bytes)
+        assert config.max_batch_bytes == max_batch_bytes
+
+    @pytest.mark.parametrize("invalid_max_batch_bytes", [0, -1, -1024])
+    def test_invalid_max_batch_bytes(self, invalid_max_batch_bytes):
+        with pytest.raises(ValueError):
+            LoggerConfig(max_batch_bytes=invalid_max_batch_bytes)
+
+    @pytest.mark.parametrize("emit_internal", [True, False])
+    def test_valid_emit_internal(self, emit_internal):
+        config = LoggerConfig(emit_internal=emit_internal)
+        assert config.emit_internal == emit_internal
+
     def test_multiple_params(self):
         config = LoggerConfig(
             base_level=PyLogLevel.DEBUG,
             do_stdout=True,
             str_format="%(message)s",
-            path="ipc:///tmp/multi",
+            path="/tmp/multi.shm",
             flush_interval_s=2.0,
+            emit_internal=True,
+            shm_capacity_bytes=134217728,
+            max_batch_messages=5000,
+            max_batch_bytes=2097152,
         )
         assert config.base_level == PyLogLevel.DEBUG
         assert config.do_stdout is True
         assert config.str_format == "%(message)s"
-        assert config.path == "ipc:///tmp/multi"
+        assert config.path == "/tmp/multi.shm"
         assert config.flush_interval_s == 2.0
+        assert config.emit_internal is True
+        assert config.shm_capacity_bytes == 134217728
+        assert config.max_batch_messages == 5000
+        assert config.max_batch_bytes == 2097152

@@ -116,7 +116,6 @@ that covers API details, architecture notes, and usage examples.
 - `BytesRingBuffer`: Optimized for byte arrays
 - `BytesRingBufferFast`: Pre-allocated slots for predictable byte workloads
 - `GenericRingBuffer`: Flexible support for any Python type
-- `IPCRingBuffer`: PUSH/PULL transport for SPSC/MPSC/SPMC topologies
 - `SharedMemoryRingBuffer`: SPSC shared-memory ring buffer (POSIX-only)
 
 All ring buffers share consistent insert/consume semantics and overwrite oldest

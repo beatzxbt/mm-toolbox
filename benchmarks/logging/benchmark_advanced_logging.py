@@ -169,7 +169,6 @@ def _worker_emit_burst(
             do_stdout=False,
             flush_interval_s=flush_interval_s,
             emit_internal=False,
-            ipc_linger_ms=0,
         ),
         name=worker_name,
     )
@@ -353,7 +352,6 @@ class AdvancedLoggingBenchmark(BenchmarkRunner[AdvancedLoggingBenchmarkConfig]):
                 do_stdout=False,
                 flush_interval_s=self.config.flush_interval_s,
                 emit_internal=False,
-                ipc_linger_ms=0,
             ),
             log_handlers=[handler],
         )
