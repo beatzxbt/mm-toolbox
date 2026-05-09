@@ -10,6 +10,7 @@ This example shows:
 
 import asyncio
 import multiprocessing
+import os
 import sys
 import time
 from typing import Any
@@ -32,6 +33,31 @@ from mm_toolbox.ringbuffer.ipc import (
     IPCRingBufferProducer,
 )
 from mm_toolbox.websocket import WsConnectionConfig, WsPool, WsPoolConfig
+
+
+class StartupEvent:
+    """Simple cross-process synchronization using a file."""
+
+    def __init__(self, path: str):
+        self.path = path
+
+    def set(self):
+        """Signal that startup is complete."""
+        with open(self.path, "w") as f:
+            f.write("ready")
+
+    def wait(self, timeout: float = 10.0, poll_interval: float = 0.01):
+        """Wait for startup signal."""
+        start = time.time()
+        while time.time() - start < timeout:
+            try:
+                with open(self.path, "r") as f:
+                    if f.read().strip() == "ready":
+                        return True
+            except FileNotFoundError:
+                pass
+            time.sleep(poll_interval)
+        return False
 
 
 class StdoutLogHandler(BaseLogHandler):
@@ -70,8 +96,8 @@ class OrderbookSnapshot(msgspec.Struct):
 class OrderbookDelta(msgspec.Struct):
     """Orderbook delta update message."""
 
-    first_update_id: int
     final_update_id: int
+    first_update_id: int
     bids: list[tuple[float, float]]
     asks: list[tuple[float, float]]
 
@@ -139,7 +165,7 @@ class BinanceStreamProcessor:
             stream_msg = StreamMessage(msg_type="bbo", data=msgspec.to_builtins(bbo))
             self.data_producer.insert(self.encoder.encode(stream_msg), copy=False)
         except Exception as e:
-            self.logger.error(f"Error processing BBO message: {e}")
+            self.logger.error(f"Error processing BBO message: {e}".encode("utf-8"))
 
     def _process_orderbook_message(self, msg: bytes) -> None:
         """Process orderbook depth messages."""
@@ -157,9 +183,10 @@ class BinanceStreamProcessor:
                 )
             else:
                 # Delta update
+                # Binance format: U = first_update_id, u = final_update_id
                 delta = OrderbookDelta(
-                    first_update_id=decoded["u"],
-                    final_update_id=decoded["U"],
+                    final_update_id=decoded["u"],
+                    first_update_id=decoded["U"],
                     bids=[[float(p), float(q)] for p, q in decoded["b"]],
                     asks=[[float(p), float(q)] for p, q in decoded["a"]],
                 )
@@ -168,11 +195,11 @@ class BinanceStreamProcessor:
                 )
             self.data_producer.insert(self.encoder.encode(stream_msg), copy=False)
         except Exception as e:
-            self.logger.error(f"Error processing orderbook message: {e}")
+            self.logger.error(f"Error processing orderbook message: {e}".encode("utf-8"))
 
     async def _run_streams(self) -> None:
         """Run WebSocket streams."""
-        self.logger.info(f"Starting streams for {self.symbol}")
+        self.logger.info(f"Starting streams for {self.symbol}".encode("utf-8"))
 
         # BBO stream
         bbo_config = WsConnectionConfig.default(
@@ -195,7 +222,7 @@ class BinanceStreamProcessor:
         )
 
         async with self.bbo_pool, self.orderbook_pool:
-            self.logger.info("Streams connected, processing messages...")
+            self.logger.info("Streams connected, processing messages...".encode("utf-8"))
             try:
 
                 async def consume_bbo():
@@ -208,14 +235,14 @@ class BinanceStreamProcessor:
 
                 await asyncio.gather(consume_bbo(), consume_orderbook())
             except KeyboardInterrupt:
-                self.logger.info("Stream interrupted, shutting down...")
+                self.logger.info("Stream interrupted, shutting down...".encode("utf-8"))
 
     def run(self) -> None:
         """Run the stream processor."""
         try:
             asyncio.run(self._run_streams())
         except KeyboardInterrupt:
-            self.logger.info("Stream process interrupted")
+            self.logger.info("Stream process interrupted".encode("utf-8"))
         finally:
             self.shutdown()
 
@@ -282,6 +309,7 @@ class BinanceDataProcessor:
 
         # State
         self.snapshot_received = False
+        self._last_candle_timestamp = -1.0
 
     def _handle_snapshot(self, snapshot_data: OrderbookSnapshot) -> None:
         """Handle orderbook snapshot."""
@@ -296,7 +324,7 @@ class BinanceDataProcessor:
         self.orderbook.consume_snapshot(asks=asks, bids=bids)
         self.snapshot_received = True
         self.logger.info(
-            f"Orderbook snapshot received: {len(bids)} bids, {len(asks)} asks"
+            f"Orderbook snapshot received: {len(bids)} bids, {len(asks)} asks".encode("utf-8")
         )
 
     def _handle_delta(self, delta_data: OrderbookDelta) -> None:
@@ -338,7 +366,7 @@ class BinanceDataProcessor:
 
         # Get mid price and log it
         mid_price = self.orderbook.get_mid_price()
-        self.logger.info(f"Mid price: {mid_price:.2f}")
+        self.logger.info(f"Mid price: {mid_price:.2f}".encode("utf-8"))
 
         # Create a trade-like object for candles (using mid price)
         current_time_ms = int(time.time() * 1000)
@@ -350,21 +378,26 @@ class BinanceDataProcessor:
         )
 
         # Process trade for candles
-        candle_count_before = len(self.time_candles)
         self.time_candles.process_trade(trade)
-        candle_count_after = len(self.time_candles)
 
-        # Check if a new candle was completed
-        if candle_count_after > candle_count_before and candle_count_after > 1:
-            completed_candle = self.time_candles[-2]
-            if completed_candle.num_trades > 0:
-                self.logger.info(
-                    f"1s Candle: O={completed_candle.open_price:.2f} "
-                    f"H={completed_candle.high_price:.2f} "
-                    f"L={completed_candle.low_price:.2f} "
-                    f"C={completed_candle.close_price:.2f} "
-                    f"VWAP={completed_candle.vwap:.2f}"
-                )
+        # Check if a new candle was completed using timestamp
+        if len(self.time_candles) > 0:
+            current_candle = self.time_candles[-1]
+            if (
+                current_candle.timestamp != self._last_candle_timestamp
+                and self._last_candle_timestamp >= 0
+            ):
+                # New candle started, previous one is complete
+                completed_candle = self.time_candles[-2] if len(self.time_candles) > 1 else None
+                if completed_candle is not None and completed_candle.num_trades > 0:
+                    self.logger.info(
+                        f"1s Candle: O={completed_candle.open_price:.2f} "
+                        f"H={completed_candle.high_price:.2f} "
+                        f"L={completed_candle.low_price:.2f} "
+                        f"C={completed_candle.close_price:.2f} "
+                        f"VWAP={completed_candle.vwap:.2f}".encode("utf-8")
+                    )
+            self._last_candle_timestamp = current_candle.timestamp
 
     def _process_message(self, msg_bytes: bytes) -> None:
         """Process a single message."""
@@ -386,12 +419,12 @@ class BinanceDataProcessor:
                 self._handle_bbo(bbo_data)
 
         except Exception as e:
-            self.logger.error(f"Error processing message: {e}")
+            self.logger.error(f"Error processing message: {e}".encode("utf-8"))
 
     def run(self) -> None:
         """Run the data processor."""
-        self.logger.info(f"Processing process started for {self.symbol}")
-        self.logger.info("Waiting for orderbook snapshot...")
+        self.logger.info(f"Processing process started for {self.symbol}".encode("utf-8"))
+        self.logger.info("Waiting for orderbook snapshot...".encode("utf-8"))
 
         try:
             while True:
@@ -406,14 +439,14 @@ class BinanceDataProcessor:
                         self._process_message(msg_bytes)
 
                 except KeyboardInterrupt:
-                    self.logger.info("Processing interrupted, shutting down...")
+                    self.logger.info("Processing interrupted, shutting down...".encode("utf-8"))
                     break
                 except Exception as e:
-                    self.logger.error(f"Error in processing loop: {e}")
+                    self.logger.error(f"Error in processing loop: {e}".encode("utf-8"))
                     time.sleep(0.1)
 
         except KeyboardInterrupt:
-            self.logger.info("Processing process interrupted")
+            self.logger.info("Processing process interrupted".encode("utf-8"))
         finally:
             self.shutdown()
 

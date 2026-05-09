@@ -37,8 +37,8 @@ class WsConnectionConfig(Struct):
     latency_ping_interval_ms: int = DEFAULT_LATENCY_PING_INTERVAL_MS
 
     def __post_init__(self):
-        if not self.wss_url.startswith("wss://"):
-            raise ValueError("Invalid wss_url; must start with 'wss://'")
+        if not (self.wss_url.startswith("wss://") or self.wss_url.startswith("ws://")):
+            raise ValueError("Invalid wss_url; must start with 'ws://' or 'wss://'")
         if self.max_frame_size <= 0:
             raise ValueError(
                 f"Invalid max_frame_size; expected >0 but got {self.max_frame_size}"
