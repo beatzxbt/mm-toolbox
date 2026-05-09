@@ -3,10 +3,8 @@ import os
 import time
 from queue import Empty, Queue
 from pathlib import Path
-import hashlib
 
 import pytest
-import zmq
 
 from mm_toolbox.logging.advanced.config import LoggerConfig
 from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
@@ -53,45 +51,12 @@ def _wait_for_file_lines(path, expected: int, timeout_s: float = 5.0) -> list[st
     return path.read_text().splitlines() if path.exists() else []
 
 
-def _ipc_available(path: Path) -> bool:
-    ctx = zmq.Context.instance()
-    sock = ctx.socket(zmq.PULL)
-    addr = f"ipc://{path}"
-    try:
-        sock.bind(addr)
-        sock.unbind(addr)
-        return True
-    except zmq.ZMQError:
-        return False
-    finally:
-        sock.close(0)
-        if path.exists():
-            path.unlink()
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _require_ipc_support() -> None:
-    base_dir = Path.cwd() / ".ipc"
-    base_dir.mkdir(exist_ok=True)
-    probe_path = base_dir / "ipc_probe"
-    if not _ipc_available(probe_path):
-        pytest.skip("IPC transport is not available in this environment")
-
-
 @pytest.fixture
-def ipc_path():
+def ipc_path(tmp_path: Path):
     def _make(name: str) -> str:
-        base_dir = Path.cwd() / ".ipc"
-        base_dir.mkdir(exist_ok=True)
         suffix = f"{name}_{os.getpid()}"
-        path = base_dir / suffix
-
-        max_len = getattr(zmq, "IPC_PATH_MAX_LEN", 103)
-        if len(str(path)) > max_len:
-            digest = hashlib.sha1(suffix.encode("utf-8")).hexdigest()[:12]
-            path = base_dir / digest
-
-        return f"ipc://{path}"
+        path = tmp_path / suffix
+        return str(path)
 
     return _make
 
@@ -113,7 +78,7 @@ def worker_process(
             PyLogLevel.WARNING: logger.warning,
             PyLogLevel.ERROR: logger.error,
         }[level]
-        log_func(f"Log {i} from {name}")
+        log_func(msg_bytes=f"Log {i} from {name}".encode("utf-8"))
     logger.shutdown()
 
 
@@ -128,11 +93,11 @@ def worker_large_msg(path, name, msg_size):
 def worker_mixed_levels(path, name):
     config = LoggerConfig(path=path, base_level=PyLogLevel.TRACE)
     logger = WorkerLogger(config=config, name=name)
-    logger.trace("Trace msg")
-    logger.debug("Debug msg")
-    logger.info("Info msg")
-    logger.warning("Warning msg")
-    logger.error("Error msg")
+    logger.trace(msg_bytes=b"Trace msg")
+    logger.debug(msg_bytes=b"Debug msg")
+    logger.info(msg_bytes=b"Info msg")
+    logger.warning(msg_bytes=b"Warning msg")
+    logger.error(msg_bytes=b"Error msg")
     logger.shutdown()
 
 

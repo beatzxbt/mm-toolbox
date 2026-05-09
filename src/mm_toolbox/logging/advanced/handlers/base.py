@@ -80,6 +80,7 @@ class BaseLogHandler(ABC):
         self._encode_json: Callable[[object], bytes] | None = None
         self._http_session: aiohttp.ClientSession | None = None
         self._ev_loop: asyncio.AbstractEventLoop | None = None
+        self._ev_loop_lock = threading.Lock()
         self._loop_thread: threading.Thread | None = None
         self._primary_config: LoggerConfig | None = None
         self._futures: list[Future] = []
@@ -121,17 +122,18 @@ class BaseLogHandler(ABC):
         Returns:
             asyncio.AbstractEventLoop: Event loop used by this handler.
         """
-        if self._ev_loop is None or self._ev_loop.is_closed():
-            loop = asyncio.new_event_loop()
-            self._ev_loop = loop
+        with self._ev_loop_lock:
+            if self._ev_loop is None or self._ev_loop.is_closed():
+                loop = asyncio.new_event_loop()
+                self._ev_loop = loop
 
-            def _runner() -> None:
-                asyncio.set_event_loop(loop)
-                loop.run_forever()
+                def _runner() -> None:
+                    asyncio.set_event_loop(loop)
+                    loop.run_forever()
 
-            self._loop_thread = threading.Thread(target=_runner, daemon=True)
-            self._loop_thread.start()
-        return self._ev_loop
+                self._loop_thread = threading.Thread(target=_runner, daemon=True)
+                self._loop_thread.start()
+            return self._ev_loop
 
     def _run_coro(self, coro: "Coroutine[object, None, object]") -> Future:
         """Submit a coroutine to the handler loop.

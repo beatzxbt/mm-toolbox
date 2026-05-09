@@ -18,20 +18,20 @@ cdef class WorkerLogger:
         u32             _num_pending_logs
         BinaryWriter    _batch_writer
         object          _transport
-        bint            _is_running
-        object          _timed_operations_thread
         object          _stop_event
+        object          _timed_operations_thread
+        object          _batch_lock
 
-    # cdef                __cinit__(self, object config=None, str name=None)
     cpdef void          _timed_operations(self)
-    cdef void           _flush_logs(self)
-    cdef void           _add_log_to_batch(self, CLogLevel clevel, u32 message_len, unsigned char* message)
+    cdef void           _flush_logs(self) except *
+    cdef void           _flush_logs_locked(self) except *
+    cdef void           _add_log_to_batch(self, CLogLevel clevel, u32 message_len, unsigned char* message) except *
     
-    cpdef void          trace(self, str msg_str=*, bytes msg_bytes=*)
-    cpdef void          debug(self, str msg_str=*, bytes msg_bytes=*)
-    cpdef void          info(self, str msg_str=*, bytes msg_bytes=*)
-    cpdef void          warning(self, str msg_str=*, bytes msg_bytes=*)
-    cpdef void          error(self, str msg_str=*, bytes msg_bytes=*)
+    cpdef void          trace(self, bytes msg_bytes=*)
+    cpdef void          debug(self, bytes msg_bytes=*)
+    cpdef void          info(self, bytes msg_bytes=*)
+    cpdef void          warning(self, bytes msg_bytes=*)
+    cpdef void          error(self, bytes msg_bytes=*)
     cpdef void          shutdown(self)
 
     cpdef bint          is_running(self)

@@ -1,14 +1,17 @@
 import asyncio
 import json
 import os
+import shutil
 import tempfile
+import threading
+from concurrent.futures import Future
 from unittest.mock import AsyncMock, patch
 
 import aiohttp
 import pytest
 
 from mm_toolbox.logging.advanced.config import LoggerConfig
-from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
+from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler, _RateLimiter
 from mm_toolbox.logging.advanced.handlers.discord import DiscordLogHandler
 from mm_toolbox.logging.advanced.handlers.file import FileLogHandler
 from mm_toolbox.logging.advanced.handlers.telegram import TelegramLogHandler
@@ -59,6 +62,89 @@ class TestBaseLogHandler:
         loop = handler.ev_loop
         assert isinstance(loop, asyncio.AbstractEventLoop)
         assert handler._ev_loop is not None
+
+    def test_close_waits_for_futures(self):
+        handler = FileLogHandler("test.txt")
+        fut = handler._run_coro(asyncio.sleep(0.1))
+        handler._track_future(fut)
+        handler.close(timeout_s=1.0)
+        assert fut.done()
+        assert handler._loop_thread is None or not handler._loop_thread.is_alive()
+
+    def test_future_trim_at_4096(self):
+        handler = FileLogHandler("test.txt")
+        for _ in range(4097):
+            mock_fut = Future()
+            handler._track_future(mock_fut)
+        # After exceeding 4096, trim to last 2048
+        assert len(handler._futures) == 2048
+        # Add more and verify it stays bounded
+        for _ in range(1000):
+            mock_fut = Future()
+            handler._track_future(mock_fut)
+        assert len(handler._futures) <= 4096
+        # Clean up to avoid __del__ hanging on pending futures
+        handler._futures.clear()
+
+    def test_on_future_done_captures_exception(self):
+        handler = FileLogHandler("test.txt")
+        with patch.object(handler, "_handle_exception") as mock_handle:
+            fut = Future()
+            handler._track_future(fut)
+            fut.set_exception(RuntimeError("test error"))
+            mock_handle.assert_called_once()
+            args = mock_handle.call_args[0]
+            assert isinstance(args[0], RuntimeError)
+            assert args[1] == "handler task"
+
+    def test_handle_exception_custom_callback(self):
+        handler = FileLogHandler("test.txt")
+        errors = []
+
+        def callback(exc, ctx):
+            errors.append((exc, ctx))
+
+        handler.set_error_handler(callback)
+        exc = RuntimeError("test")
+        handler._handle_exception(exc, "test_ctx")
+        assert len(errors) == 1
+        assert errors[0][0] is exc
+        assert errors[0][1] == "test_ctx"
+
+    def test_handle_exception_stderr_fallback(self, capsys):
+        handler = FileLogHandler("test.txt")
+        exc = RuntimeError("stderr test")
+        handler._handle_exception(exc, "fallback")
+        captured = capsys.readouterr()
+        assert "stderr test" in captured.err
+        assert "fallback" in captured.err
+        assert "FileLogHandler" in captured.err
+
+    def test_normalize_log_bytes_bytearray(self):
+        result = BaseLogHandler._normalize_log_bytes(bytearray(b"hello"))
+        assert result == b"hello"
+        assert isinstance(result, bytes)
+
+    def test_normalize_log_bytes_invalid_type(self):
+        with pytest.raises(TypeError):
+            BaseLogHandler._normalize_log_bytes(123)
+
+    def test_ev_loop_thread_safe(self):
+        handler = FileLogHandler("test.txt")
+        loops = []
+
+        def get_loop():
+            loops.append(handler.ev_loop)
+
+        t1 = threading.Thread(target=get_loop)
+        t2 = threading.Thread(target=get_loop)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        assert len(loops) == 2
+        assert loops[0] is loops[1]
+        handler.close()
 
 
 class TestFileLogHandler:
@@ -145,6 +231,37 @@ class TestFileLogHandler:
         with open(temp_file) as f:
             assert f.read() == ""  # Nothing written
 
+    def test_create_with_directory(self):
+        tmpdir = tempfile.mkdtemp()
+        shutil.rmtree(tmpdir)
+        path = os.path.join(tmpdir, "subdir", "test.txt")
+        handler = FileLogHandler(path, create=True)
+        assert os.path.exists(os.path.dirname(path))
+        handler.close()
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_push_creates_file_if_missing(self):
+        tmpdir = tempfile.mkdtemp()
+        path = os.path.join(tmpdir, "test.txt")
+        handler = FileLogHandler(path, create=True)
+        config = LoggerConfig(str_format="%(message)s")
+        handler.add_primary_config(config)
+        logs = [PyLog(1, b"name", PyLogLevel.INFO, b"msg")]
+        handler.push(logs)
+        assert os.path.exists(path)
+        with open(path) as f:
+            assert "msg" in f.read()
+        handler.close()
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_push_disk_full(self, temp_file):
+        handler = FileLogHandler(temp_file)
+        config = LoggerConfig(str_format="%(message)s")
+        handler.add_primary_config(config)
+        with patch("builtins.open", side_effect=OSError("No space left")):
+            handler.push([PyLog(1, b"name", PyLogLevel.INFO, b"msg")])
+        handler.close()
+
 
 class TestDiscordLogHandler:
     def test_init_valid(self):
@@ -186,6 +303,18 @@ class TestDiscordLogHandler:
         assert call_args[1]["headers"] == {"Content-Type": "application/json"}
         data = json.loads(call_args[1]["data"])
         assert data["content"] == "msg1\nmsg2"
+
+    def test_discord_chunking(self):
+        text = "a" * 2500
+        chunks = DiscordLogHandler._chunk(text, 1800)
+        assert len(chunks) == 2
+        assert len(chunks[0]) == 1800
+        assert len(chunks[1]) == 700
+
+    def test_discord_rate_limiter(self):
+        handler = DiscordLogHandler("https://discord.com/api/webhooks/123/abc")
+        assert handler._limiter._rate == 2.5
+        assert handler._limiter._capacity == 5
 
 
 class TestTelegramLogHandler:
@@ -237,3 +366,36 @@ class TestTelegramLogHandler:
         for i, call in enumerate(calls, 1):
             data = json.loads(call[1]["data"])
             assert data["text"] == f"msg{i}"
+
+    def test_telegram_chunking(self):
+        text = "b" * 4000
+        chunks = TelegramLogHandler._chunk(text, 3500)
+        assert len(chunks) == 2
+        assert len(chunks[0]) == 3500
+        assert len(chunks[1]) == 500
+
+    def test_telegram_rate_limiter(self):
+        handler = TelegramLogHandler("token", "chat")
+        assert handler._limiter._rate == 1.0
+        assert handler._limiter._capacity == 20
+
+
+class TestRateLimiter:
+    @pytest.mark.asyncio
+    async def test_rate_limiter_basic(self):
+        limiter = _RateLimiter(10.0, 5)
+        for _ in range(5):
+            await limiter.acquire(1)
+        start = asyncio.get_running_loop().time()
+        await limiter.acquire(1)
+        elapsed = asyncio.get_running_loop().time() - start
+        assert elapsed > 0
+
+    @pytest.mark.asyncio
+    async def test_rate_limiter_burst(self):
+        limiter = _RateLimiter(1.0, 10)
+        start = asyncio.get_running_loop().time()
+        for _ in range(10):
+            await limiter.acquire(1)
+        elapsed = asyncio.get_running_loop().time() - start
+        assert elapsed < 0.1

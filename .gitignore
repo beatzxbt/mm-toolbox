@@ -4,6 +4,7 @@
 .cursor
 .DS_Store
 .ipc/
+.shm/
 AGENTS.md
 CLAUDE.md
 

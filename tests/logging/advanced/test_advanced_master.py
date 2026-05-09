@@ -16,7 +16,7 @@ class MockHandler(BaseLogHandler):
 class TestMasterLogger:
     @pytest.fixture
     def default_config(self):
-        return LoggerConfig(path="ipc:///tmp/test_master")
+        return LoggerConfig(path="/tmp/test_master.shm")
 
     def test_init_default(self, default_config):
         logger = MasterLogger(config=default_config)
@@ -48,11 +48,6 @@ class TestMasterLogger:
     @pytest.mark.parametrize(
         "method, args",
         [
-            ("trace", {"msg_str": "trace msg"}),
-            ("debug", {"msg_str": "debug msg"}),
-            ("info", {"msg_str": "info msg"}),
-            ("warning", {"msg_str": "warning msg"}),
-            ("error", {"msg_str": "error msg"}),
             ("trace", {"msg_bytes": b"trace bytes"}),
             ("debug", {"msg_bytes": b"debug bytes"}),
             ("info", {"msg_bytes": b"info bytes"}),
@@ -62,20 +57,18 @@ class TestMasterLogger:
     )
     def test_log_methods(self, default_config, method, args):
         logger = MasterLogger(config=default_config)
-        log_func = getattr(logger, method)
-        log_func(**args)  # Should not raise
-        logger.shutdown()
-
-    def test_log_with_both_str_and_bytes(self, default_config):
-        logger = MasterLogger(config=default_config)
-        with pytest.raises(TypeError):  # Assuming implementation doesn't allow both
-            logger.info(msg_str="str", msg_bytes=b"bytes")
-        logger.shutdown()
+        try:
+            log_func = getattr(logger, method)
+            log_func(**args)  # Should not raise
+        finally:
+            logger.shutdown()
 
     def test_shutdown(self, default_config):
         logger = MasterLogger(config=default_config)
-        assert logger.is_running()
-        logger.shutdown()
+        try:
+            assert logger.is_running()
+        finally:
+            logger.shutdown()
         assert not logger.is_running()
 
     def test_double_shutdown(self, default_config):
@@ -87,4 +80,6 @@ class TestMasterLogger:
     def test_log_after_shutdown(self, default_config):
         logger = MasterLogger(config=default_config)
         logger.shutdown()
-        logger.info("msg after shutdown")  # Should not add to batch, but no error
+        logger.info(
+            msg_bytes=b"msg after shutdown"
+        )  # Should not add to batch, but no error
