@@ -1,4 +1,17 @@
-"""Simple binary protocol implementation for logging."""
+"""Simple binary protocol implementation for logging.
+
+This module provides a fast, type-safe binary serializer (BinaryWriter) and
+deserializer (BinaryReader) used by the HFT logging system. It also defines
+InternalMessage helpers for structured message creation and parsing.
+
+Components:
+    - BinaryWriter: Fixed-capacity growable-ish binary serializer. Used for
+      batching log entries before transport.
+    - BinaryReader: Type-safe binary deserializer with bounds checking.
+    - InternalMessage / helpers: C-level message struct for inter-thread
+      communication.
+"""
+
 
 from libc.stdlib cimport malloc, free, realloc
 from libc.string cimport memcpy
@@ -76,21 +89,14 @@ cdef class BinaryWriter:
         self._pos = 0
     
     def __dealloc__(self):
-        free(self._buffer)
+        if self._buffer != NULL:
+            free(self._buffer)
+            self._buffer = NULL
     
     cdef void _ensure_capacity(self, u32 needed):
-        """Grow buffer if needed."""
-        cdef u32 new_size
-        cdef unsigned char* new_buffer
+        """Ensure buffer has capacity, raise if exceeded."""
         if self._pos + needed > self._capacity:
-            new_size = max(self._capacity * 2, self._pos + needed)
-            new_buffer = <unsigned char*>realloc(
-                self._buffer, new_size * sizeof(unsigned char)
-            )
-            if not new_buffer:
-                raise MemoryError("Failed to reallocate memory for BinaryWriter")
-            self._buffer = new_buffer
-            self._capacity = new_size
+            raise MemoryError("BinaryWriter capacity exceeded")
     
     cdef inline u32 length(self) nogil:
         return self._pos
@@ -134,9 +140,11 @@ cdef class BinaryWriter:
         return result
 
     cdef (unsigned char*, u32) finalize_to_chars(self) nogil:
-        """Return the buffer pointer and length, and reset."""
+        """Return the buffer pointer and length, and reset ownership."""
         cdef unsigned char* ptr = self._buffer
         cdef u32 len = self._pos
+        self._buffer = NULL
+        self._capacity = 0
         self._pos = 0
         return (ptr, len)
     

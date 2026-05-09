@@ -11,6 +11,7 @@ from libc.stdint cimport uint64_t as u64
 from libc.stddef cimport size_t
 from libc.errno cimport errno
 from libc.stdlib cimport malloc, free
+from cpython.bytes cimport PyBytes_FromStringAndSize
 
 _libc = ctypes.CDLL(None)
 _sched_yield = _libc.sched_yield

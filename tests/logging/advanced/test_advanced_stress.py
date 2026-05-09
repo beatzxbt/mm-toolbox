@@ -62,13 +62,13 @@ class TestStressHandlers:
     """Stress and load tests for logging handlers."""
 
     def test_high_throughput_single_worker(self):
-        """One worker pushing 50K logs; all must be received."""
+        """One worker pushing 100K logs; all must be received."""
         handler = CountingHandler()
-        num_logs = 50_000
+        num_logs = 100_000
 
         worker = threading.Thread(target=_worker_push_logs, args=(handler, num_logs))
         worker.start()
-        worker.join(timeout=60.0)
+        worker.join(timeout=30.0)
 
         assert worker.is_alive() is False
         assert handler.count == num_logs

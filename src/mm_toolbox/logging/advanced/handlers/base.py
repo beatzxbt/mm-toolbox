@@ -133,7 +133,7 @@ class BaseLogHandler(ABC):
 
                 self._loop_thread = threading.Thread(target=_runner, daemon=True)
                 self._loop_thread.start()
-            return self._ev_loop
+        return self._ev_loop
 
     def _run_coro(self, coro: "Coroutine[object, None, object]") -> Future:
         """Submit a coroutine to the handler loop.
@@ -150,7 +150,8 @@ class BaseLogHandler(ABC):
     async def _ensure_session(self) -> None:
         """Ensure the HTTP session exists and is open."""
         if self._http_session is None or self._http_session.closed:
-            self._http_session = aiohttp.ClientSession()
+            timeout = aiohttp.ClientTimeout(total=5.0, connect=2.0)
+            self._http_session = aiohttp.ClientSession(timeout=timeout)
 
     @property
     def primary_config(self):
@@ -257,7 +258,7 @@ class BaseLogHandler(ABC):
         self._futures.append(fut)
         fut.add_done_callback(self._on_future_done)
         # Trim to avoid unbounded growth
-        if len(self._futures) > 4096:
+        if len(self._futures) > 2048:
             self._futures = self._futures[-2048:]
 
     def _on_future_done(self, fut: Future) -> None:
@@ -306,5 +307,6 @@ class BaseLogHandler(ABC):
                 self._loop_thread.join(timeout=timeout_s)
 
     def __del__(self):
-        with contextlib.suppress(Exception):
-            self.close()
+        if self._ev_loop is not None and not self._ev_loop.is_closed():
+            with contextlib.suppress(Exception):
+                self.close()

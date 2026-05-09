@@ -3,16 +3,15 @@ from mm_toolbox.logging.advanced.log cimport CLogLevel
 
 cdef class LoggerConfig:
     def __cinit__(
-        self, 
+        self,
         object base_level=None,
         bint do_stdout=False,
-        str str_format="%(asctime)s [%(levelname)s] %(name)s - %(message)s", 
-        str path="/tmp/hft_logger.shm", 
+        str str_format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+        str path="ipc:///tmp/hft_logger",
         double flush_interval_s=1.0,
         bint emit_internal=False,
         int ipc_linger_ms=1000,
         int shm_capacity_bytes=67108864,
-        int shm_num_rings=0,
         int max_batch_messages=10000,
         int max_batch_bytes=1048576,
     ):
@@ -26,14 +25,14 @@ cdef class LoggerConfig:
                 Supports standard format placeholders like %(asctime)s, %(name)s, %(levelname)s, 
                 and %(message)s. Defaults to '%(asctime)s [%(levelname)s] %(name)s - %(message)s'.
                 Must contain at least %(message)s to be valid.
-            path (str): The connection path for the transport protocol. Defaults to '/tmp/hft_logger.shm'.
+            path (str): The connection path for the transport protocol. Must follow the format
+                required by the selected transport protocol. Defaults to 'ipc:///tmp/hft_logger'.
             flush_interval_s (float): Positive interval (seconds) to pace flush cycles. Defaults to 1.0.
             emit_internal (bool): If True, emit internal startup/shutdown logs. Defaults to False.
             ipc_linger_ms (int): ZMQ linger (milliseconds) for IPC sockets. Defaults to 1000.
             shm_capacity_bytes (int): Shared memory ring buffer capacity in bytes. Defaults to 64MB.
-            shm_num_rings (int): Number of sub-rings for MPSC. 0 = auto (cpu_count * 2). Defaults to 0.
-            max_batch_messages (int): Max messages before forced flush. Defaults to 10000.
-            max_batch_bytes (int): Max bytes before forced flush. Defaults to 1MB.
+            max_batch_messages (int): Maximum messages per batch before flush. Defaults to 10000.
+            max_batch_bytes (int): Maximum batch size in bytes before flush. Defaults to 1MB.
         """
         if base_level is None:
             base_level = PyLogLevel.INFO
@@ -44,6 +43,8 @@ cdef class LoggerConfig:
         if "%(message)s" not in str_format:
             raise ValueError("Format string must contain at least the '%(message)s' placeholder")
         
+        # Any formatting issues with the path will be thrown within the IPCRingBuffer
+        # configuration in the logger constructors, so no need to handle it here.
         if path is None:
             raise TypeError("path must be of type str")
         self.path = path
@@ -60,10 +61,6 @@ cdef class LoggerConfig:
         self.shm_capacity_bytes = shm_capacity_bytes
         if self.shm_capacity_bytes <= 0:
             raise ValueError(f"Invalid shm_capacity_bytes; expected >0 but got '{self.shm_capacity_bytes}'")
-
-        self.shm_num_rings = shm_num_rings
-        if self.shm_num_rings < 0:
-            raise ValueError(f"Invalid shm_num_rings; expected >=0 but got '{self.shm_num_rings}'")
 
         self.max_batch_messages = max_batch_messages
         if self.max_batch_messages <= 0:

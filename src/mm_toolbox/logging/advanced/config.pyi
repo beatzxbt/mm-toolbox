@@ -12,6 +12,9 @@ class LoggerConfig:
     flush_interval_s: float
     emit_internal: bool
     ipc_linger_ms: int
+    shm_capacity_bytes: int
+    max_batch_messages: int
+    max_batch_bytes: int
 
     def __init__(
         self,
@@ -22,6 +25,9 @@ class LoggerConfig:
         flush_interval_s: float = 1.0,
         emit_internal: bool = False,
         ipc_linger_ms: int = 1000,
+        shm_capacity_bytes: int = 67108864,
+        max_batch_messages: int = 10000,
+        max_batch_bytes: int = 1048576,
     ) -> None:
         """Initialize the LoggerConfig with transport, path, and format settings.
 
@@ -38,5 +44,8 @@ class LoggerConfig:
             flush_interval_s: Timeout in seconds for log messages. Defaults to 1.0.
             emit_internal: If True, emit internal startup/shutdown logs. Defaults to False.
             ipc_linger_ms: ZMQ linger in milliseconds for IPC sockets. Defaults to 1000.
+            shm_capacity_bytes: Shared memory ring buffer capacity in bytes. Defaults to 64MB.
+            max_batch_messages: Maximum messages per batch before flush. Defaults to 10000.
+            max_batch_bytes: Maximum batch size in bytes before flush. Defaults to 1MB.
         """
         ...
