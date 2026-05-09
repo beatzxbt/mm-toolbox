@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import math
 import time
-from collections import defaultdict
+
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
@@ -397,30 +397,6 @@ class LiveBinanceWebSocketBenchmark(
         print("Running incoming-data and latency benchmark...")
         self._benchmark_side_by_side_window()
 
-    @staticmethod
-    def _pair_latency_deltas(
-        single_samples: list[tuple[str, int]],
-        pool_samples: list[tuple[str, int]],
-    ) -> list[int]:
-        """Pair keyed event latencies and return single-pool delta list in ms."""
-        by_key_single: dict[str, list[int]] = defaultdict(list)
-        by_key_pool: dict[str, list[int]] = defaultdict(list)
-
-        for key, latency_ms in single_samples:
-            by_key_single[key].append(latency_ms)
-        for key, latency_ms in pool_samples:
-            by_key_pool[key].append(latency_ms)
-
-        deltas_ms: list[int] = []
-        for key in set(by_key_single) & set(by_key_pool):
-            single_vals = by_key_single[key]
-            pool_vals = by_key_pool[key]
-            count = min(len(single_vals), len(pool_vals))
-            for i in range(count):
-                deltas_ms.append(single_vals[i] - pool_vals[i])
-
-        return deltas_ms
-
     def _benchmark_side_by_side_window(self) -> None:
         """Benchmark incoming throughput and latency distributions in one window."""
         if self.stats is None:
@@ -429,14 +405,13 @@ class LiveBinanceWebSocketBenchmark(
         incoming_metrics = self.stats.add_operation("incoming_msgs_per_sec")
         single_metrics = self.stats.add_operation("single.event_latency")
         pool_metrics = self.stats.add_operation("pool.event_latency")
-        delta_metrics = self.stats.add_operation("single_vs_pool.delta_latency")
 
         for _ in range(self.config.warmup_operations):
             asyncio.run(self._run_side_by_side_window_once())
 
         for _ in range(self.config.num_operations):
             result = asyncio.run(self._run_side_by_side_window_once())
-            single_latencies_ms, pool_latencies_ms, deltas_ms, incoming_bins = result
+            single_latencies_ms, pool_latencies_ms, incoming_bins = result
 
             for value in incoming_bins:
                 incoming_metrics.add_latency(int(round(value * self.THROUGHPUT_SCALE)))
@@ -444,12 +419,10 @@ class LiveBinanceWebSocketBenchmark(
                 single_metrics.add_latency(int(round(value * 1_000_000)))
             for value in pool_latencies_ms:
                 pool_metrics.add_latency(int(round(value * 1_000_000)))
-            for value in deltas_ms:
-                delta_metrics.add_latency(int(round(value * 1_000_000)))
 
     async def _run_side_by_side_window_once(
         self,
-    ) -> tuple[list[int], list[int], list[int], list[int]]:
+    ) -> tuple[list[int], list[int], list[int]]:
         """Run one synchronized side-by-side sampling window."""
         barrier = _StartBarrier(parties=2)
         ws = WsSingle(WsConnectionConfig.default(self.combined_url))
@@ -507,16 +480,11 @@ class LiveBinanceWebSocketBenchmark(
         assert not missing_single, f"Single missing streams: {sorted(missing_single)}"
         assert not missing_pool, f"Pool missing streams: {sorted(missing_pool)}"
 
-        deltas_ms = self._pair_latency_deltas(single_keyed, pool_keyed)
-        assert deltas_ms, (
-            "No overlapping events between single and pool for delta latency"
-        )
-
         merged_bins: list[int] = []
         for single_rate, pool_rate in zip(single_bins, pool_bins):
             merged_bins.append(int(round((single_rate + pool_rate) / 2.0)))
 
-        return single_latencies_ms, pool_latencies_ms, deltas_ms, merged_bins
+        return single_latencies_ms, pool_latencies_ms, merged_bins
 
 
 def _parse_csv(value: str) -> list[str]:
