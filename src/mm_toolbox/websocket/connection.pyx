@@ -18,7 +18,7 @@ from mm_toolbox.ringbuffer.bytes cimport BytesRingBuffer
 from mm_toolbox.moving_average.ema cimport ExponentialMovingAverage as Ema
 
 DEFAULT_MAX_FRAME_SIZE = 1_048_576
-DEFAULT_LATENCY_PING_INTERVAL_MS = 100
+DEFAULT_LATENCY_PING_INTERVAL_MS = 1000
 
 
 cdef inline bint _is_data_frame_type(WSMsgType msg_type):
@@ -88,7 +88,7 @@ cdef class WsConnection(WSListener):
         self._seq_id = 0
         self._ringbuffer = ringbuffer
         self._latency_ms = 1000.0
-        self._latency_ema = Ema(window=60, is_fast=False)
+        self._latency_ema = Ema(window=60, is_fast=True)
         self._max_frame_size = self._config.max_frame_size
         self._latency_ping_interval_s = self._config.latency_ping_interval_ms / 1000.0
         self._on_connect = self._config.on_connect

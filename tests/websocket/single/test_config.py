@@ -29,7 +29,7 @@ class TestWsConnectionConfig:
         assert config.on_connect == [b'{"test": "msg"}']
         assert config.auto_reconnect is True
         assert config.max_frame_size == 1_048_576
-        assert config.latency_ping_interval_ms == 100
+        assert config.latency_ping_interval_ms == 1000
 
     def test_default_factory(self) -> None:
         """Validate default config factory behavior.
@@ -43,7 +43,7 @@ class TestWsConnectionConfig:
         assert config.on_connect == []
         assert config.auto_reconnect is True
         assert config.max_frame_size == 1_048_576
-        assert config.latency_ping_interval_ms == 100
+        assert config.latency_ping_interval_ms == 1000
 
     def test_default_factory_custom_max_frame_size(self) -> None:
         """Validate default config factory accepts max_frame_size override.
