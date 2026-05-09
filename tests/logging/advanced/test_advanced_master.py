@@ -3,16 +3,10 @@ from pathlib import Path
 import pytest
 
 from mm_toolbox.logging.advanced.config import LoggerConfig
-from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
 from mm_toolbox.logging.advanced.handlers.file import FileLogHandler
 from mm_toolbox.logging.advanced.master import MasterLogger
 
 pytestmark = pytest.mark.timeout(10, method="thread")
-
-
-class MockHandler(BaseLogHandler):
-    def push(self, logs):
-        pass  # Mock implementation
 
 
 class TestMasterLogger:
@@ -26,8 +20,8 @@ class TestMasterLogger:
         assert logger.get_config() == default_config
         logger.shutdown()
 
-    def test_init_with_handlers(self, default_config):
-        handlers = [MockHandler(), FileLogHandler("test.txt")]
+    def test_init_with_handlers(self, default_config, tmp_path: Path):
+        handlers = [FileLogHandler(str(tmp_path / "test.txt"))]
         logger = MasterLogger(config=default_config, log_handlers=handlers)
         assert logger.is_running()
         logger.shutdown()

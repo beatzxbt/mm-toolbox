@@ -105,12 +105,15 @@ class TestIntegration:
     @pytest.mark.parametrize(
         "num_workers, num_logs_per_worker", [(1, 10), (5, 10), (25, 10)]
     )
-    def test_multiple_workers(self, num_workers, num_logs_per_worker, ipc_path):
+    def test_multiple_workers(
+        self, num_workers, num_logs_per_worker, ipc_path, tmp_path
+    ):
+        log_file = tmp_path / "integration_multi.txt"
         path = ipc_path("test_integration")
         config = LoggerConfig(path=path)
-        mock_handler = MockHandler()
-        master = MasterLogger(config=config, log_handlers=[mock_handler])
-        mock_handler.add_primary_config(config)
+        file_handler = FileLogHandler(str(log_file), create=True)
+        master = MasterLogger(config=config, log_handlers=[file_handler])
+        file_handler.add_primary_config(config)
 
         processes = []
         for i in range(num_workers):
@@ -125,29 +128,30 @@ class TestIntegration:
         for p in processes:
             p.join()
 
-        received = _drain_logs(
-            mock_handler.received_logs,
-            num_workers * num_logs_per_worker,
-        )
+        lines = _wait_for_file_lines(log_file, num_workers * num_logs_per_worker)
         master.shutdown()
 
-        assert len(received) == num_workers * num_logs_per_worker
+        assert len(lines) == num_workers * num_logs_per_worker
 
         # Check contents
-        worker_logs = {f"Worker_{i}".encode(): 0 for i in range(num_workers)}
-        for log in received:
-            assert log.level == PyLogLevel.INFO
-            worker_logs[log.name] += 1
+        worker_logs = {f"Worker_{i}": 0 for i in range(num_workers)}
+        for line in lines:
+            assert "INFO" in line
+            for worker_name in worker_logs:
+                if f" {worker_name} -" in line:
+                    worker_logs[worker_name] += 1
+                    break
 
         for count in worker_logs.values():
             assert count == num_logs_per_worker
 
-    def test_high_throughput(self, ipc_path):
+    def test_high_throughput(self, ipc_path, tmp_path):
+        log_file = tmp_path / "test_high_throughput.txt"
         path = ipc_path("test_high_throughput")
         config = LoggerConfig(path=path, flush_interval_s=0.1)
-        mock_handler = MockHandler()
-        master = MasterLogger(config=config, log_handlers=[mock_handler])
-        mock_handler.add_primary_config(config)
+        file_handler = FileLogHandler(str(log_file), create=True)
+        master = MasterLogger(config=config, log_handlers=[file_handler])
+        file_handler.add_primary_config(config)
 
         num_workers = 10
         num_logs_per_worker = 1000
@@ -164,14 +168,14 @@ class TestIntegration:
         for p in processes:
             p.join()
 
-        received = _drain_logs(
-            mock_handler.received_logs,
+        lines = _wait_for_file_lines(
+            log_file,
             num_workers * num_logs_per_worker,
             timeout_s=8.0,
         )
         master.shutdown()
 
-        assert len(received) == num_workers * num_logs_per_worker
+        assert len(lines) == num_workers * num_logs_per_worker
 
     @pytest.mark.parametrize(
         "level",
@@ -183,14 +187,17 @@ class TestIntegration:
             PyLogLevel.ERROR,
         ],
     )
-    def test_different_levels(self, level, ipc_path):
+    def test_different_levels(self, level, ipc_path, tmp_path):
+        log_file = tmp_path / f"test_levels_{level.name}.txt"
         path = ipc_path(f"test_levels_{level}")
         config = LoggerConfig(
-            path=path, base_level=PyLogLevel.TRACE
-        )  # Set low to capture all
-        mock_handler = MockHandler()
-        master = MasterLogger(config=config, log_handlers=[mock_handler])
-        mock_handler.add_primary_config(config)
+            path=path,
+            base_level=PyLogLevel.TRACE,
+            str_format="%(levelname)s: %(message)s",
+        )
+        file_handler = FileLogHandler(str(log_file), create=True)
+        master = MasterLogger(config=config, log_handlers=[file_handler])
+        file_handler.add_primary_config(config)
 
         p = multiprocessing.Process(
             target=worker_process,
@@ -199,12 +206,12 @@ class TestIntegration:
         p.start()
         p.join()
 
-        received = _drain_logs(mock_handler.received_logs, 5)
+        lines = _wait_for_file_lines(log_file, 5)
         master.shutdown()
 
-        assert len(received) == 5
-        for _, _, recv_level, _ in received:
-            assert recv_level == level
+        assert len(lines) == 5
+        for line in lines:
+            assert line.startswith(f"{level.name}:")
 
     def test_large_messages(self, ipc_path):
         path = ipc_path("test_large")
@@ -265,12 +272,13 @@ class TestIntegration:
         for i, line in enumerate(lines):
             assert line.strip() == f"INFO: Log {i} from Worker"
 
-    def test_short_flush_many_logs(self, ipc_path):
+    def test_short_flush_many_logs(self, ipc_path, tmp_path):
+        log_file = tmp_path / "test_flush.txt"
         path = ipc_path("test_flush")
         config = LoggerConfig(path=path, flush_interval_s=0.01)  # Very short
-        mock_handler = MockHandler()
-        master = MasterLogger(config=config, log_handlers=[mock_handler])
-        mock_handler.add_primary_config(config)
+        file_handler = FileLogHandler(str(log_file), create=True)
+        master = MasterLogger(config=config, log_handlers=[file_handler])
+        file_handler.add_primary_config(config)
 
         num_logs = 1000
         p = multiprocessing.Process(
@@ -279,7 +287,7 @@ class TestIntegration:
         p.start()
         p.join()
 
-        received = _drain_logs(mock_handler.received_logs, num_logs, timeout_s=8.0)
+        lines = _wait_for_file_lines(log_file, num_logs, timeout_s=8.0)
         master.shutdown()
 
-        assert len(received) == num_logs
+        assert len(lines) == num_logs

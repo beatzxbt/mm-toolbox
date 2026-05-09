@@ -59,14 +59,14 @@ cdef class WorkerLogger:
             self._transport = ShmMpscProducer(
                 path=self._config.path,
                 capacity_bytes=self._config.shm_capacity_bytes,
-                num_rings=self._config.shm_num_rings,
+                num_rings=0,
                 create=False,
             )
         except (OSError, RuntimeError):
             self._transport = ShmMpscProducer(
                 path=self._config.path,
                 capacity_bytes=self._config.shm_capacity_bytes,
-                num_rings=self._config.shm_num_rings,
+                num_rings=0,
                 create=True,
                 unlink_on_close=False,
             )

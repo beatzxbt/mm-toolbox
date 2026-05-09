@@ -88,14 +88,18 @@ class TestBaseLogHandler:
 
     def test_on_future_done_captures_exception(self):
         handler = FileLogHandler("test.txt")
-        with patch.object(handler, "_handle_exception") as mock_handle:
-            fut = Future()
-            handler._track_future(fut)
-            fut.set_exception(RuntimeError("test error"))
-            mock_handle.assert_called_once()
-            args = mock_handle.call_args[0]
-            assert isinstance(args[0], RuntimeError)
-            assert args[1] == "handler task"
+        errors = []
+
+        def callback(exc, ctx):
+            errors.append((exc, ctx))
+
+        handler.set_error_handler(callback)
+        fut = Future()
+        handler._track_future(fut)
+        fut.set_exception(RuntimeError("test error"))
+        assert len(errors) == 1
+        assert isinstance(errors[0][0], RuntimeError)
+        assert errors[0][1] == "handler task"
 
     def test_handle_exception_custom_callback(self):
         handler = FileLogHandler("test.txt")
