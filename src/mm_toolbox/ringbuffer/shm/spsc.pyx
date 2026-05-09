@@ -533,6 +533,107 @@ cdef class ShmSpscConsumer(_SharedBytesRing):
         self._cached_read = read_pos + 8 + msg_len
         return bytes(buf)
 
+    cpdef int consume_into(self, bytearray dst):
+        """Consume a single item into the provided bytearray.
+
+        Blocks until a message is available.
+
+        Args:
+            dst: Pre-allocated bytearray to copy the message into.
+
+        Returns:
+            Number of bytes copied.
+
+        Raises:
+            ValueError: If dst is too small to hold the message.
+        """
+        cdef:
+            u64 msg_len = 0
+            u64 read_pos = 0
+            u64 read_pos_check = 0
+            int spin_count = 0
+            int available = 0
+            unsigned char* buf_ptr
+
+        while True:
+            with nogil:
+                available = shm_consumer_peek_available(&self._cons_ctx, &msg_len, &read_pos)
+            if not available:
+                spin_count += 1
+                if spin_count < self._spin_wait:
+                    continue
+                _sched_yield()
+                spin_count = 0
+                continue
+            with nogil:
+                read_pos_check = atomic_load_acquire(&self._hdr.read_pos)
+            if read_pos_check != read_pos:
+                continue
+            break
+
+        if msg_len > <u64>len(dst):
+            raise ValueError(
+                f"Message size {msg_len} exceeds buffer size {len(dst)}"
+            )
+
+        buf_ptr = <unsigned char*>dst
+        with nogil:
+            shm_consumer_consume(&self._cons_ctx, buf_ptr, msg_len, read_pos)
+
+        self._cached_read = read_pos + 8 + msg_len
+        return <int>msg_len
+
+    cpdef int consume_all_into(self, list[bytearray] buffers):
+        """Consume all available items into the provided bytearrays.
+
+        Does not block. Copies as many available messages as there are
+        buffers provided.
+
+        Args:
+            buffers: List of pre-allocated bytearrays.
+
+        Returns:
+            Number of messages copied.
+
+        Raises:
+            ValueError: If any buffer is too small for its message.
+        """
+        cdef:
+            int total_copied = 0
+            int n = len(buffers)
+            int i
+            u64 msg_len = 0
+            u64 read_pos = 0
+            u64 read_pos_check = 0
+            int available = 0
+            bytearray buf
+            unsigned char* buf_ptr
+
+        for i in range(n):
+            with nogil:
+                available = shm_consumer_peek_available(&self._cons_ctx, &msg_len, &read_pos)
+                if available:
+                    read_pos_check = atomic_load_acquire(&self._hdr.read_pos)
+            if not available:
+                break
+            if read_pos_check != read_pos:
+                continue
+
+            buf = buffers[i]
+            if msg_len > <u64>len(buf):
+                raise ValueError(
+                    f"Message size {msg_len} exceeds buffer size {len(buf)}"
+                )
+
+            buf_ptr = <unsigned char*>buf
+            with nogil:
+                shm_consumer_consume(&self._cons_ctx, buf_ptr, msg_len, read_pos)
+
+            total_copied += 1
+            self._cached_read = read_pos + 8 + msg_len
+
+        return total_copied
+
     cpdef object peekleft(self):
         """Peek at the next item without consuming; returns None if empty.
 

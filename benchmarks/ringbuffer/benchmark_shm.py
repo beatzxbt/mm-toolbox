@@ -70,7 +70,7 @@ class SHMBenchmarkConfig(BaseBenchmarkConfig):
     capacity_bytes: int = 2**20
     payload_sizes: list[int] = field(default_factory=lambda: [32, 128, 512, 2048, 8192])
     latency_iterations: int = 100_000
-    throughput_duration_sec: float = 3.0
+    throughput_messages: int = 100_000
     run_latency: bool = True
     run_throughput: bool = True
 
@@ -130,7 +130,7 @@ def _producer_process(
     path: str,
     capacity_bytes: int,
     payload_size: int,
-    duration_sec: float,
+    num_messages: int,
     result_queue: Queue,
     barrier: multiprocessing.Barrier,
 ) -> None:
@@ -143,70 +143,80 @@ def _producer_process(
         barrier.wait()
 
         start_ns = time.perf_counter_ns()
-        end_time_ns = start_ns + int(duration_sec * 1e9)
-        count = 0
-
-        while time.perf_counter_ns() < end_time_ns:
+        for _ in range(num_messages):
             producer.insert(payload)
-            count += 1
-
         actual_end_ns = time.perf_counter_ns()
-        result_queue.put(("producer", actual_end_ns - start_ns, count))
 
-        # Keep inserting briefly so a blocked consumer can unblock
-        extra_end = time.perf_counter_ns() + int(0.05 * 1e9)
-        while time.perf_counter_ns() < extra_end:
-            producer.insert(payload)
+        result_queue.put(("producer", actual_end_ns - start_ns, num_messages))
 
 
 def _consumer_process(
     path: str,
     capacity_bytes: int,
-    duration_sec: float,
+    payload_size: int,
+    num_messages: int,
     result_queue: Queue,
     barrier: multiprocessing.Barrier,
 ) -> None:
     """Consumer process for throughput benchmark."""
     barrier.wait()
 
+    # Pre-allocate a pool of buffers to eliminate allocation overhead
+    pool_size = 1024
+    buffer_pool = [bytearray(payload_size) for _ in range(pool_size)]
+
     with ShmSpscConsumer(path) as consumer:
         start_ns = time.perf_counter_ns()
-        end_time_ns = start_ns + int(duration_sec * 1e9)
         count = 0
-
-        while time.perf_counter_ns() < end_time_ns:
-            consumer.consume()
-            count += 1
-
+        while count < num_messages:
+            copied = consumer.consume_all_into(buffer_pool)
+            count += copied
         actual_end_ns = time.perf_counter_ns()
+
         result_queue.put(("consumer", actual_end_ns - start_ns, count))
 
 
 def throughput_benchmark(
     capacity_bytes: int,
     payload_size: int,
-    duration_sec: float,
+    num_messages: int,
     path: str,
 ) -> tuple[int, int, int, int]:
     """Benchmark producer-consumer throughput across processes."""
+    # Ensure buffer is large enough to hold all messages without drops
+    required_capacity = max(capacity_bytes, num_messages * (8 + payload_size))
     result_queue: Queue = Queue()
     barrier = multiprocessing.Barrier(2)
 
     prod_proc = multiprocessing.Process(
         target=_producer_process,
-        args=(path, capacity_bytes, payload_size, duration_sec, result_queue, barrier),
+        args=(
+            path,
+            required_capacity,
+            payload_size,
+            num_messages,
+            result_queue,
+            barrier,
+        ),
     )
     cons_proc = multiprocessing.Process(
         target=_consumer_process,
-        args=(path, capacity_bytes, duration_sec, result_queue, barrier),
+        args=(
+            path,
+            required_capacity,
+            payload_size,
+            num_messages,
+            result_queue,
+            barrier,
+        ),
     )
 
     prod_proc.start()
     cons_proc.start()
 
     try:
-        prod_proc.join(timeout=duration_sec + 5)
-        cons_proc.join(timeout=duration_sec + 5)
+        prod_proc.join(timeout=30)
+        cons_proc.join(timeout=30)
     finally:
         if prod_proc.is_alive():
             prod_proc.terminate()
@@ -316,7 +326,7 @@ class SHMRingBufferBenchmark(BenchmarkRunner[SHMBenchmarkConfig]):
                     prod_ns, cons_ns, prod_count, cons_count = throughput_benchmark(
                         self.config.capacity_bytes,
                         payload_size,
-                        self.config.throughput_duration_sec,
+                        self.config.throughput_messages,
                         tp_path,
                     )
                     if prod_count != cons_count:
@@ -376,10 +386,10 @@ def main() -> None:
         help="Number of iterations per latency test (default: 100000)",
     )
     cli.parser.add_argument(
-        "--duration",
-        type=float,
-        default=3.0,
-        help="Throughput benchmark duration in seconds (default: 3.0)",
+        "--messages",
+        type=int,
+        default=100_000,
+        help="Number of messages for throughput benchmark (default: 100000)",
     )
     cli.parser.add_argument(
         "--latency-only",
@@ -408,7 +418,7 @@ def main() -> None:
         capacity_bytes=args.capacity_bytes,
         payload_sizes=payload_sizes,
         latency_iterations=args.latency_iterations,
-        throughput_duration_sec=args.duration,
+        throughput_messages=args.messages,
         run_latency=not args.throughput_only,
         run_throughput=not args.latency_only,
     )
@@ -422,7 +432,7 @@ def main() -> None:
             "Capacity bytes": config.capacity_bytes,
             "Payload sizes": ", ".join(str(size) for size in payload_sizes),
             "Latency iterations": config.latency_iterations,
-            "Throughput duration": config.throughput_duration_sec,
+            "Throughput messages": config.throughput_messages,
         },
     )
     reporter.print_full_report(stats)

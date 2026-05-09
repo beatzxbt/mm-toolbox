@@ -179,11 +179,12 @@ def _producer_process(
         count += 1
 
     actual_end_ns = time.perf_counter_ns()
-    result_queue.put((producer_id, actual_end_ns - start_ns, count))
+    result_queue.put(("producer", producer_id, actual_end_ns - start_ns, count))
 
 
 def _consumer_process(
     path: str,
+    payload_size: int,
     duration_sec: float,
     result_queue: Queue,
     barrier: multiprocessing.Barrier,
@@ -194,6 +195,10 @@ def _consumer_process(
 
     consumer = ShmMpscConsumer(path)
 
+    # Pre-allocate a pool of buffers to eliminate allocation overhead
+    pool_size = 1024
+    buffer_pool = [bytearray(payload_size) for _ in range(pool_size)]
+
     start_ns = time.perf_counter_ns()
     end_time_ns = start_ns + int(duration_sec * 1e9)
     count = 0
@@ -201,16 +206,19 @@ def _consumer_process(
 
     while time.perf_counter_ns() < end_time_ns:
         try:
-            msg = consumer.consume()
-            count += 1
-            if track_fairness and msg:
-                pid = msg[0]
-                per_producer_counts[pid] = per_producer_counts.get(pid, 0) + 1
+            copied = consumer.consume_all_into(buffer_pool)
+            count += copied
+            if track_fairness:
+                for i in range(copied):
+                    msg = buffer_pool[i]
+                    if msg:
+                        pid = msg[0]
+                        per_producer_counts[pid] = per_producer_counts.get(pid, 0) + 1
         except Exception:
             break
 
     actual_end_ns = time.perf_counter_ns()
-    result_queue.put((actual_end_ns - start_ns, count, per_producer_counts))
+    result_queue.put(("consumer", actual_end_ns - start_ns, count, per_producer_counts))
 
 
 def throughput_benchmark(
@@ -254,7 +262,7 @@ def throughput_benchmark(
 
     cons_proc = multiprocessing.Process(
         target=_consumer_process,
-        args=(path, duration_sec, result_queue, barrier),
+        args=(path, payload_size, duration_sec, result_queue, barrier),
     )
 
     cons_proc.start()
@@ -273,12 +281,17 @@ def throughput_benchmark(
             proc.terminate()
             proc.join(timeout=1.0)
 
-    results = []
-    cons_ns, cons_count, _ = result_queue.get()
-    for _ in range(num_producers):
-        results.append(result_queue.get())
+    consumer_result = None
+    producer_results = []
+    for _ in range(num_producers + 1):
+        result = result_queue.get()
+        if result[0] == "consumer":
+            consumer_result = result
+        else:
+            producer_results.append(result[1:])  # Strip "producer" tag
 
-    return cons_ns, cons_count, results
+    _, cons_ns, cons_count, _ = consumer_result
+    return cons_ns, cons_count, producer_results
 
 
 def fairness_benchmark(
@@ -323,7 +336,7 @@ def fairness_benchmark(
 
     cons_proc = multiprocessing.Process(
         target=_consumer_process,
-        args=(path, duration_sec, result_queue, barrier, True),
+        args=(path, payload_size, duration_sec, result_queue, barrier, True),
     )
 
     cons_proc.start()
@@ -340,11 +353,16 @@ def fairness_benchmark(
             proc.terminate()
             proc.join(timeout=1.0)
 
+    consumer_result = None
     producer_results = []
-    cons_ns, cons_count, per_producer_counts = result_queue.get()
-    for _ in range(num_producers):
-        producer_results.append(result_queue.get())
+    for _ in range(num_producers + 1):
+        result = result_queue.get()
+        if result[0] == "consumer":
+            consumer_result = result
+        else:
+            producer_results.append(result[1:])  # Strip "producer" tag
 
+    _, cons_ns, cons_count, per_producer_counts = consumer_result
     return cons_ns, cons_count, per_producer_counts, producer_results
 
 

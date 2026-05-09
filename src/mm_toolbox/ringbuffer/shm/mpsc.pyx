@@ -821,6 +821,125 @@ cdef class ShmMpscConsumer(_ShmRingBase):
                     break
         return res
 
+    cpdef int consume_into(self, bytearray dst):
+        """Consume a single item into the provided bytearray.
+
+        Blocks until a message is available.
+
+        Args:
+            dst: Pre-allocated bytearray to copy the message into.
+
+        Returns:
+            Number of bytes copied.
+
+        Raises:
+            ValueError: If dst is too small to hold the message.
+        """
+        cdef:
+            u64 msg_len = 0
+            u64 read_pos = 0
+            u64 read_pos_check = 0
+            int spin_count = 0
+            int available = 0
+            unsigned char* buf_ptr
+            u64 ring_idx
+            u64 start_ring
+            u64 i
+
+        while True:
+            start_ring = self._next_ring
+            for i in range(self._num_rings):
+                ring_idx = (start_ring + i) % self._num_rings
+                with nogil:
+                    available = shm_consumer_peek_available(
+                        &self._cons_ctxs[ring_idx], &msg_len, &read_pos
+                    )
+                if available:
+                    with nogil:
+                        read_pos_check = atomic_load_acquire(
+                            &self._sub_hdrs[ring_idx].read_pos
+                        )
+                    if read_pos_check == read_pos:
+                        if msg_len > <u64>len(dst):
+                            raise ValueError(
+                                f"Message size {msg_len} exceeds buffer size {len(dst)}"
+                            )
+                        buf_ptr = <unsigned char*>dst
+                        with nogil:
+                            shm_consumer_consume(
+                                &self._cons_ctxs[ring_idx], buf_ptr, msg_len, read_pos
+                            )
+                        self._next_ring = (ring_idx + 1) % self._num_rings
+                        return <int>msg_len
+            spin_count += 1
+            if spin_count < self._spin_wait:
+                continue
+            _sched_yield()
+            spin_count = 0
+
+    cpdef int consume_all_into(self, list[bytearray] buffers):
+        """Consume all available items into the provided bytearrays.
+
+        Does not block. Copies as many available messages as there are
+        buffers provided.
+
+        Args:
+            buffers: List of pre-allocated bytearrays.
+
+        Returns:
+            Number of messages copied.
+
+        Raises:
+            ValueError: If any buffer is too small for its message.
+        """
+        cdef:
+            int total_copied = 0
+            int n = len(buffers)
+            int i_buf
+            u64 msg_len = 0
+            u64 read_pos = 0
+            u64 read_pos_check = 0
+            int available = 0
+            bytearray buf
+            unsigned char* buf_ptr
+            u64 ring_idx
+            bint found = True
+            u64 i
+
+        for i_buf in range(n):
+            found = False
+            for i in range(self._num_rings):
+                ring_idx = (self._next_ring + i) % self._num_rings
+                with nogil:
+                    available = shm_consumer_peek_available(
+                        &self._cons_ctxs[ring_idx], &msg_len, &read_pos
+                    )
+                    if available:
+                        read_pos_check = atomic_load_acquire(
+                            &self._sub_hdrs[ring_idx].read_pos
+                        )
+                if not available:
+                    continue
+                if read_pos_check != read_pos:
+                    continue
+                buf = buffers[i_buf]
+                if msg_len > <u64>len(buf):
+                    raise ValueError(
+                        f"Message size {msg_len} exceeds buffer size {len(buf)}"
+                    )
+                buf_ptr = <unsigned char*>buf
+                with nogil:
+                    shm_consumer_consume(
+                        &self._cons_ctxs[ring_idx], buf_ptr, msg_len, read_pos
+                    )
+                self._next_ring = (ring_idx + 1) % self._num_rings
+                total_copied += 1
+                found = True
+                break
+            if not found:
+                break
+        return total_copied
+
     cpdef list consume_packed(self):
         """Consume and unpack a packed message."""
         cdef bytes buf = self.consume()
