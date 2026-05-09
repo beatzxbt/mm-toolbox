@@ -32,17 +32,12 @@ class FileLogHandler(BaseLogHandler):
         self.create = create
 
         if self.create:
-            # Create the file if it doesn't exist, or truncate it if it does
-            try:
-                directory = os.path.dirname(self.filepath)
-                if directory:
-                    os.makedirs(directory, exist_ok=True)
-
-                # Create or truncate the file
+            directory = os.path.dirname(self.filepath)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            if not os.path.exists(self.filepath):
                 with open(self.filepath, "w"):
                     pass
-            except Exception as e:
-                self._handle_exception(e, "init")
 
     def push(self, logs: list[PyLog]) -> None:
         """Append a batch of log messages to disk.

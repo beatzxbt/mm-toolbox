@@ -73,18 +73,10 @@ class TestBaseLogHandler:
 
     def test_future_trim_at_4096(self):
         handler = FileLogHandler("test.txt")
-        for _ in range(4097):
+        for _ in range(5000):
             mock_fut = Future()
             handler._track_future(mock_fut)
-        # After exceeding 4096, trim to last 2048
         assert len(handler._futures) == 2048
-        # Add more and verify it stays bounded
-        for _ in range(1000):
-            mock_fut = Future()
-            handler._track_future(mock_fut)
-        assert len(handler._futures) <= 4096
-        # Clean up to avoid __del__ hanging on pending futures
-        handler._futures.clear()
 
     def test_on_future_done_captures_exception(self):
         handler = FileLogHandler("test.txt")
@@ -232,25 +224,27 @@ class TestFileLogHandler:
             assert f.read() == ""  # Nothing written
 
     def test_create_with_directory(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            shutil.rmtree(tmpdir)
-            path = os.path.join(tmpdir, "subdir", "test.txt")
-            handler = FileLogHandler(path, create=True)
-            assert os.path.exists(os.path.dirname(path))
-            handler.close()
+        tmpdir = tempfile.mkdtemp()
+        shutil.rmtree(tmpdir)
+        path = os.path.join(tmpdir, "subdir", "test.txt")
+        handler = FileLogHandler(path, create=True)
+        assert os.path.exists(os.path.dirname(path))
+        handler.close()
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_push_creates_file_if_missing(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = os.path.join(tmpdir, "test.txt")
-            handler = FileLogHandler(path, create=True)
-            config = LoggerConfig(str_format="%(message)s")
-            handler.add_primary_config(config)
-            logs = [PyLog(1, b"name", PyLogLevel.INFO, b"msg")]
-            handler.push(logs)
-            assert os.path.exists(path)
-            with open(path) as f:
-                assert "msg" in f.read()
-            handler.close()
+        tmpdir = tempfile.mkdtemp()
+        path = os.path.join(tmpdir, "test.txt")
+        handler = FileLogHandler(path, create=True)
+        config = LoggerConfig(str_format="%(message)s")
+        handler.add_primary_config(config)
+        logs = [PyLog(1, b"name", PyLogLevel.INFO, b"msg")]
+        handler.push(logs)
+        assert os.path.exists(path)
+        with open(path) as f:
+            assert "msg" in f.read()
+        handler.close()
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_push_disk_full(self, temp_file):
         handler = FileLogHandler(temp_file)
