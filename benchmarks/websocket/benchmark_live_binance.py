@@ -105,9 +105,9 @@ class LiveBinanceBenchmarkConfig(BaseBenchmarkConfig):
     )
     stream_kinds: list[str] = field(default_factory=lambda: ["bookTicker", "trade"])
     connection_timeout_s: float = 10.0
-    sample_window_s: float = 15.0
+    sample_window_s: float = 60.0
     pool_connections: int = 3
-    pool_evict_interval_s: int = 60
+    pool_evict_interval_s: int = 15
     freshness_budget_ms: int = 15_000
     clock_future_drift_ms: int = 2_000
 
@@ -530,14 +530,6 @@ def main() -> None:
     cli = BenchmarkCLI("Benchmark live Binance Futures websocket performance")
     cli.parser.set_defaults(operations=1, warmup=0)
     cli.parser.add_argument(
-        "--combined-base-url",
-        default="wss://fstream.binance.com/stream?streams=",
-        help=(
-            "Combined stream base URL "
-            "(default: wss://fstream.binance.com/stream?streams=)"
-        ),
-    )
-    cli.parser.add_argument(
         "--symbols",
         default="btcusdt,ethusdt,solusdt",
         help="Comma-separated symbols (default: btcusdt,ethusdt,solusdt)",
@@ -546,42 +538,6 @@ def main() -> None:
         "--stream-kinds",
         default="bookTicker,trade",
         help="Comma-separated stream kinds (default: bookTicker,trade)",
-    )
-    cli.parser.add_argument(
-        "--connection-timeout-s",
-        type=float,
-        default=10.0,
-        help="Connection timeout in seconds (default: 10.0)",
-    )
-    cli.parser.add_argument(
-        "--sample-window-s",
-        type=float,
-        default=15.0,
-        help="Latency/throughput sample window in seconds (default: 15.0)",
-    )
-    cli.parser.add_argument(
-        "--pool-connections",
-        type=int,
-        default=3,
-        help="Number of pool websocket connections (default: 3)",
-    )
-    cli.parser.add_argument(
-        "--pool-evict-interval-s",
-        type=int,
-        default=60,
-        help="Pool eviction interval in seconds (default: 60)",
-    )
-    cli.parser.add_argument(
-        "--freshness-budget-ms",
-        type=int,
-        default=15_000,
-        help="Freshness budget in milliseconds (default: 15000)",
-    )
-    cli.parser.add_argument(
-        "--clock-future-drift-ms",
-        type=int,
-        default=2_000,
-        help="Allowed future clock drift in milliseconds (default: 2000)",
     )
 
     args = cli.parse()
@@ -600,15 +556,8 @@ def main() -> None:
     config = LiveBinanceBenchmarkConfig(
         num_operations=max(1, int(args.operations)),
         warmup_operations=max(0, int(args.warmup)),
-        combined_base_url=args.combined_base_url,
         symbols=symbols,
         stream_kinds=stream_kinds,
-        connection_timeout_s=float(args.connection_timeout_s),
-        sample_window_s=float(args.sample_window_s),
-        pool_connections=max(1, int(args.pool_connections)),
-        pool_evict_interval_s=max(1, int(args.pool_evict_interval_s)),
-        freshness_budget_ms=max(1, int(args.freshness_budget_ms)),
-        clock_future_drift_ms=max(0, int(args.clock_future_drift_ms)),
     )
 
     benchmark = LiveBinanceWebSocketBenchmark(config)
@@ -620,7 +569,11 @@ def main() -> None:
             "Symbols": ",".join(config.symbols),
             "Streams": ",".join(config.stream_kinds),
             "Pool connections": config.pool_connections,
+            "Pool eviction interval (s)": config.pool_evict_interval_s,
             "Sample window (s)": config.sample_window_s,
+            "Connection timeout (s)": config.connection_timeout_s,
+            "Freshness budget (ms)": config.freshness_budget_ms,
+            "Clock drift (ms)": config.clock_future_drift_ms,
         },
     )
     reporter.print_full_report(stats, warmup=config.warmup_operations)
