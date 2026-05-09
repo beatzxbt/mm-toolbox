@@ -1,18 +1,22 @@
 """Comprehensive example demonstrating multi-process Binance streaming with IPC.
 
 This example shows:
-- Using WsPool for BBO and orderbook streams
+- Using WsPool for BBO, orderbook depth, and trade streams
 - Building time-based candles on mid price
-- Building standard orderbook
+- Building standard orderbook from snapshot + deltas
+- Computing TEMA on mid price with tick-size rounding
 - IPC communication between processes
 - Worker logger in stream process, master logger in processing process
 """
+
+from __future__ import annotations
 
 import asyncio
 import multiprocessing
 import os
 import sys
 import time
+import urllib.request
 from typing import Any
 
 import msgspec
@@ -26,12 +30,14 @@ from mm_toolbox.logging.advanced import (
 )
 from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
 from mm_toolbox.logging.advanced.pylog import PyLog
+from mm_toolbox.moving_average import TimeExponentialMovingAverage
 from mm_toolbox.orderbook.standard import Orderbook, OrderbookLevel
 from mm_toolbox.ringbuffer.ipc import (
     IPCRingBufferConfig,
     IPCRingBufferConsumer,
     IPCRingBufferProducer,
 )
+from mm_toolbox.rounding import Rounder, RounderConfig
 from mm_toolbox.websocket import WsConnectionConfig, WsPool, WsPoolConfig
 
 
@@ -116,7 +122,7 @@ class TradeUpdate(msgspec.Struct):
 class StreamMessage(msgspec.Struct):
     """Wrapper for stream messages."""
 
-    msg_type: str  # "bbo", "trade"
+    msg_type: str  # "bbo", "trade", "depth"
     data: dict[str, Any]
 
 
@@ -160,6 +166,7 @@ class BinanceStreamProcessor:
         # WebSocket pools
         self.bbo_pool: WsPool | None = None
         self.trade_pool: WsPool | None = None
+        self.depth_pool: WsPool | None = None
         self._trade_sent_count = 0
 
     def _process_bbo_message(self, msg: bytes) -> None:
@@ -199,6 +206,23 @@ class BinanceStreamProcessor:
         except Exception as e:
             self.logger.error(f"Error processing trade message: {e}".encode("utf-8"))
 
+    def _process_depth_message(self, msg: bytes) -> None:
+        """Process depth update messages."""
+        try:
+            decoded = msgspec.json.decode(msg, type=dict)
+            delta = OrderbookDelta(
+                final_update_id=decoded["u"],
+                first_update_id=decoded["U"],
+                bids=[(float(p), float(q)) for p, q in decoded.get("b", [])],
+                asks=[(float(p), float(q)) for p, q in decoded.get("a", [])],
+            )
+            stream_msg = StreamMessage(
+                msg_type="depth", data=msgspec.to_builtins(delta)
+            )
+            self.data_producer.insert(self.encoder.encode(stream_msg), copy=False)
+        except Exception as e:
+            self.logger.error(f"Error processing depth message: {e}".encode("utf-8"))
+
     async def _run_streams(self) -> None:
         """Run WebSocket streams."""
         self.logger.info(f"Starting streams for {self.symbol}".encode("utf-8"))
@@ -221,8 +245,19 @@ class BinanceStreamProcessor:
             pool_config=WsPoolConfig.default(),
         )
 
-        async with self.bbo_pool, self.trade_pool:
-            self.logger.info("Streams connected, processing BBO + trades...".encode("utf-8"))
+        # Depth stream
+        depth_config = WsConnectionConfig.default(
+            wss_url=f"wss://fstream.binance.com/ws/{self.symbol.lower()}@depth@100ms"
+        )
+        self.depth_pool = await WsPool.new(
+            config=depth_config,
+            pool_config=WsPoolConfig.default(),
+        )
+
+        async with self.bbo_pool, self.trade_pool, self.depth_pool:
+            self.logger.info(
+                "Streams connected, processing BBO + trades + depth...".encode("utf-8")
+            )
             try:
 
                 async def consume_bbo():
@@ -233,9 +268,15 @@ class BinanceStreamProcessor:
                     async for msg in self.trade_pool:
                         self._process_trade_message(msg)
 
-                await asyncio.gather(consume_bbo(), consume_trades())
+                async def consume_depth():
+                    async for msg in self.depth_pool:
+                        self._process_depth_message(msg)
+
+                await asyncio.gather(consume_bbo(), consume_trades(), consume_depth())
             except KeyboardInterrupt:
-                self.logger.info("Stream interrupted, shutting down...".encode("utf-8"))
+                self.logger.info(
+                    "Stream interrupted, shutting down...".encode("utf-8")
+                )
 
     def run(self) -> None:
         """Run the stream processor."""
@@ -252,6 +293,8 @@ class BinanceStreamProcessor:
             self.bbo_pool.close()
         if self.trade_pool is not None:
             self.trade_pool.close()
+        if self.depth_pool is not None:
+            self.depth_pool.close()
         self.data_producer.stop()
         self.logger.shutdown()
 
@@ -300,20 +343,75 @@ class BinanceDataProcessor:
         # Message decoder
         self.decoder = msgspec.json.Decoder(type=StreamMessage)
 
+        # Orderbook state
+        self.orderbook: Orderbook | None = None
+        self.last_update_id: int = 0
+        self._depth_started: bool = False
+        self._depth_update_count: int = 0
+
+        # TEMA and rounding
+        self.tema = TimeExponentialMovingAverage(half_life_s=1.0)
+        self.rounder = Rounder(
+            RounderConfig.default(tick_size=tick_size, lot_size=lot_size)
+        )
+
         # State
         self._last_candle_timestamp = -1.0
         self._bbo_count = 0
         self._trade_count = 0
 
+    def _fetch_snapshot(self) -> None:
+        """Fetch initial orderbook snapshot via REST."""
+        url = (
+            f"https://fapi.binance.com/fapi/v1/depth"
+            f"?symbol={self.symbol}&limit=100"
+        )
+        with urllib.request.urlopen(url, timeout=20) as resp:
+            data = resp.read()
+
+        payload = msgspec.json.decode(data, type=dict)
+        snapshot = OrderbookSnapshot(
+            last_update_id=payload["lastUpdateId"],
+            bids=[(float(p), float(q)) for p, q in payload.get("bids", [])],
+            asks=[(float(p), float(q)) for p, q in payload.get("asks", [])],
+        )
+
+        bids = [
+            OrderbookLevel(price=price, size=size, norders=0)
+            for price, size in snapshot.bids
+        ]
+        asks = [
+            OrderbookLevel(price=price, size=size, norders=0)
+            for price, size in snapshot.asks
+        ]
+
+        self.orderbook = Orderbook(
+            tick_size=self.tick_size,
+            lot_size=self.lot_size,
+            size=100,
+        )
+        self.orderbook.consume_snapshot(asks=asks, bids=bids)
+        self.last_update_id = snapshot.last_update_id
+        self._depth_started = False
+
+        self.logger.info(
+            f"Orderbook snapshot received: {len(bids)} bids, {len(asks)} asks".encode(
+                "utf-8"
+            )
+        )
+
     def _handle_bbo(self, bbo_data: BBOUpdate) -> None:
         """Handle BBO update - log mid price periodically."""
         mid_price = (bbo_data.best_bid_price + bbo_data.best_ask_price) / 2.0
 
+        # Feed TEMA
+        tema_value = self.tema.update(mid_price)
+
         self._bbo_count += 1
         if self._bbo_count % 50 == 0:
+            rounded_tema = self.rounder.bid(tema_value)
             self.logger.info(
-                f"BBO #{self._bbo_count}: Bid={bbo_data.best_bid_price:.2f} "
-                f"Ask={bbo_data.best_ask_price:.2f} Mid={mid_price:.2f}".encode("utf-8")
+                f"TEMA(1s): {rounded_tema:.2f} | Mid: {mid_price:.2f}".encode("utf-8")
             )
 
     def _handle_trade(self, trade_data: TradeUpdate) -> None:
@@ -359,6 +457,53 @@ class BinanceDataProcessor:
                         )
             self._last_candle_timestamp = current_open_time
 
+    def _handle_depth(self, depth_data: OrderbookDelta) -> None:
+        """Handle orderbook delta update."""
+        if self.orderbook is None:
+            return
+
+        # Validate sequence continuity
+        if depth_data.final_update_id <= self.last_update_id:
+            return
+
+        if not self._depth_started:
+            if (
+                depth_data.first_update_id
+                <= self.last_update_id + 1
+                <= depth_data.final_update_id
+            ):
+                self._depth_started = True
+            else:
+                return
+        else:
+            if depth_data.final_update_id < self.last_update_id + 1:
+                return
+            if depth_data.first_update_id > self.last_update_id + 1:
+                self.logger.warning(
+                    f"Orderbook sequence gap: expected {self.last_update_id + 1}, "
+                    f"got [{depth_data.first_update_id}, {depth_data.final_update_id}]".encode(
+                        "utf-8"
+                    )
+                )
+                return
+
+        # Apply deltas
+        bids = [
+            OrderbookLevel(price=price, size=size, norders=0)
+            for price, size in depth_data.bids
+        ]
+        asks = [
+            OrderbookLevel(price=price, size=size, norders=0)
+            for price, size in depth_data.asks
+        ]
+        self.orderbook.consume_deltas(asks=asks, bids=bids)
+        self.last_update_id = depth_data.final_update_id
+
+        self._depth_update_count += 1
+        if self._depth_update_count % 100 == 0:
+            depth = len(self.orderbook.get_bids()) + len(self.orderbook.get_asks())
+            self.logger.info(f"Orderbook depth: {depth} levels".encode("utf-8"))
+
     def _process_message(self, msg_bytes: bytes) -> None:
         """Process a single message."""
         try:
@@ -370,6 +515,9 @@ class BinanceDataProcessor:
             elif stream_msg.msg_type == "trade":
                 trade_data = msgspec.convert(stream_msg.data, type=TradeUpdate)
                 self._handle_trade(trade_data)
+            elif stream_msg.msg_type == "depth":
+                depth_data = msgspec.convert(stream_msg.data, type=OrderbookDelta)
+                self._handle_depth(depth_data)
 
         except Exception as e:
             self.logger.error(f"Error processing message: {e}".encode("utf-8"))
@@ -391,10 +539,14 @@ class BinanceDataProcessor:
                         self._process_message(msg_bytes)
 
                 except KeyboardInterrupt:
-                    self.logger.info("Processing interrupted, shutting down...".encode("utf-8"))
+                    self.logger.info(
+                        "Processing interrupted, shutting down...".encode("utf-8")
+                    )
                     break
                 except Exception as e:
-                    self.logger.error(f"Error in processing loop: {e}".encode("utf-8"))
+                    self.logger.error(
+                        f"Error in processing loop: {e}".encode("utf-8")
+                    )
                     time.sleep(0.1)
 
         except KeyboardInterrupt:
@@ -417,7 +569,7 @@ def stream_process_entry(
     startup_event_path: str,
 ) -> None:
     """Entry point for stream process."""
-    # Wait for processing process to initialize MasterLogger
+    # Wait for processing process to initialize MasterLogger and snapshot
     startup = StartupEvent(startup_event_path)
     if not startup.wait(timeout=10.0):
         print("Timeout waiting for processing process to start", file=sys.stderr)
@@ -440,7 +592,11 @@ def processing_process_entry(
         symbol, tick_size, lot_size, logger_path, data_path
     )
 
-    # Signal that MasterLogger is ready
+    # Fetch snapshot before signaling ready so stream process does not
+    # produce deltas we are unprepared to handle.
+    processor._fetch_snapshot()
+
+    # Signal that MasterLogger and orderbook snapshot are ready
     startup = StartupEvent(startup_event_path)
     startup.set()
 

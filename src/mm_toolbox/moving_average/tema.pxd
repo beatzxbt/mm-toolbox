@@ -4,7 +4,7 @@ from mm_toolbox.moving_average.base cimport MovingAverage
 
 cdef class TimeExponentialMovingAverage(MovingAverage):
     cdef:
-        double      _time
+        double      _time_s
         double      _lam
         
     cpdef double    initialize(self, cnp.ndarray values)
