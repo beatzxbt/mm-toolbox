@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import pytest
 
@@ -8,8 +9,8 @@ from mm_toolbox.logging.advanced.worker import WorkerLogger
 
 class TestWorkerLogger:
     @pytest.fixture
-    def default_config(self):
-        return LoggerConfig(path=f"/tmp/test_worker_{os.getpid()}.shm")
+    def default_config(self, tmp_path: Path):
+        return LoggerConfig(path=str(tmp_path / f"test_worker_{os.getpid()}.shm"))
 
     def test_init_default(self, default_config):
         logger = WorkerLogger(config=default_config)

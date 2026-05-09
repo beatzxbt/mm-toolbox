@@ -232,27 +232,25 @@ class TestFileLogHandler:
             assert f.read() == ""  # Nothing written
 
     def test_create_with_directory(self):
-        tmpdir = tempfile.mkdtemp()
-        shutil.rmtree(tmpdir)
-        path = os.path.join(tmpdir, "subdir", "test.txt")
-        handler = FileLogHandler(path, create=True)
-        assert os.path.exists(os.path.dirname(path))
-        handler.close()
-        shutil.rmtree(tmpdir, ignore_errors=True)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            shutil.rmtree(tmpdir)
+            path = os.path.join(tmpdir, "subdir", "test.txt")
+            handler = FileLogHandler(path, create=True)
+            assert os.path.exists(os.path.dirname(path))
+            handler.close()
 
     def test_push_creates_file_if_missing(self):
-        tmpdir = tempfile.mkdtemp()
-        path = os.path.join(tmpdir, "test.txt")
-        handler = FileLogHandler(path, create=True)
-        config = LoggerConfig(str_format="%(message)s")
-        handler.add_primary_config(config)
-        logs = [PyLog(1, b"name", PyLogLevel.INFO, b"msg")]
-        handler.push(logs)
-        assert os.path.exists(path)
-        with open(path) as f:
-            assert "msg" in f.read()
-        handler.close()
-        shutil.rmtree(tmpdir, ignore_errors=True)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "test.txt")
+            handler = FileLogHandler(path, create=True)
+            config = LoggerConfig(str_format="%(message)s")
+            handler.add_primary_config(config)
+            logs = [PyLog(1, b"name", PyLogLevel.INFO, b"msg")]
+            handler.push(logs)
+            assert os.path.exists(path)
+            with open(path) as f:
+                assert "msg" in f.read()
+            handler.close()
 
     def test_push_disk_full(self, temp_file):
         handler = FileLogHandler(temp_file)

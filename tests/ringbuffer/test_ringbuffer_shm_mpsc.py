@@ -518,11 +518,14 @@ class TestMpscSharedBytesRingBuffer:
         prod = ShmMpscProducer(
             shm_path, 0, num_rings=1, create=True, unlink_on_close=False
         )
-        prod.close()
-        # Global header (64) + sub header (64) + 1 byte data, aligned stride = 128
-        # total = 64 + 128 = 192
-        assert os.path.getsize(shm_path) == 192
-        os.unlink(shm_path)
+        try:
+            prod.close()
+            # Global header (64) + sub header (64) + 1 byte data, aligned stride = 128
+            # total = 64 + 128 = 192
+            assert os.path.getsize(shm_path) == 192
+        finally:
+            if os.path.exists(shm_path):
+                os.unlink(shm_path)
 
     # --- Timestamp properties ---
 
@@ -652,39 +655,43 @@ class TestMpscSharedBytesRingBuffer:
         n_per_prod = 1000
         num_prods = 8
         total = n_per_prod * num_prods
-        prod_init = ShmMpscProducer(shm_path, 1 << 22, num_rings=8, create=True)
-        prod_init.close()
-
+        cons = None
         procs = []
-        rng = random.Random(1337)
-        for pid in range(num_prods):
-            msgs = [
-                bytes(rng.randrange(0, 256) for _ in range(rng.randint(1, 128)))
-                for _ in range(n_per_prod)
-            ]
-            p = mp.Process(
-                target=_mpsc_producer_proc,
-                args=(shm_path, 1 << 22, 8, msgs),
-            )
-            p.start()
-            procs.append(p)
-
-        cons = ShmMpscConsumer(shm_path, spin_wait=4096)
         try:
+            prod_init = ShmMpscProducer(shm_path, 1 << 22, num_rings=8, create=True)
+            prod_init.close()
+
+            rng = random.Random(1337)
+            for pid in range(num_prods):
+                msgs = [
+                    bytes(rng.randrange(0, 256) for _ in range(rng.randint(1, 128)))
+                    for _ in range(n_per_prod)
+                ]
+                p = mp.Process(
+                    target=_mpsc_producer_proc,
+                    args=(shm_path, 1 << 22, 8, msgs),
+                )
+                p.start()
+                procs.append(p)
+
+            cons = ShmMpscConsumer(shm_path, spin_wait=4096)
             received = 0
             for _ in range(total):
                 cons.consume()
                 received += 1
             assert received == total
+
+            for p in procs:
+                p.join(timeout=60)
+                assert p.exitcode == 0
         finally:
-            cons.close()
-
-        for p in procs:
-            p.join(timeout=60)
-            assert p.exitcode == 0
-
-        if os.path.exists(shm_path):
-            os.unlink(shm_path)
+            if cons is not None:
+                cons.close()
+            for p in procs:
+                if p.is_alive():
+                    p.join(timeout=5)
+            if os.path.exists(shm_path):
+                os.unlink(shm_path)
 
     # --- Multi-process scenarios ---
 

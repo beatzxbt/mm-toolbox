@@ -2,6 +2,8 @@
 
 from collections.abc import AsyncIterator, Iterable
 
+import os
+
 import zmq
 import zmq.asyncio as azmq
 from msgspec import Struct
@@ -110,6 +112,13 @@ class IPCRingBufferProducer:
             self._socket.close()
         self._context.term()
         self._is_started = False
+        if self._path and self._path.startswith("ipc://"):
+            try:
+                socket_file = self._path.replace("ipc://", "")
+                if os.path.exists(socket_file):
+                    os.unlink(socket_file)
+            except Exception:
+                pass
 
     def __enforce_producer_started(self) -> None:
         """Enforce that the producer is started."""
@@ -206,6 +215,13 @@ class IPCRingBufferConsumer:
             self._asocket.close()
         self._context.term()
         self._is_started = False
+        if self._path and self._path.startswith("ipc://"):
+            try:
+                socket_file = self._path.replace("ipc://", "")
+                if os.path.exists(socket_file):
+                    os.unlink(socket_file)
+            except Exception:
+                pass
 
     def __aiter__(self) -> AsyncIterator[bytes]:
         """Async iterator for the consumer."""

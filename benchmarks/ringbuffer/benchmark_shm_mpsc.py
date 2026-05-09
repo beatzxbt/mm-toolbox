@@ -11,6 +11,7 @@ for the MPSC shared-memory ring buffer implementation.
 
 from __future__ import annotations
 
+import atexit
 import multiprocessing
 import os
 import time
@@ -41,6 +42,26 @@ from mm_toolbox.ringbuffer.shm import (
     ShmMpscConsumer,
     ShmMpscProducer,
 )
+
+
+_shm_cleanup_paths = []
+
+
+def _register_shm_cleanup(path: str) -> None:
+    _shm_cleanup_paths.append(path)
+
+
+def _shm_atexit_cleanup() -> None:
+    for path in _shm_cleanup_paths:
+        try:
+            p = Path(path)
+            if p.exists():
+                p.unlink()
+        except Exception:
+            pass
+
+
+atexit.register(_shm_atexit_cleanup)
 
 
 @dataclass
@@ -376,6 +397,7 @@ class MPSCSHMRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
         for payload_size in config.payload_sizes:
             if config.run_latency:
                 lat_path = f"{base_path}_lat_{payload_size}"
+                _register_shm_cleanup(lat_path)
                 self._cleanup_path(lat_path)
 
                 try:
@@ -411,6 +433,7 @@ class MPSCSHMRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
             if config.run_throughput:
                 for num_producers in config.throughput_producer_counts:
                     tp_path = f"{base_path}_tp_{payload_size}_p{num_producers}"
+                    _register_shm_cleanup(tp_path)
                     self._cleanup_path(tp_path)
 
                     try:
@@ -447,6 +470,7 @@ class MPSCSHMRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
 
         if config.run_scalability:
             scal_path = f"{base_path}_scal"
+            _register_shm_cleanup(scal_path)
             self._cleanup_path(scal_path)
             payload_size = 128
             try:
@@ -477,6 +501,7 @@ class MPSCSHMRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
 
         if config.run_fairness:
             fair_path = f"{base_path}_fair"
+            _register_shm_cleanup(fair_path)
             self._cleanup_path(fair_path)
             payload_size = 128
             try:

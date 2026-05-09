@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from mm_toolbox.logging.advanced.config import LoggerConfig
@@ -15,8 +17,8 @@ class MockHandler(BaseLogHandler):
 
 class TestMasterLogger:
     @pytest.fixture
-    def default_config(self):
-        return LoggerConfig(path="/tmp/test_master.shm")
+    def default_config(self, tmp_path: Path):
+        return LoggerConfig(path=str(tmp_path / "test_master.shm"))
 
     def test_init_default(self, default_config):
         logger = MasterLogger(config=default_config)

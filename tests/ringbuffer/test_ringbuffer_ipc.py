@@ -4,6 +4,7 @@ import asyncio
 import os
 import random
 import string
+from pathlib import Path
 
 import pytest
 
@@ -17,29 +18,32 @@ import threading
 import time
 
 
-def _random_ipc_path() -> str:
+def _random_ipc_path(tmp_path: Path) -> str:
     """Generate unique IPC path to avoid test collisions."""
-    suffix = "".join(random.choice(string.ascii_lowercase) for _ in range(8))
-    return f"ipc:///tmp/mmtoolbox_ipc_{os.getpid()}_{suffix}"
+    # macOS tmp_path exceeds ZMQ's 103-char IPC limit, so use a short path
+    # under /tmp that is unique per test via tmp_path.name
+    short_dir = f"/tmp/mmt_{os.getpid()}_{tmp_path.name[:8]}"
+    os.makedirs(short_dir, exist_ok=True)
+    return f"ipc://{short_dir}/s"
 
 
 class TestIPCRingBufferConfig:
     """Test IPCRingBufferConfig validation comprehensively."""
 
-    def test_valid_config_creation(self):
+    def test_valid_config_creation(self, tmp_path: Path):
         """Test creating valid configurations."""
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=1024, num_producers=1, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=1024, num_producers=1, num_consumers=1
         )
         assert cfg.backlog == 1024
         assert cfg.num_producers == 1
         assert cfg.num_consumers == 1
-        assert cfg.path.startswith("ipc:///tmp/mmtoolbox_ipc_")
+        assert cfg.path.startswith("ipc://")
         assert cfg.linger_ms == 0
 
-    def test_path_validation(self):
+    def test_path_validation(self, tmp_path: Path):
         """Test path validation."""
-        valid_path = _random_ipc_path()
+        valid_path = _random_ipc_path(tmp_path)
         cfg = IPCRingBufferConfig(
             path=valid_path, backlog=1, num_producers=1, num_consumers=1
         )
@@ -57,9 +61,9 @@ class TestIPCRingBufferConfig:
         with pytest.raises(AttributeError):
             IPCRingBufferConfig(path=None, backlog=1, num_producers=1, num_consumers=1)
 
-    def test_backlog_validation(self):
+    def test_backlog_validation(self, tmp_path: Path):
         """Test backlog validation."""
-        valid_path = _random_ipc_path()
+        valid_path = _random_ipc_path(tmp_path)
 
         # Valid backlogs
         for backlog in [1, 10, 1024]:
@@ -78,9 +82,9 @@ class TestIPCRingBufferConfig:
                     num_consumers=1,
                 )
 
-    def test_producer_consumer_count_validation(self):
+    def test_producer_consumer_count_validation(self, tmp_path: Path):
         """Test producer and consumer count validation."""
-        valid_path = _random_ipc_path()
+        valid_path = _random_ipc_path(tmp_path)
 
         # Valid SPSC configuration
         cfg = IPCRingBufferConfig(
@@ -106,9 +110,9 @@ class TestIPCRingBufferConfig:
                 path=valid_path, backlog=1024, num_producers=2, num_consumers=2
             )
 
-    def test_linger_validation_and_default(self):
+    def test_linger_validation_and_default(self, tmp_path: Path):
         """Test linger_ms validation and default."""
-        valid_path = _random_ipc_path()
+        valid_path = _random_ipc_path(tmp_path)
         # Default() should set 0
         cfg_default = IPCRingBufferConfig.default()
         assert cfg_default.linger_ms == 0
@@ -134,23 +138,23 @@ class TestIPCRingBufferConfig:
                 linger_ms=-1,
             )
 
-    def test_should_producer_bind_rules(self):
+    def test_should_producer_bind_rules(self, tmp_path: Path):
         """Verify binding direction based on topology."""
         # SPSC
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=128, num_producers=1, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=128, num_producers=1, num_consumers=1
         )
         assert cfg.should_producer_bind() is True
 
         # MPSC (consumer binds)
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=128, num_producers=3, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=128, num_producers=3, num_consumers=1
         )
         assert cfg.should_producer_bind() is False
 
         # SPMC (producer binds)
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=128, num_producers=1, num_consumers=2
+            path=_random_ipc_path(tmp_path), backlog=128, num_producers=1, num_consumers=2
         )
         assert cfg.should_producer_bind() is True
 
@@ -158,10 +162,10 @@ class TestIPCRingBufferConfig:
 class TestIPCRingBufferBasicOperations:
     """Test basic IPC ringbuffer operations."""
 
-    def test_producer_consumer_creation(self):
+    def test_producer_consumer_creation(self, tmp_path: Path):
         """Test creating producer and consumer."""
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=1024, num_producers=1, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=1024, num_producers=1, num_consumers=1
         )
         producer = IPCRingBufferProducer(cfg)
         consumer = IPCRingBufferConsumer(cfg)
@@ -173,10 +177,10 @@ class TestIPCRingBufferBasicOperations:
             producer.stop()
             consumer.stop()
 
-    def test_single_message_roundtrip(self):
+    def test_single_message_roundtrip(self, tmp_path: Path):
         """Test sending and receiving a single message."""
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=1024, num_producers=1, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=1024, num_producers=1, num_consumers=1
         )
         producer = IPCRingBufferProducer(cfg)
         consumer = IPCRingBufferConsumer(cfg)
@@ -190,10 +194,10 @@ class TestIPCRingBufferBasicOperations:
             producer.stop()
             consumer.stop()
 
-    def test_multiple_messages_roundtrip(self):
+    def test_multiple_messages_roundtrip(self, tmp_path: Path):
         """Test sending and receiving multiple messages."""
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=1024, num_producers=1, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=1024, num_producers=1, num_consumers=1
         )
         producer = IPCRingBufferProducer(cfg)
         consumer = IPCRingBufferConsumer(cfg)
@@ -212,10 +216,10 @@ class TestIPCRingBufferBasicOperations:
             producer.stop()
             consumer.stop()
 
-    def test_batch_operations(self):
+    def test_batch_operations(self, tmp_path: Path):
         """Test batch insert and consume operations."""
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=1024, num_producers=1, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=1024, num_producers=1, num_consumers=1
         )
         producer = IPCRingBufferProducer(cfg)
         consumer = IPCRingBufferConsumer(cfg)
@@ -233,10 +237,10 @@ class TestIPCRingBufferBasicOperations:
             producer.stop()
             consumer.stop()
 
-    def test_packed_operations(self):
+    def test_packed_operations(self, tmp_path: Path):
         """Test packed insert and consume operations."""
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=1024, num_producers=1, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=1024, num_producers=1, num_consumers=1
         )
         producer = IPCRingBufferProducer(cfg)
         consumer = IPCRingBufferConsumer(cfg)
@@ -254,10 +258,10 @@ class TestIPCRingBufferBasicOperations:
 class TestIPCRingBufferDataTypes:
     """Test various data types and edge cases."""
 
-    def test_empty_messages(self):
+    def test_empty_messages(self, tmp_path: Path):
         """Test handling of empty byte messages."""
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=1024, num_producers=1, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=1024, num_producers=1, num_consumers=1
         )
         producer = IPCRingBufferProducer(cfg)
         consumer = IPCRingBufferConsumer(cfg)
@@ -271,10 +275,10 @@ class TestIPCRingBufferDataTypes:
             producer.stop()
             consumer.stop()
 
-    def test_large_messages(self):
+    def test_large_messages(self, tmp_path: Path):
         """Test handling of reasonably large messages."""
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=1024, num_producers=1, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=1024, num_producers=1, num_consumers=1
         )
         producer = IPCRingBufferProducer(cfg)
         consumer = IPCRingBufferConsumer(cfg)
@@ -290,10 +294,10 @@ class TestIPCRingBufferDataTypes:
             producer.stop()
             consumer.stop()
 
-    def test_binary_data(self):
+    def test_binary_data(self, tmp_path: Path):
         """Test handling of binary data."""
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=1024, num_producers=1, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=1024, num_producers=1, num_consumers=1
         )
         producer = IPCRingBufferProducer(cfg)
         consumer = IPCRingBufferConsumer(cfg)
@@ -314,10 +318,10 @@ class TestIPCRingBufferDataTypes:
             producer.stop()
             consumer.stop()
 
-    def test_unicode_encoded_data(self):
+    def test_unicode_encoded_data(self, tmp_path: Path):
         """Test handling of unicode strings encoded as bytes."""
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=1024, num_producers=1, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=1024, num_producers=1, num_consumers=1
         )
         producer = IPCRingBufferProducer(cfg)
         consumer = IPCRingBufferConsumer(cfg)
@@ -339,10 +343,10 @@ class TestIPCRingBufferDataTypes:
 class TestIPCRingBufferErrorHandling:
     """Test error handling and edge cases."""
 
-    def test_invalid_message_types(self):
+    def test_invalid_message_types(self, tmp_path: Path):
         """Test that invalid message types are rejected."""
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=1024, num_producers=1, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=1024, num_producers=1, num_consumers=1
         )
         producer = IPCRingBufferProducer(cfg)
 
@@ -356,10 +360,10 @@ class TestIPCRingBufferErrorHandling:
         finally:
             producer.stop()
 
-    def test_consumer_without_producer(self):
+    def test_consumer_without_producer(self, tmp_path: Path):
         """Test consumer behavior when no producer is running."""
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=1024, num_producers=1, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=1024, num_producers=1, num_consumers=1
         )
         consumer = IPCRingBufferConsumer(cfg)
 
@@ -370,10 +374,10 @@ class TestIPCRingBufferErrorHandling:
         finally:
             consumer.stop()
 
-    def test_double_stop_safety(self):
+    def test_double_stop_safety(self, tmp_path: Path):
         """Test that calling stop() multiple times is safe."""
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=1024, num_producers=1, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=1024, num_producers=1, num_consumers=1
         )
         producer = IPCRingBufferProducer(cfg)
         consumer = IPCRingBufferConsumer(cfg)
@@ -389,9 +393,9 @@ class TestIPCRingBufferErrorHandling:
 class TestIPCRingBufferTopologies:
     """Integrated tests for common topologies and start-order robustness."""
 
-    def test_mpsc_multiple_producers_single_consumer_roundtrip(self):
+    def test_mpsc_multiple_producers_single_consumer_roundtrip(self, tmp_path: Path):
         """Multiple producers, single consumer should deliver all messages."""
-        path = _random_ipc_path()
+        path = _random_ipc_path(tmp_path)
         num_producers = 5
         msgs_per_producer = 50
         total_expected = num_producers * msgs_per_producer
@@ -445,9 +449,9 @@ class TestIPCRingBufferTopologies:
                 except Exception:
                     pass
 
-    def test_mpsc_producers_can_start_before_consumer(self):
+    def test_mpsc_producers_can_start_before_consumer(self, tmp_path: Path):
         """Starting producers before consumer should not deadlock."""
-        path = _random_ipc_path()
+        path = _random_ipc_path(tmp_path)
         num_producers = 3
         msgs_per_producer = 10
         total_expected = num_producers * msgs_per_producer
@@ -480,9 +484,9 @@ class TestIPCRingBufferTopologies:
             for p in producers:
                 p.stop()
 
-    def test_spmc_single_producer_multiple_consumers(self):
+    def test_spmc_single_producer_multiple_consumers(self, tmp_path: Path):
         """Single producer, multiple consumers share messages without loss."""
-        path = _random_ipc_path()
+        path = _random_ipc_path(tmp_path)
         num_consumers = 2
         total_msgs = 200
 
@@ -521,10 +525,10 @@ class TestIPCRingBufferAsyncOperations:
     """Test async operations (simplified for speed)."""
 
     @pytest.mark.asyncio
-    async def test_async_single_message(self):
+    async def test_async_single_message(self, tmp_path: Path):
         """Test async single message operations."""
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=1024, num_producers=1, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=1024, num_producers=1, num_consumers=1
         )
 
         producer = IPCRingBufferProducer(cfg)
@@ -539,10 +543,10 @@ class TestIPCRingBufferAsyncOperations:
             consumer.stop()
 
     @pytest.mark.asyncio
-    async def test_async_packed_operations(self):
+    async def test_async_packed_operations(self, tmp_path: Path):
         """Test async packed operations."""
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=1024, num_producers=1, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=1024, num_producers=1, num_consumers=1
         )
 
         producer = IPCRingBufferProducer(cfg)
@@ -559,10 +563,10 @@ class TestIPCRingBufferAsyncOperations:
             consumer.stop()
 
     @pytest.mark.asyncio
-    async def test_async_timeout_behavior(self):
+    async def test_async_timeout_behavior(self, tmp_path: Path):
         """Test async timeout behavior."""
         cfg = IPCRingBufferConfig(
-            path=_random_ipc_path(), backlog=1024, num_producers=1, num_consumers=1
+            path=_random_ipc_path(tmp_path), backlog=1024, num_producers=1, num_consumers=1
         )
 
         consumer = IPCRingBufferConsumer(cfg)

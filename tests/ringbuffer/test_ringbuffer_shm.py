@@ -327,6 +327,8 @@ class TestSharedBytesRingBuffer:
             assert isinstance(checksum, int) and checksum > 0
         finally:
             prod.close()
+            if os.path.exists(shm_path):
+                os.unlink(shm_path)
 
     # --- P0 Critical ---
 
@@ -708,7 +710,10 @@ class TestSharedBytesRingBuffer:
             shm_path: Temporary file path for the shared memory ringbuffer.
         """
         prod = ShmSpscProducer(shm_path, 0, create=True, unlink_on_close=False)
-        prod.close()
-        # Header (64 bytes) + 1 byte capacity
-        assert os.path.getsize(shm_path) == 65
-        os.unlink(shm_path)
+        try:
+            prod.close()
+            # Header (64 bytes) + 1 byte capacity
+            assert os.path.getsize(shm_path) == 65
+        finally:
+            if os.path.exists(shm_path):
+                os.unlink(shm_path)

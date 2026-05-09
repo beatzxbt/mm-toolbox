@@ -14,6 +14,7 @@ Measures producer/consumer throughput for:
 from __future__ import annotations
 
 import asyncio
+import atexit
 import multiprocessing
 import os
 import time
@@ -44,6 +45,31 @@ from mm_toolbox.ringbuffer.ipc import (
     IPCRingBufferConsumer,
     IPCRingBufferProducer,
 )
+
+
+_cleanup_paths = []
+
+
+def _register_cleanup(path: str) -> None:
+    _cleanup_paths.append(path)
+
+
+def _atexit_cleanup() -> None:
+    for path in _cleanup_paths:
+        try:
+            if os.path.exists(path):
+                os.unlink(path)
+        except Exception:
+            pass
+    try:
+        ipc_dir = Path(".ipc")
+        if ipc_dir.exists() and not any(ipc_dir.iterdir()):
+            ipc_dir.rmdir()
+    except Exception:
+        pass
+
+
+atexit.register(_atexit_cleanup)
 
 
 def _producer_sync_single(
@@ -635,6 +661,7 @@ class IPCRingBufferBenchmark(BenchmarkRunner[IPCBenchmarkConfig]):
 
         for payload_size in self.config.payload_sizes:
             path = f"{base_path}_{payload_size}"
+            _register_cleanup(path.replace("ipc://", ""))
 
             for _ in range(self.config.repeats):
                 if self.config.run_sync:
