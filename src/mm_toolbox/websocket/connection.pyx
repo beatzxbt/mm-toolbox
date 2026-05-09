@@ -214,8 +214,7 @@ cdef class WsConnection(WSListener):
         Args:
             msg (bytes, optional): Optional payload for the PING frame.
         """
-        if self._transport is not None:
-            self._dispatch_on_loop(getattr(self._transport, "send_ping"), (msg,))
+        self._dispatch_on_loop(getattr(self._transport, "send_ping", None), (msg,))
 
     cpdef void send_pong(self, bytes msg=b""):
         """
@@ -224,8 +223,7 @@ cdef class WsConnection(WSListener):
         Args:
             msg (bytes, optional): Optional payload for the PONG frame.
         """
-        if self._transport is not None:
-            self._dispatch_on_loop(getattr(self._transport, "send_pong"), (msg,))
+        self._dispatch_on_loop(getattr(self._transport, "send_pong", None), (msg,))
 
     cpdef void send_data(self, bytes msg):
         """
@@ -234,8 +232,7 @@ cdef class WsConnection(WSListener):
         Args:
             msg (bytes): The data to send as TEXT.
         """
-        if self._transport is not None:
-            self._dispatch_on_loop(getattr(self._transport, "send"), (WSMsgType.TEXT, msg))
+        self._dispatch_on_loop(getattr(self._transport, "send", None), (WSMsgType.TEXT, msg))
 
     cpdef void send_data_bytearray(self, bytearray msg):
         """
@@ -248,14 +245,11 @@ cdef class WsConnection(WSListener):
             bytearray transport_buffer
             Py_ssize_t msg_len
 
-        if self._conn_state != ConnectionState.CONNECTED or self._transport is None:
-            return
-
         msg_len = len(msg)
         transport_buffer = bytearray(14 + msg_len)
         transport_buffer[14:] = msg
         self._dispatch_on_loop(
-            getattr(self._transport, "send_reuse_external_bytearray"),
+            getattr(self._transport, "send_reuse_external_bytearray", None),
             (WSMsgType.TEXT, transport_buffer, 14)
         )
 
