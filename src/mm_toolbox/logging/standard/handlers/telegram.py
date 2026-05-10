@@ -26,12 +26,7 @@ class TelegramLogHandler(BaseLogHandler):
         self.headers = {"Content-Type": "application/json"}
 
     def push(self, buffer: list[str]) -> None:
-        """Batch messages into chunks and send to Telegram.
-
-        Args:
-            buffer (list[str]): List of formatted log messages.
-
-        """
+        """Batch messages into chunks and send to Telegram."""
         chunks = self._chunk_messages(buffer, max_chars=4096)
         asyncio.run(self._push_chunks(chunks))
 
@@ -69,34 +64,24 @@ class TelegramLogHandler(BaseLogHandler):
         return chunks
 
     async def _push_chunks(self, chunks: list[str]) -> None:
-        """Send chunks concurrently via HTTP.
+        """Send chunks to Telegram Bot API."""
+        import aiohttp
 
-        Args:
-            chunks (list[str]): Pre-batched message chunks.
-
-        """
-        tasks = [self._post(chunk) for chunk in chunks]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for res in results:
-            if isinstance(res, Exception):
-                self._handle_exception(res, "push")
-
-    async def _post(self, text: str) -> None:
-        """Send a single chunk to Telegram.
-
-        Args:
-            text (str): Formatted log message content.
-
-        """
-        payload = {
-            "chat_id": self.chat_id,
-            "text": text,
-            "disable_web_page_preview": True,
-        }
-        resp = await self.http_session.post(
-            url=self.url,
-            headers=self.headers,
-            data=self.json_encode(payload),
-        )
-        await resp.read()
-        resp.raise_for_status()
+        async with aiohttp.ClientSession() as session:
+            for chunk in chunks:
+                payload = {
+                    "chat_id": self.chat_id,
+                    "text": chunk,
+                }
+                try:
+                    async with session.post(
+                        self.url,
+                        headers=self.headers,
+                        json=payload,
+                    ) as response:
+                        if response.status >= 400:
+                            raise RuntimeError(
+                                f"Telegram API returned {response.status}"
+                            )
+                except Exception as exc:
+                    self._handle_exception(exc, "Telegram push")

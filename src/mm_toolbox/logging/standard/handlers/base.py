@@ -1,12 +1,10 @@
 """Base class for standard logging handlers."""
 
-import asyncio
 import sys
 import traceback
 from abc import ABC, abstractmethod
 from typing import Callable
 
-import aiohttp
 import msgspec
 
 
@@ -38,18 +36,6 @@ class BaseLogHandler(ABC):
         if self._json_encode is None:
             self._json_encode = msgspec.json.Encoder().encode
         return self._json_encode
-
-    @property
-    def http_session(self):
-        """Lazy aiohttp client session.
-
-        Returns:
-            aiohttp.ClientSession: Reusable HTTP session.
-
-        """
-        if self._http_session is None:
-            self._http_session = aiohttp.ClientSession()
-        return self._http_session
 
     def set_error_handler(
         self, handler: Callable[[BaseException, str], None] | None
@@ -86,15 +72,6 @@ class BaseLogHandler(ABC):
 
     def close(self) -> None:
         """Close any async resources owned by the handler."""
-        if self._http_session is not None and not self._http_session.closed:
-            try:
-                loop = asyncio.new_event_loop()
-                try:
-                    loop.run_until_complete(self._http_session.close())
-                finally:
-                    loop.close()
-            except Exception:
-                pass
         self._is_open = False
 
     @abstractmethod

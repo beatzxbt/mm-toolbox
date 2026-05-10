@@ -5,8 +5,19 @@ WorkerLogger to control log levels, formatting, shared memory capacity,
 and batching behaviour.
 """
 
+import os
+import secrets
+
 from mm_toolbox.logging.advanced.pylog import PyLogLevel
 from mm_toolbox.logging.advanced.log cimport CLogLevel
+
+
+def _get_default_shm_path():
+    """Generate a secure, per-process SHM path."""
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+    token = secrets.token_hex(8)
+    return f"{runtime_dir}/mm_toolbox_logger_{token}.shm"
+
 
 cdef class LoggerConfig:
     def __cinit__(
@@ -14,7 +25,7 @@ cdef class LoggerConfig:
         object base_level=None,
         bint do_stdout=False,
         str str_format="%(asctime)s [%(levelname)s] %(name)s - %(message)s", 
-        str path="/tmp/hft_logger.shm", 
+        str path=None, 
         double flush_interval_s=1.0,
         bint emit_internal=False,
         int shm_capacity_bytes=67108864,
@@ -31,7 +42,7 @@ cdef class LoggerConfig:
                 Supports standard format placeholders like %(asctime)s, %(name)s, %(levelname)s, 
                 and %(message)s. Defaults to '%(asctime)s [%(levelname)s] %(name)s - %(message)s'.
                 Must contain at least %(message)s to be valid.
-            path (str): The connection path for the transport protocol. Defaults to '/tmp/hft_logger.shm'.
+            path (str): The connection path for the transport protocol. Defaults to a randomized path.
             flush_interval_s (float): Positive interval (seconds) to pace flush cycles. Defaults to 1.0.
             emit_internal (bool): If True, emit internal startup/shutdown logs. Defaults to False.
             shm_capacity_bytes (int): Shared memory ring buffer capacity in bytes. Defaults to 64MB.
@@ -48,7 +59,7 @@ cdef class LoggerConfig:
             raise ValueError("Format string must contain at least the '%(message)s' placeholder")
         
         if path is None:
-            raise TypeError("path must be of type str")
+            path = _get_default_shm_path()
         self.path = path
 
         self.flush_interval_s = flush_interval_s
