@@ -7,6 +7,7 @@
 
 import ctypes
 import os
+import stat
 from libc.stdint cimport uint64_t as u64
 from libc.stddef cimport size_t
 from libc.errno cimport errno
@@ -26,6 +27,9 @@ cdef extern from "fcntl.h":
     int open(const char* path, int oflag, ...)
     int O_RDWR
     int O_CREAT
+    int O_EXCL
+    int O_NOFOLLOW
+    int O_CLOEXEC
 
 cdef extern from "unistd.h":
     int ftruncate(int fd, long length)
@@ -118,7 +122,7 @@ cdef class ShmMpscProducer(_ShmRingBase):
         if self._sub_hdrs == NULL or self._sub_datas == NULL or self._prod_ctxs == NULL:
             raise MemoryError("Failed to allocate MPSC sub-ring arrays")
 
-        fd = open(path_b, O_CREAT | O_RDWR, 0o600)
+        fd = open(path_b, O_CREAT | O_RDWR | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
         if fd < 0:
             raise OSError(errno, "open failed for MPSC shared ring")
         if ftruncate(fd, <long long>total_len) != 0:
@@ -180,14 +184,21 @@ cdef class ShmMpscProducer(_ShmRingBase):
             unsigned char* sub_data
             ShmSubRingHeader* sub_hdr
 
-        fd = open(path_b, O_RDWR, 0o600)
+        fd = open(path_b, O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
         if fd < 0:
             raise OSError(errno, "open failed for MPSC shared ring")
         try:
-            backing_len = os.fstat(fd).st_size
+            st = os.fstat(fd)
+            backing_len = st.st_size
         except Exception:
             close(fd)
             raise
+        if not stat.S_ISREG(st.st_mode):
+            close(fd)
+            raise RuntimeError("MPSC shared ring backing file is not a regular file")
+        if stat.S_IMODE(st.st_mode) != 0o600:
+            close(fd)
+            raise RuntimeError("MPSC shared ring backing file has incorrect permissions")
         if backing_len < _MPSC_GLOBAL_HEADER_SIZE:
             close(fd)
             raise RuntimeError("MPSC shared ring backing file too small for global header")

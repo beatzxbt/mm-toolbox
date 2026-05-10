@@ -7,6 +7,7 @@
 
 import ctypes
 import os
+import stat
 from libc.stdint cimport uint64_t as u64
 from libc.string cimport memcpy
 from libc.stddef cimport size_t
@@ -27,6 +28,9 @@ cdef extern from "fcntl.h":
     int open(const char* path, int oflag, ...)
     int O_RDWR
     int O_CREAT
+    int O_EXCL
+    int O_NOFOLLOW
+    int O_CLOEXEC
 
 cdef extern from "unistd.h":
     int ftruncate(int fd, long length)
@@ -105,7 +109,7 @@ cdef class _SharedBytesRing(_ShmRingBase):
             size_t cap = <size_t>pow2_at_least(capacity_bytes if capacity_bytes > 0 else 1)
             size_t total_len = _HEADER_SIZE + cap
             void* base
-        fd = open(path_b, O_CREAT | O_RDWR, 0o600)
+        fd = open(path_b, O_CREAT | O_RDWR | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
         if fd < 0:
             raise OSError(errno, "open failed for shared ring")
         if ftruncate(fd, <long long>total_len) != 0:
@@ -153,14 +157,21 @@ cdef class _SharedBytesRing(_ShmRingBase):
             u64 capacity
             u64 mask
             object backing_len
-        fd = open(path_b, O_RDWR, 0o600)
+        fd = open(path_b, O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
         if fd < 0:
             raise OSError(errno, "open failed for shared ring")
         try:
-            backing_len = os.fstat(fd).st_size
+            st = os.fstat(fd)
+            backing_len = st.st_size
         except Exception:
             close(fd)
             raise
+        if not stat.S_ISREG(st.st_mode):
+            close(fd)
+            raise RuntimeError("Shared ring backing file is not a regular file")
+        if stat.S_IMODE(st.st_mode) != 0o600:
+            close(fd)
+            raise RuntimeError("Shared ring backing file has incorrect permissions")
         if backing_len < _HEADER_SIZE:
             close(fd)
             raise RuntimeError("Shared ring backing file too small for header")
