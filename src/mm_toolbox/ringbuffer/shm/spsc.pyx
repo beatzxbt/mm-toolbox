@@ -340,7 +340,7 @@ cdef class ShmSpscProducer(_SharedBytesRing):
         self._cached_write = self._prod_ctx.cached_write
         return success == 1
 
-    cpdef bint insert_char(self, const char* data, size_t n):
+    cdef bint insert_char(self, const char* data, size_t n):
         """Insert a raw buffer of length n from a char* pointer.
 
         Args:

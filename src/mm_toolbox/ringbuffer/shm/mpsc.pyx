@@ -332,7 +332,7 @@ cdef class ShmMpscProducer(_ShmRingBase):
                                          <size_t>payload_len, &dropped)
         return success == 1
 
-    cpdef bint insert_char(self, const char* data, size_t n):
+    cdef bint insert_char(self, const char* data, size_t n):
         """Insert a raw buffer of length n from a char* pointer.
 
         Args:

@@ -99,7 +99,7 @@ cdef class BytesRingBuffer:
         self._latest_insert_time_ns = <u64>time_monotonic_ns()
         return True
 
-    cpdef bint insert_char(self, const char* data, Py_ssize_t n):
+    cdef bint insert_char(self, const char* data, Py_ssize_t n):
         """Add a new element directly from char* to avoid byte conversion overhead.
 
         Args:
@@ -552,7 +552,7 @@ cdef class BytesRingBufferFast:
         self._latest_insert_time_ns = <u64>time_monotonic_ns()
         return True
 
-    cpdef bint insert_char(self, const char* item, Py_ssize_t item_len):
+    cdef bint insert_char(self, const char* item, Py_ssize_t item_len):
         """Add a new element directly from char* to avoid byte conversion overhead."""
         cdef:
             u64     head = self._head
