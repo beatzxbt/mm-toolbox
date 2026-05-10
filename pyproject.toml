@@ -73,6 +73,7 @@ dev = [
     "uv>=0.8.8",
     "setuptools>=80.9.0",
     "pytest-asyncio>=1.1.0",
+    "pytest-cov>=6.0",
     "websockets>=12.0",
 ]
 build = [
@@ -80,6 +81,26 @@ build = [
     "twine>=5.0.0",
     "cibuildwheel>=2.16.0",
 ]
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+omit = [
+    "tests/*",
+    "setup.py",
+    "conftest.py",
+    ".venv/*",
+    "build/*",
+]
+plugins = ["Cython.Coverage"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = false
+
+[tool.coverage.html]
+directory = "htmlcov"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

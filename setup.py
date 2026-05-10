@@ -18,6 +18,8 @@ from setuptools.command.build_ext import build_ext as _build_ext
 #   'pip install .'
 """
 
+CYTHON_TRACE = os.environ.get("CYTHON_TRACE", "0") == "1"
+
 COMPILER_DIRECTIVES = {
     "language_level": 3,
     "boundscheck": False,
@@ -26,6 +28,7 @@ COMPILER_DIRECTIVES = {
     "embedsignature.format": "python",
     "cdivision": True,
     "cpow": True,
+    "linetrace": CYTHON_TRACE,
 }
 EXTRA_COMPILE_ARGS = [
     "-O3",
@@ -39,13 +42,16 @@ EXTRA_LINK_ARGS = ["-Wl,-w"] if sys.platform == "darwin" else []
 
 def get_extension(name, sources, include_dirs=None):
     """Helper to create extension with consistent settings."""
-    return Extension(
+    kwargs = dict(
         name=name,
         sources=sources,
         include_dirs=["src"] if not include_dirs else include_dirs,
         extra_compile_args=EXTRA_COMPILE_ARGS,
         extra_link_args=EXTRA_LINK_ARGS,
     )
+    if CYTHON_TRACE:
+        kwargs["define_macros"] = [("CYTHON_TRACE", "1")]
+    return Extension(**kwargs)
 
 
 def get_build_dir():
@@ -395,6 +401,10 @@ class build_ext(_build_ext):
     def run(self):
         """Run the build_ext command and clean up generated C files."""
         super().run()
+        # Skip cleanup when building with coverage tracing so that
+        # Cython.Coverage can read line-mapping metadata from .c files.
+        if CYTHON_TRACE:
+            return
         # Remove all generated .c files from cythonized .pyx sources
         for ext in self.extensions:
             for src in ext.sources:
@@ -407,6 +417,21 @@ class build_ext(_build_ext):
                             pass
 
 
+cythonize_kwargs = dict(
+    module_list=module_list,
+    compiler_directives=COMPILER_DIRECTIVES,
+    include_path=[
+        "src",
+        "src/mm_toolbox/misc/filter",
+        "src/mm_toolbox/rate_limiter",
+    ],
+)
+# When tracing Cython for coverage, write generated C files next to the
+# .pyx sources so that Cython.Coverage can locate them via the embedded
+# paths. Using a separate build_dir breaks the plugin's path resolution.
+if not CYTHON_TRACE:
+    cythonize_kwargs["build_dir"] = get_build_dir()
+
 setup(
     cmdclass={"build_ext": build_ext},
     name="mm_toolbox",
@@ -418,14 +443,5 @@ setup(
             "**/*.pyi",
         ]
     },
-    ext_modules=cythonize(
-        module_list=module_list,
-        compiler_directives=COMPILER_DIRECTIVES,
-        build_dir=get_build_dir(),
-        include_path=[
-            "src",
-            "src/mm_toolbox/misc/filter",
-            "src/mm_toolbox/rate_limiter",
-        ],
-    ),
+    ext_modules=cythonize(**cythonize_kwargs),
 )
