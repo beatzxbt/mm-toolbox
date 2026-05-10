@@ -11,6 +11,15 @@ from enum import IntEnum
 
 
 class PyOrderbookSortedness(IntEnum):
+    """Python-facing enum for orderbook level array ordering.
+
+    Attributes:
+        UNKNOWN: Sort order is unknown; will be sorted.
+        ASCENDING: Levels are in ascending order by price.
+        DESCENDING: Levels are in descending order by price.
+        BIDS_ASCENDING_ASKS_DESCENDING: Bids ascending, asks descending.
+        BIDS_DESCENDING_ASKS_ASCENDING: Bids descending, asks ascending.
+    """
     UNKNOWN = 0
     ASCENDING = 1
     DESCENDING = 2

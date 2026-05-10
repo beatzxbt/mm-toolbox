@@ -38,42 +38,99 @@ cdef extern from "orderbook_helpers.h":
 
 
 cdef inline u64 convert_price_to_tick(double price, double tick_size) noexcept nogil:
-    """Convert a price to ticks using integer arithmetic."""
+    """Convert a price to ticks using integer arithmetic.
+
+    Args:
+        price: Price to convert.
+        tick_size: Tick size unit.
+
+    Returns:
+        Number of ticks.
+    """
     return price_to_tick(price, tick_size)
 
 
 cdef inline u64 convert_price_to_tick_fast(double price, double tick_size_recip) noexcept nogil:
-    """Convert a price to ticks using multiplication (faster, uses pre-computed reciprocal)."""
+    """Convert a price to ticks using multiplication (faster, uses pre-computed reciprocal).
+
+    Args:
+        price: Price to convert.
+        tick_size_recip: Pre-computed reciprocal of tick size.
+
+    Returns:
+        Number of ticks.
+    """
     return price_to_tick_fast(price, tick_size_recip)
 
 
 cdef inline u64 convert_size_to_lot(double size, double lot_size) noexcept nogil:
-    """Convert a size to lots using integer arithmetic."""
+    """Convert a size to lots using integer arithmetic.
+
+    Args:
+        size: Size to convert.
+        lot_size: Lot size unit.
+
+    Returns:
+        Number of lots.
+    """
     return size_to_lot(size, lot_size)
 
 
 cdef inline u64 convert_size_to_lot_fast(double size, double lot_size_recip) noexcept nogil:
-    """Convert a size to lots using multiplication (faster, uses pre-computed reciprocal)."""
+    """Convert a size to lots using multiplication (faster, uses pre-computed reciprocal).
+
+    Args:
+        size: Size to convert.
+        lot_size_recip: Pre-computed reciprocal of lot size.
+
+    Returns:
+        Number of lots.
+    """
     return size_to_lot_fast(size, lot_size_recip)
 
 
 cdef inline double convert_price_from_tick(u64 tick, double tick_size) noexcept nogil:
-    """Convert ticks back to price."""
+    """Convert ticks back to price.
+
+    Args:
+        tick: Number of ticks.
+        tick_size: Tick size unit.
+
+    Returns:
+        Price value.
+    """
     return tick_to_price(tick, tick_size)
 
 
 cdef inline double convert_size_from_lot(u64 lot, double lot_size) noexcept nogil:
-    """Convert lots back to size."""
+    """Convert lots back to size.
+
+    Args:
+        lot: Number of lots.
+        lot_size: Lot size unit.
+
+    Returns:
+        Size value.
+    """
     return lot_to_size(lot, lot_size)
 
 
 cdef void reverse_levels(OrderbookLevels levels) noexcept nogil:
-    """Reverse the order of levels in-place."""
+    """Reverse the order of levels in-place.
+
+    Args:
+        levels: OrderbookLevels struct to reverse.
+    """
     reverse_levels_inplace(levels.num_levels, levels.levels)
 
 
 cdef void inplace_sort_levels_by_ticks(OrderbookLevels levels, bint ascending) noexcept nogil:
-    """Sort levels by tick in-place with smart algorithm."""
+    """Sort levels by tick in-place with smart algorithm.
+
+    Args:
+        levels: OrderbookLevels struct to sort.
+        ascending: If True, sort in ascending order; else descending.
+    """
     sort_levels_by_tick(levels.num_levels, levels.levels, ascending)
 
 

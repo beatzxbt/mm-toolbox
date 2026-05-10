@@ -73,14 +73,23 @@ class WsConnectionConfig(Struct):
         )
 
 cdef class WsConnection(WSListener):
-    """Abstract Websocket connection class, wrapping PicoWs."""
+    """Abstract Websocket connection class, wrapping PicoWs.
+
+    Manages a WebSocket connection with automatic latency tracking,
+    message buffering via BytesRingBuffer, and configurable reconnection.
+    """
 
     def __cinit__(
         self, 
         BytesRingBuffer ringbuffer,
         object config,
     ):
-        """Initializes a new Websocket connection."""
+        """Initialize a new WebSocket connection.
+
+        Args:
+            ringbuffer: BytesRingBuffer for incoming message storage.
+            config: WsConnectionConfig with connection parameters.
+        """
         self._config = cast('WsConnectionConfig', config)
 
         # Flatten hot-path state into cdef primitives
@@ -107,19 +116,35 @@ cdef class WsConnection(WSListener):
         self._latency_task = None
 
     cpdef int get_seq_id(self):
-        """Returns the current sequence ID."""
+        """Return the current sequence ID.
+
+        Returns:
+            Monotonically increasing sequence number for received messages.
+        """
         return self._seq_id
 
     cpdef double get_latency_ms(self):
-        """Returns the current latency in milliseconds."""
+        """Return the current latency in milliseconds.
+
+        Returns:
+            Estimated round-trip latency based on ping/pong timing.
+        """
         return self._latency_ms
 
     cpdef bint is_connected(self):
-        """Returns whether the connection is currently connected."""
+        """Return whether the connection is currently connected.
+
+        Returns:
+            True if the WebSocket handshake is complete and active.
+        """
         return self._conn_state == ConnectionState.CONNECTED
 
     cpdef object get_ringbuffer(self):
-        """Returns the ringbuffer for message storage."""
+        """Return the ringbuffer for message storage.
+
+        Returns:
+            The BytesRingBuffer instance used for incoming messages.
+        """
         return self._ringbuffer
 
     def _start_latency_task(self):
@@ -234,7 +259,11 @@ cdef class WsConnection(WSListener):
             self._transport.send_reuse_external_bytearray(WSMsgType.TEXT, transport_buffer, 14)
 
     cpdef void close(self):
-        """Closes the Websocket connection."""
+        """Close the Websocket connection gracefully.
+
+        Signals stop, cancels latency task, clears message state, and
+        disconnects the transport.
+        """
         # Signal task to stop first (cheapest operation)
         self._should_stop = True
         self._conn_state = ConnectionState.DISCONNECTED
@@ -249,17 +278,29 @@ cdef class WsConnection(WSListener):
             self._transport.disconnect(graceful=True)
 
     cpdef object get_config(self):
-        """Returns the current connection config."""
+        """Return the current connection config.
+
+        Returns:
+            WsConnectionConfig instance.
+        """
         return self._config
 
     cpdef object get_state(self):
-        """Returns the current connection state."""
+        """Return the current connection state.
+
+        Returns:
+            ConnectionState enum value.
+        """
         return self._conn_state
 
     # ---------- WSListener Callbacks ---------- #
 
     cpdef on_ws_connected(self, WSTransport transport):
-        """Called when the handshake completes successfully."""
+        """Handle successful WebSocket handshake.
+
+        Args:
+            transport: PicoWs WSTransport instance.
+        """
         self._should_stop = False
         self._seq_id = 0
         self._transport = transport
@@ -279,7 +320,12 @@ cdef class WsConnection(WSListener):
             transport.send(msg_type=WSMsgType.TEXT, message=payload)
 
     cpdef on_ws_frame(self, WSTransport transport, WSFrame frame):
-        """Called upon receiving a new frame."""
+        """Handle an incoming WebSocket frame.
+
+        Args:
+            transport: PicoWs WSTransport instance.
+            frame: Incoming WSFrame.
+        """
         # Guard against processing frames after close/disconnect
         if self._should_stop or self._conn_state != ConnectionState.CONNECTED:
             return
@@ -364,7 +410,11 @@ cdef class WsConnection(WSListener):
         self._seq_id += 1
 
     cpdef on_ws_disconnected(self, WSTransport transport):
-        """Called when the Websocket connection is closed."""
+        """Handle WebSocket disconnection.
+
+        Args:
+            transport: PicoWs WSTransport instance.
+        """
         # In the future, maybe add some default bytes message sent
         # downstream to indicate the connection is closed. For now,
         # just close the stream without any downstream signal.

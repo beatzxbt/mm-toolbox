@@ -103,7 +103,11 @@ cdef class RateLimiter:
             self._sub_used = NULL
 
     cdef inline void _maybe_refill(self, i64 now):
-        """Trigger a refill if the overall window has expired."""
+        """Trigger a refill if the overall window has expired.
+
+        Args:
+            now: Current monotonic time in milliseconds.
+        """
         cdef i64 i
         if now - self._window_start_ms >= self._window_ms:
             self._window_start_ms = now
@@ -114,6 +118,9 @@ cdef class RateLimiter:
 
     cdef inline i64 _sub_index(self, i64 now):
         """Calculate the active per-second bucket index.
+
+        Args:
+            now: Current monotonic time in milliseconds.
 
         Returns:
             Index of the currently active sub-bucket (0 if sub-buckets are

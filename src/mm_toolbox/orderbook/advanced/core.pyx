@@ -60,12 +60,20 @@ cdef class CoreAdvancedOrderbook:
         self._asks_data = self._asks.get_data()
 
     cdef inline void _ensure_not_empty(self):
-        """Ensures the orderbook has been populated."""
+        """Ensure the orderbook has been populated.
+
+        Raises:
+            RuntimeError: If either side of the orderbook is empty.
+        """
         if self._bids.is_empty() or self._asks.is_empty():
             raise RuntimeError("Empty view on one/both sides of orderbook; cannot compute without data")
 
     cdef inline bint _check_if_empty(self):
-        """Checks if the orderbook is not empty."""
+        """Check if the orderbook has data on both sides.
+
+        Returns:
+            True if both bid and ask sides are non-empty.
+        """
         return not self._bids.is_empty() and not self._asks.is_empty()
 
     cdef void _normalize_incoming_levels(
@@ -74,7 +82,16 @@ cdef class CoreAdvancedOrderbook:
         OrderbookLevels bids,
         bint is_snapshot,
     ):
-        """Normalize incoming levels to the orderbook's internal representation."""
+        """Normalize incoming levels to the orderbook's internal representation.
+
+        Converts prices to ticks and sizes to lots, then applies sorting
+        based on the configured sortedness for snapshots or deltas.
+
+        Args:
+            asks: Incoming ask levels to normalize.
+            bids: Incoming bid levels to normalize.
+            is_snapshot: If True, use snapshot sortedness; else use delta sortedness.
+        """
         cdef:
             CyOrderbookSortedness sortedness_code = (
                 self._snapshot_sortedness 
@@ -117,7 +134,14 @@ cdef class CoreAdvancedOrderbook:
             reverse_levels(levels=bids)
 
     cdef void _process_matching_ask_ticks(self, OrderbookLevel* ask):
-        """Rolls the ask level array left (removing the top-of-book ask) if lots=0, otherwise updates size/lots/norders."""
+        """Process an ask level at the current best ask price.
+
+        Rolls the ask level array left (removing the top-of-book ask) if
+        lots=0, otherwise updates size/lots/norders.
+
+        Args:
+            ask: Pointer to the ask level to process.
+        """
         cdef:
             OrderbookLadderData* asks = self._asks_data
             OrderbookLevel* top_of_book_ask = &asks.levels[0]
@@ -130,7 +154,14 @@ cdef class CoreAdvancedOrderbook:
             top_of_book_ask.norders = ask.norders
 
     cdef void _process_matching_bid_ticks(self, OrderbookLevel* bid):
-        """Rolls the bid level array left (removing the top-of-book bid) if lots=0, otherwise updates size/lots/norders."""
+        """Process a bid level at the current best bid price.
+
+        Rolls the bid level array left (removing the top-of-book bid) if
+        lots=0, otherwise updates size/lots/norders.
+
+        Args:
+            bid: Pointer to the bid level to process.
+        """
         cdef:
             OrderbookLadderData* bids = self._bids_data
             OrderbookLevel* top_of_book_bid = &bids.levels[0]
@@ -143,7 +174,14 @@ cdef class CoreAdvancedOrderbook:
             top_of_book_bid.norders = bid.norders
 
     cdef void _process_lower_ask_ticks(self, OrderbookLevel* ask):
-        """Rolls the ask level array right (adding a new ask level) then corrects for any overlapping bids"""
+        """Process an ask level better than the current best ask.
+
+        Rolls the ask level array right (adding a new ask level) then
+        corrects for any overlapping bids by removing them.
+
+        Args:
+            ask: Pointer to the ask level to process.
+        """
         cdef:
             OrderbookLadderData* bids = self._bids_data
             OrderbookLadderData* asks = self._asks_data
@@ -172,7 +210,14 @@ cdef class CoreAdvancedOrderbook:
             self._bids.decrement_count()
 
     cdef void _process_higher_bid_ticks(self, OrderbookLevel* bid):
-        """Rolls the bid level array right (adding a new bid level) then corrects for any overlapping asks"""
+        """Process a bid level better than the current best bid.
+
+        Rolls the bid level array right (adding a new bid level) then
+        corrects for any overlapping asks by removing them.
+
+        Args:
+            bid: Pointer to the bid level to process.
+        """
         cdef:
             OrderbookLadderData* bids = self._bids_data
             OrderbookLadderData* asks = self._asks_data
@@ -201,7 +246,11 @@ cdef class CoreAdvancedOrderbook:
             self._asks.decrement_count()
 
     cdef void _process_middle_ask_ticks(self, OrderbookLevel* ask):
-        """Process an ask level that falls in the middle of the existing ask levels."""
+        """Process an ask level that falls in the middle of the existing ask levels.
+
+        Args:
+            ask: Pointer to the ask level to process.
+        """
         cdef:
             OrderbookLadderData* bids = self._bids_data
             OrderbookLadderData* asks = self._asks_data
@@ -242,7 +291,11 @@ cdef class CoreAdvancedOrderbook:
             ask_insertion_level.norders = ask.norders
 
     cdef void _process_middle_bid_ticks(self, OrderbookLevel* bid):
-        """Process a bid level that falls in the middle of the existing bid levels."""
+        """Process a bid level that falls in the middle of the existing bid levels.
+
+        Args:
+            bid: Pointer to the bid level to process.
+        """
         cdef:
             OrderbookLadderData* bids = self._bids_data
             OrderbookLadderData* asks = self._asks_data
@@ -284,12 +337,20 @@ cdef class CoreAdvancedOrderbook:
             bid_insertion_level.norders = bid.norders
 
     cdef inline void clear(self):
-        """Clear all levels from both sides of the orderbook."""
+        """Clear all levels from both sides of the orderbook.
+
+        Resets both bid and ask ladders to empty state.
+        """
         self._bids.reset()
         self._asks.reset()
 
     cdef inline void consume_snapshot(self, OrderbookLevels new_asks, OrderbookLevels new_bids):
-        """Replace the entire orderbook state with new snapshot data."""
+        """Replace the entire orderbook state with new snapshot data.
+
+        Args:
+            new_asks: New ask levels to set.
+            new_bids: New bid levels to set.
+        """
         cdef:
             OrderbookLadderData* bids_data = self._bids.get_data()
             OrderbookLadderData* asks_data = self._asks.get_data()
@@ -310,7 +371,12 @@ cdef class CoreAdvancedOrderbook:
         bids_data.num_levels = copy_n
 
     cdef inline void consume_deltas(self, OrderbookLevels asks, OrderbookLevels bids):
-        """Apply incremental delta updates to the orderbook."""
+        """Apply incremental delta updates to the orderbook.
+
+        Args:
+            asks: Ask level deltas to apply.
+            bids: Bid level deltas to apply.
+        """
         if not self._check_if_empty():
             return
 
@@ -630,7 +696,14 @@ cdef class CoreAdvancedOrderbook:
             self._assign_bbo_level(&bids_data.levels[0], &bid, bid_ticks, bid_lots)
 
     cdef inline double get_mid_price(self):
-        """Calculate the mid price from best bid and ask."""
+        """Calculate the mid price from best bid and ask.
+
+        Returns:
+            Mid price as a double.
+
+        Raises:
+            RuntimeError: If orderbook is empty.
+        """
         self._ensure_not_empty()
         cdef:
             OrderbookLadderData* bids_data = self._bids_data
@@ -643,7 +716,14 @@ cdef class CoreAdvancedOrderbook:
         )
 
     cdef inline double get_bbo_spread(self):
-        """Calculate the spread between best bid and ask."""
+        """Calculate the spread between best bid and ask.
+
+        Returns:
+            Spread in price units.
+
+        Raises:
+            RuntimeError: If orderbook is empty.
+        """
         self._ensure_not_empty()
         cdef:
             OrderbookLadderData* bids_data = self._bids_data
@@ -662,7 +742,14 @@ cdef class CoreAdvancedOrderbook:
             )
 
     cdef inline double get_wmid_price(self):
-        """Calculate weighted mid price using best bid/ask volumes."""
+        """Calculate weighted mid price using best bid/ask volumes.
+
+        Returns:
+            Volume-weighted mid price.
+
+        Raises:
+            RuntimeError: If orderbook is empty.
+        """
         self._ensure_not_empty()
         cdef:
             OrderbookLadderData* bids_data = self._bids_data
@@ -683,7 +770,18 @@ cdef class CoreAdvancedOrderbook:
         )
 
     cdef inline double get_volume_weighted_mid_price(self, double size, bint is_base_currency):
-        """Calculate volume-weighted mid price for a given trade size."""
+        """Calculate volume-weighted mid price for a given trade size.
+
+        Args:
+            size: Trade size to calculate weighted price for.
+            is_base_currency: If True, size is in base currency.
+
+        Returns:
+            Volume-weighted mid price, or infinity if size cannot be filled.
+
+        Raises:
+            RuntimeError: If orderbook is empty.
+        """
         self._ensure_not_empty()
         cdef double mid_price = self.get_mid_price()
         if size <= 0.0:
@@ -713,7 +811,19 @@ cdef class CoreAdvancedOrderbook:
         return convert_price_from_tick((final_buy_ticks + final_sell_ticks) // 2, self._tick_size)
 
     cdef inline double get_price_impact(self, double size, bint is_buy, bint is_base_currency):
-        """Calculate terminal touch-relative impact for a trade of given size."""
+        """Calculate terminal touch-relative impact for a trade of given size.
+
+        Args:
+            size: Trade size.
+            is_buy: If True, anchor at best ask and consume asks.
+            is_base_currency: If True, size is in base currency.
+
+        Returns:
+            Absolute price impact, or infinity if size cannot be filled.
+
+        Raises:
+            RuntimeError: If orderbook is empty.
+        """
         self._ensure_not_empty()
         if size <= 0.0:
             return 0.0
@@ -752,7 +862,19 @@ cdef class CoreAdvancedOrderbook:
         bint is_buy,
         bint is_base_currency,
     ):
-        """Get cumulative size available within a touch-anchored impact band."""
+        """Get cumulative size available within a touch-anchored impact band.
+
+        Args:
+            impact_bps: Price depth in basis points from touch.
+            is_buy: If True, aggregate asks; if False, aggregate bids.
+            is_base_currency: If True, return base size; if False, quote notional.
+
+        Returns:
+            Cumulative available size within the band.
+
+        Raises:
+            RuntimeError: If orderbook is empty.
+        """
         self._ensure_not_empty()
         if impact_bps <= 0.0:
             return 0.0
@@ -794,7 +916,18 @@ cdef class CoreAdvancedOrderbook:
         return (self._tick_size * self._lot_size) * total_ticks_times_lots
 
     cdef inline bint is_bbo_crossed(self, double other_bid_price, double other_ask_price):
-        """Check if this orderbook's BBO crosses with another orderbook's BBO."""
+        """Check if this orderbook's BBO crosses with another orderbook's BBO.
+
+        Args:
+            other_bid_price: Best bid price from another orderbook.
+            other_ask_price: Best ask price from another orderbook.
+
+        Returns:
+            True if this bid > other ask or this ask < other bid.
+
+        Raises:
+            RuntimeError: If orderbook is empty.
+        """
         self._ensure_not_empty()
         cdef:
             OrderbookLadderData* bids_data = self._bids_data
@@ -806,7 +939,18 @@ cdef class CoreAdvancedOrderbook:
         return my_bid_ticks > other_ask_ticks or my_ask_ticks < other_bid_ticks
 
     cdef inline bint does_bbo_price_change(self, double bid_price, double ask_price):
-        """Check if the given prices differ from current BBO."""
+        """Check if the given prices differ from current BBO.
+
+        Args:
+            bid_price: Bid price to compare.
+            ask_price: Ask price to compare.
+
+        Returns:
+            True if either price differs from current BBO.
+
+        Raises:
+            RuntimeError: If orderbook is empty.
+        """
         self._ensure_not_empty()
         cdef:
             OrderbookLadderData* bids_data = self._bids_data

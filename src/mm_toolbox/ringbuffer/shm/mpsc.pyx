@@ -462,11 +462,19 @@ cdef class ShmMpscProducer(_ShmRingBase):
         return <Py_ssize_t>self._num_rings
 
     cpdef bint is_empty(self):
-        """Check if the buffer is empty."""
+        """Check if the buffer is empty.
+
+        Returns:
+            True if all sub-rings are empty.
+        """
         return len(self) == 0
 
     cpdef bint is_full(self):
-        """Check if the buffer is full (no space for even a 0-byte message in any sub-ring)."""
+        """Check if the buffer is full.
+
+        Returns:
+            True if no sub-ring has space for even a 0-byte message.
+        """
         cdef u64 read_pos
         cdef u64 i
         cdef u64 free_bytes

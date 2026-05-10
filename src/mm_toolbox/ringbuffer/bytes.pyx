@@ -10,9 +10,29 @@ from libc.stdint cimport uint64_t as u64
 from mm_toolbox.time.time cimport time_monotonic_ns
 
 cdef class BytesRingBuffer:
-    """A fixed-size ring buffer for bytes objects."""
+    """A fixed-size ring buffer for bytes objects.
+
+    Provides FIFO semantics with optional async waiting, batch operations,
+    and uniqueness constraints. When full, new inserts overwrite the oldest
+    elements.
+
+    Attributes:
+        _max_capacity: Ring capacity (rounded up to power of two).
+        _disable_async: If True, async operations are disabled.
+        _only_insert_unique: If True, duplicate inserts are skipped.
+    """
 
     def __cinit__(self, int max_capacity, bint disable_async=False, bint only_insert_unique=False) -> None:
+        """Initialize a new BytesRingBuffer.
+
+        Args:
+            max_capacity: Maximum number of elements (rounded up to power of two).
+            disable_async: If True, disable asyncio.Event for performance.
+            only_insert_unique: If True, skip duplicate inserts.
+
+        Raises:
+            ValueError: If max_capacity is not positive.
+        """
         if max_capacity <= 0:
             raise ValueError(f"Capacity cannot be negative; expected >0 but got {max_capacity}")
         self._max_capacity = <u64>(1 << (max_capacity - 1).bit_length() if max_capacity > 1 else 1)
@@ -28,7 +48,11 @@ cdef class BytesRingBuffer:
         self._only_insert_unique = only_insert_unique
 
     cpdef list unwrapped(self):
-        """Return a list of the buffer's contents in logical (oldest to newest) order."""
+        """Return a list of the buffer's contents in logical (oldest to newest) order.
+
+        Returns:
+            List of bytes objects in FIFO order.
+        """
         cdef:
             u64     size = self._size
             u64     tail = self._tail
@@ -43,7 +67,16 @@ cdef class BytesRingBuffer:
         return buf[tail:] + buf[:(tail + size) & mask]
 
     cpdef bint insert(self, bytes item):
-        """Add a new element to the end of the buffer."""
+        """Add a new element to the end of the buffer.
+
+        If the buffer is full, the oldest element is overwritten.
+
+        Args:
+            item: Bytes object to insert.
+
+        Returns:
+            True if the insert succeeded (or was skipped due to uniqueness).
+        """
         if self._only_insert_unique and self.contains(item):
             return True
 
@@ -67,12 +100,31 @@ cdef class BytesRingBuffer:
         return True
 
     cpdef bint insert_char(self, const char* data, Py_ssize_t n):
-        """Add a new element directly from char* to avoid byte conversion overhead."""
+        """Add a new element directly from char* to avoid byte conversion overhead.
+
+        Args:
+            data: Pointer to raw character data.
+            n: Length of the data in bytes.
+
+        Returns:
+            True if the insert succeeded.
+        """
         cdef bytes item = data[:n]
         return self.insert(item)
 
     cpdef int consume_into(self, bytearray dst):
-        """Consume one item and copy it into the provided bytearray."""
+        """Consume one item and copy it into the provided bytearray.
+
+        Args:
+            dst: Pre-allocated bytearray to copy the item into.
+
+        Returns:
+            Number of bytes copied.
+
+        Raises:
+            IndexError: If the buffer is empty.
+            ValueError: If dst is too small to hold the item.
+        """
         self.__enforce_ringbuffer_not_empty()
         cdef:
             u64 tail = self._tail
@@ -92,7 +144,14 @@ cdef class BytesRingBuffer:
     cpdef int consume_all_into(self, list buffers):
         """Consume all available items and copy them into the provided bytearrays.
 
-        Returns the number of messages copied.
+        Args:
+            buffers: List of pre-allocated bytearrays.
+
+        Returns:
+            Number of messages copied.
+
+        Raises:
+            ValueError: If any destination buffer is too small.
         """
         cdef:
             u64 n = min(<u64>len(buffers), self._size)
@@ -122,7 +181,14 @@ cdef class BytesRingBuffer:
         return n
 
     cpdef bint insert_batch(self, list[bytes] items):
-        """Add a batch of elements to the end of the buffer."""
+        """Add a batch of elements to the end of the buffer.
+
+        Args:
+            items: List of bytes objects to insert.
+
+        Returns:
+            True if the batch insert succeeded.
+        """
         cdef:
             bytes item
             u64 i, n = len(items)
@@ -178,7 +244,14 @@ cdef class BytesRingBuffer:
         return True
 
     cpdef bint contains(self, bytes item):
-        """Checks if the item exists in the buffer, searching from newest to oldest."""
+        """Checks if the item exists in the buffer, searching from newest to oldest.
+
+        Args:
+            item: Bytes object to search for.
+
+        Returns:
+            True if the item is found in the buffer.
+        """
         if self.is_empty():
             return False
 
@@ -197,7 +270,14 @@ cdef class BytesRingBuffer:
         return False
 
     cpdef bytes consume(self):
-        """Remove and return the first (oldest) element from the buffer."""
+        """Remove and return the first (oldest) element from the buffer.
+
+        Returns:
+            The oldest bytes object in the buffer.
+
+        Raises:
+            IndexError: If the buffer is empty.
+        """
         self.__enforce_ringbuffer_not_empty()
         cdef u64 tail = self._tail
         cdef bytes item = self._buffer[tail]
@@ -209,19 +289,37 @@ cdef class BytesRingBuffer:
         return item
 
     cpdef list consume_all(self):
-        """Remove and return all elements from the buffer."""
+        """Remove and return all elements from the buffer.
+
+        Returns:
+            List of all bytes objects in FIFO order.
+
+        Raises:
+            IndexError: If the buffer is empty.
+        """
         self.__enforce_ringbuffer_not_empty()
         cdef list result = self.unwrapped()
         self.clear()
         return result
 
     def consume_iterable(self) -> Iterator[bytes]:
-        """Iterate over the elements in the buffer in order from oldest to newest."""
+        """Iterate over the elements in the buffer in order from oldest to newest.
+
+        Yields:
+            Bytes objects in FIFO order.
+        """
         while self._size > 0:
             yield self.consume()
 
     async def aconsume(self):
-        """Remove and return the first (oldest) element from the buffer."""
+        """Remove and return the first (oldest) element from the buffer (async).
+
+        Returns:
+            The oldest bytes object in the buffer.
+
+        Raises:
+            RuntimeError: If async operations are disabled.
+        """
         self.__enforce_async_not_disabled()
         if self._size > 0:
             return self.consume()
@@ -229,7 +327,14 @@ cdef class BytesRingBuffer:
         return self.consume()
 
     async def aconsume_iterable(self) -> AsyncIterator[bytes]:
-        """Yield and remove elements from the buffer in FIFO order."""
+        """Yield and remove elements from the buffer in FIFO order (async).
+
+        Yields:
+            Bytes objects in FIFO order.
+
+        Raises:
+            RuntimeError: If async operations are disabled.
+        """
         self.__enforce_async_not_disabled()
         while True:
             if self._size > 0:
@@ -238,17 +343,34 @@ cdef class BytesRingBuffer:
             await self._buffer_not_empty_event.wait()
 
     cpdef bytes peekright(self):
-        """Return the last element from the buffer without removing it."""
+        """Return the last element from the buffer without removing it.
+
+        Returns:
+            The newest bytes object in the buffer.
+
+        Raises:
+            IndexError: If the buffer is empty.
+        """
         self.__enforce_ringbuffer_not_empty()
         return self._buffer[(self._head - 1) & self._mask]
 
     cpdef bytes peekleft(self):
-        """Return the first element from the buffer without removing it."""
+        """Return the first element from the buffer without removing it.
+
+        Returns:
+            The oldest bytes object in the buffer.
+
+        Raises:
+            IndexError: If the buffer is empty.
+        """
         self.__enforce_ringbuffer_not_empty()
         return self._buffer[self._tail]
 
     cpdef void clear(self):
-        """Clear the buffer and reset it to its initial state."""
+        """Clear the buffer and reset it to its initial state.
+
+        All elements are discarded and the buffer is empty after this call.
+        """
         self._tail = 0
         self._head = 0
         self._size = 0
@@ -256,11 +378,19 @@ cdef class BytesRingBuffer:
             self._buffer_not_empty_event.clear()
 
     cpdef bint is_empty(self):
-        """Check if the buffer is empty."""
+        """Check if the buffer is empty.
+
+        Returns:
+            True if the buffer contains no elements.
+        """
         return self._size == 0
 
     cpdef bint is_full(self):
-        """Check if the buffer is full."""
+        """Check if the buffer is full.
+
+        Returns:
+            True if the buffer has reached its maximum capacity.
+        """
         return self._size == self._max_capacity
 
     def __contains__(self, bytes item):
@@ -301,7 +431,11 @@ from cpython.bytes cimport PyBytes_FromStringAndSize
 from cpython.mem cimport PyMem_Malloc, PyMem_Free
 
 cdef class BytesRingBufferFast:
-    """A high-performance fixed-size ring buffer using pre-allocated memory slots."""
+    """A high-performance fixed-size ring buffer using pre-allocated memory slots.
+
+    Stores byte strings in fixed-size memory slots allocated via PyMem_Malloc,
+    avoiding Python object overhead for better cache locality and throughput.
+    """
 
     def __cinit__(self, int max_capacity, bint disable_async=False, bint only_insert_unique=False, int expected_item_size=128, double buffer_percent=25.0) -> None:
         if max_capacity <= 0:
@@ -570,7 +704,14 @@ cdef class BytesRingBufferFast:
         return True
 
     cpdef bint contains(self, bytes item):
-        """Checks if the item exists in the buffer, searching from newest to oldest."""
+        """Checks if the item exists in the buffer, searching from newest to oldest.
+
+        Args:
+            item: Bytes object to search for.
+
+        Returns:
+            True if the item is found in the buffer.
+        """
         if self._size == 0:
             return False
 
@@ -591,7 +732,14 @@ cdef class BytesRingBufferFast:
         return False
 
     cpdef bytes consume(self):
-        """Remove and return the first (oldest) element from the buffer."""
+        """Remove and return the first (oldest) element from the buffer.
+
+        Returns:
+            The oldest bytes object in the buffer.
+
+        Raises:
+            IndexError: If the buffer is empty.
+        """
         if self._size == 0:
             raise IndexError("Cannot pop from an empty RingBuffer;")
         
@@ -605,7 +753,14 @@ cdef class BytesRingBufferFast:
         return item
 
     cpdef list consume_all(self):
-        """Remove and return all elements from the buffer."""
+        """Remove and return all elements from the buffer.
+
+        Returns:
+            List of all bytes objects in FIFO order.
+
+        Raises:
+            IndexError: If the buffer is empty.
+        """
         if self._size == 0:
             raise IndexError("Cannot pop from an empty RingBuffer;")
         cdef list result = self.unwrapped()
@@ -613,12 +768,23 @@ cdef class BytesRingBufferFast:
         return result
 
     def consume_iterable(self) -> Iterator[bytes]:
-        """Iterate over the elements in the buffer in order from oldest to newest."""
+        """Iterate over the elements in the buffer in order from oldest to newest.
+
+        Yields:
+            Bytes objects in FIFO order.
+        """
         while self._size > 0:
             yield self.consume()
 
     async def aconsume(self):
-        """Remove and return the first (oldest) element from the buffer."""
+        """Remove and return the first (oldest) element from the buffer (async).
+
+        Returns:
+            The oldest bytes object in the buffer.
+
+        Raises:
+            RuntimeError: If async operations are disabled.
+        """
         if self._disable_async:
             raise RuntimeError("Async operations are disabled for this buffer; use `disable_async=False` to enable.")
         if self._size > 0:
@@ -627,7 +793,14 @@ cdef class BytesRingBufferFast:
         return self.consume()
 
     async def aconsume_iterable(self) -> AsyncIterator[bytes]:
-        """Yield and remove elements from the buffer in FIFO order."""
+        """Yield and remove elements from the buffer in FIFO order (async).
+
+        Yields:
+            Bytes objects in FIFO order.
+
+        Raises:
+            RuntimeError: If async operations are disabled.
+        """
         if self._disable_async:
             raise RuntimeError("Async operations are disabled for this buffer; use `disable_async=False` to enable.")
         while True:
@@ -637,19 +810,36 @@ cdef class BytesRingBufferFast:
             await self._buffer_not_empty_event.wait()
 
     cpdef bytes peekright(self):
-        """Return the last element from the buffer without removing it."""
+        """Return the last element from the buffer without removing it.
+
+        Returns:
+            The newest bytes object in the buffer.
+
+        Raises:
+            IndexError: If the buffer is empty.
+        """
         if self._size == 0:
             raise IndexError("Cannot pop from an empty RingBuffer;")
         return self._make_bytes((self._head - 1) & self._mask)
 
     cpdef bytes peekleft(self):
-        """Return the first element from the buffer without removing it."""
+        """Return the first element from the buffer without removing it.
+
+        Returns:
+            The oldest bytes object in the buffer.
+
+        Raises:
+            IndexError: If the buffer is empty.
+        """
         if self._size == 0:
             raise IndexError("Cannot pop from an empty RingBuffer;")
         return self._make_bytes(self._tail)
 
     cpdef void clear(self):
-        """Clear the buffer and reset it to its initial state."""
+        """Clear the buffer and reset it to its initial state.
+
+        All elements are discarded and the buffer is empty after this call.
+        """
         self._tail = 0
         self._head = 0
         self._size = 0
@@ -657,11 +847,19 @@ cdef class BytesRingBufferFast:
             self._buffer_not_empty_event.clear()
 
     cpdef bint is_empty(self):
-        """Check if the buffer is empty."""
+        """Check if the buffer is empty.
+
+        Returns:
+            True if the buffer contains no elements.
+        """
         return self._size == 0
 
     cpdef bint is_full(self):
-        """Check if the buffer is full."""
+        """Check if the buffer is full.
+
+        Returns:
+            True if the buffer has reached its maximum capacity.
+        """
         return self._size == self._max_capacity
 
     def __contains__(self, bytes item):

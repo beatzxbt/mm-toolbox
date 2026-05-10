@@ -34,15 +34,22 @@ cpdef object resolve_numeric_dtype(object dtype):
 
 
 cdef class NumericRingBuffer:
-    """A fixed-size ring buffer for numeric types."""
+    """A fixed-size ring buffer for numeric types.
+
+    Stores numeric values in a NumPy array with configurable dtype. Supports
+    uint64 fast-path operations for optimal performance.
+    """
 
     def __cinit__(self, int max_capacity, object dtype, bint disable_async=False):
-        """
-        Parameters:
-            max_capacity (int): The maximum number of elements the buffer can hold.
-            dtype (numpy.dtype | type): The data type of the buffer.
-            disable_async (bool): If True, the buffer will disable use of asyncio.Event for extra performance.
-                All async methods will raise an exception.
+        """Initialize a new NumericRingBuffer.
+
+        Args:
+            max_capacity: Maximum number of elements (rounded up to power of two).
+            dtype: NumPy dtype or Python type for the buffer.
+            disable_async: If True, disable asyncio.Event for performance.
+
+        Raises:
+            ValueError: If max_capacity is not positive.
         """
         if max_capacity <= 0:
             raise ValueError(f"Capacity cannot be negative; expected >0 but got {max_capacity}")
@@ -59,7 +66,11 @@ cdef class NumericRingBuffer:
         self._disable_async = disable_async
 
     cpdef cnp.ndarray unwrapped(self):
-        """Return a list of the buffer's contents in logical (oldest to newest) order."""
+        """Return a NumPy array of the buffer's contents in logical (oldest to newest) order.
+
+        Returns:
+            NumPy array in FIFO order.
+        """
         cdef:
             u64 size = self._size
             u64 tail = self._tail
@@ -74,7 +85,14 @@ cdef class NumericRingBuffer:
         return np.concatenate((buf[tail:], buf[:(tail + size) & mask]))
 
     def insert(self, object item) -> bool:
-        """Add a new element to the end of the buffer."""
+        """Add a new element to the end of the buffer.
+
+        Args:
+            item: Numeric value to insert.
+
+        Returns:
+            True if the insert succeeded.
+        """
         cdef:
             u64 head = self._head
             u64 tail = self._tail
@@ -95,7 +113,14 @@ cdef class NumericRingBuffer:
         return True
 
     def insert_batch(self, object items) -> bool:
-        """Add a batch of elements to the end of the buffer."""
+        """Add a batch of elements to the end of the buffer.
+
+        Args:
+            items: Iterable of numeric values to insert.
+
+        Returns:
+            True if the batch insert succeeded.
+        """
         cdef:
             u64 n = len(items)
             u64 old_size = self._size
@@ -134,7 +159,14 @@ cdef class NumericRingBuffer:
         return True
 
     cpdef bint contains(self, numeric_t item):
-        """Checks if the item exists in the buffer, searching from newest to oldest."""
+        """Checks if the item exists in the buffer, searching from newest to oldest.
+
+        Args:
+            item: Numeric value to search for.
+
+        Returns:
+            True if the item is found in the buffer.
+        """
         if self.is_empty():
             return False
 
@@ -151,7 +183,14 @@ cdef class NumericRingBuffer:
         return False
 
     cpdef object consume(self):
-        """Remove and return the first element from the buffer."""
+        """Remove and return the first element from the buffer.
+
+        Returns:
+            The oldest numeric value in the buffer.
+
+        Raises:
+            IndexError: If the buffer is empty.
+        """
         self.__enforce_ringbuffer_not_empty()
         cdef:
             u64 tail = self._tail
@@ -167,19 +206,37 @@ cdef class NumericRingBuffer:
         return buf[tail]
 
     cpdef cnp.ndarray consume_all(self):
-        """Remove and return all elements from the buffer."""
+        """Remove and return all elements from the buffer.
+
+        Returns:
+            NumPy array of all values in FIFO order.
+
+        Raises:
+            IndexError: If the buffer is empty.
+        """
         self.__enforce_ringbuffer_not_empty()
         cdef cnp.ndarray result = self.unwrapped()
         self.clear()
         return result
 
     def consume_iterable(self) -> Iterator[object]:
-        """Iterate over the elements in the buffer in order from oldest to newest."""
+        """Iterate over the elements in the buffer in order from oldest to newest.
+
+        Yields:
+            Numeric values in FIFO order.
+        """
         while self._size > 0:
             yield self.consume()
 
     async def aconsume(self):
-        """Remove and return the first element from the buffer (async)."""
+        """Remove and return the first element from the buffer (async).
+
+        Returns:
+            The oldest numeric value in the buffer.
+
+        Raises:
+            RuntimeError: If async operations are disabled.
+        """
         self.__enforce_async_not_disabled()
         if self._size > 0:
             return self.consume()
@@ -187,7 +244,14 @@ cdef class NumericRingBuffer:
         return self.consume()
 
     async def aconsume_iterable(self):
-        """Yield items as they become available (async)."""
+        """Yield items as they become available (async).
+
+        Yields:
+            Numeric values in FIFO order.
+
+        Raises:
+            RuntimeError: If async operations are disabled.
+        """
         self.__enforce_async_not_disabled()
         while True:
             if self._size > 0:
@@ -196,7 +260,11 @@ cdef class NumericRingBuffer:
             await self._buffer_not_empty_event.wait()
 
     cpdef object peekright(self):
-        """Return the last element from the buffer without removing it."""
+        """Return the last element from the buffer without removing it.
+
+        Returns:
+            The newest numeric value in the buffer.
+        """
         cdef:
             u64 head = self._head
             u64 mask = self._mask
@@ -205,7 +273,11 @@ cdef class NumericRingBuffer:
         return buf[(head - 1) & mask]
 
     cpdef object peekleft(self):
-        """Return the first element from the buffer without removing it."""
+        """Return the first element from the buffer without removing it.
+
+        Returns:
+            The oldest numeric value in the buffer.
+        """
         cdef:
             u64 tail = self._tail
             cnp.ndarray buf = self._buffer
@@ -213,7 +285,10 @@ cdef class NumericRingBuffer:
         return buf[tail]
 
     cpdef void clear(self):
-        """Clear the buffer and reset it to its initial state."""
+        """Clear the buffer and reset it to its initial state.
+
+        All elements are discarded and the buffer is empty after this call.
+        """
         self._tail = 0
         self._head = 0
         self._size = 0
@@ -221,11 +296,19 @@ cdef class NumericRingBuffer:
             self._buffer_not_empty_event.clear()
 
     cpdef bint is_empty(self):
-        """Check if the buffer is empty."""
+        """Check if the buffer is empty.
+
+        Returns:
+            True if the buffer contains no elements.
+        """
         return self._size == 0
 
     cpdef bint is_full(self):
-        """Check if the buffer is full."""
+        """Check if the buffer is full.
+
+        Returns:
+            True if the buffer has reached its maximum capacity.
+        """
         return self._size == self._max_capacity
 
     def __contains__(self, item):

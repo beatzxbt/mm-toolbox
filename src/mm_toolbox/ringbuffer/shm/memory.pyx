@@ -1,15 +1,37 @@
+"""
+Shared-memory ring buffer memory utilities.
+
+Provides low-level memory operations for shared-memory ring buffers including
+alignment helpers, power-of-two rounding, little-endian u64 read/write with
+wrap handling, and bulk copy operations into/from ring buffers.
+"""
 from libc.stddef cimport size_t
 from libc.string cimport memcpy
 from libc.stdint cimport uint64_t as u64
 
 
 cdef size_t align_up(size_t x, size_t a) nogil:
-    """Align x up to the next multiple of a."""
+    """Align x up to the next multiple of a.
+
+    Args:
+        x: Value to align.
+        a: Alignment boundary (must be a power of two).
+
+    Returns:
+        The smallest multiple of a that is >= x.
+    """
     return (x + (a - 1)) & ~(a - 1)
 
 
 cdef u64 pow2_at_least(u64 v) nogil:
-    """Return smallest power of two >= v."""
+    """Return smallest power of two >= v.
+
+    Args:
+        v: Input value.
+
+    Returns:
+        Smallest power of two greater than or equal to v.
+    """
     if v <= 1:
         return 1
     v -= 1
@@ -23,7 +45,14 @@ cdef u64 pow2_at_least(u64 v) nogil:
 
 
 cdef void write_u64_le(unsigned char* base, u64 idx, u64 mask, u64 val) nogil:
-    """Write u64 in little-endian with wrap handling."""
+    """Write u64 in little-endian with wrap handling.
+
+    Args:
+        base: Pointer to the ring buffer base.
+        idx: Absolute index in the ring.
+        mask: Capacity mask (capacity - 1, capacity must be power of two).
+        val: Value to write.
+    """
     cdef u64 pos = idx & mask
     cdef u64 capacity = mask + 1
     if pos + 8 <= capacity:
@@ -41,7 +70,16 @@ cdef void write_u64_le(unsigned char* base, u64 idx, u64 mask, u64 val) nogil:
 
 
 cdef u64 read_u64_le(const unsigned char* base, u64 idx, u64 mask) nogil:
-    """Read u64 in little-endian with wrap handling."""
+    """Read u64 in little-endian with wrap handling.
+
+    Args:
+        base: Pointer to the ring buffer base.
+        idx: Absolute index in the ring.
+        mask: Capacity mask (capacity - 1, capacity must be power of two).
+
+    Returns:
+        The u64 value at the given position.
+    """
     cdef u64 pos = idx & mask
     cdef u64 capacity = mask + 1
     cdef u64 val
@@ -62,7 +100,16 @@ cdef u64 read_u64_le(const unsigned char* base, u64 idx, u64 mask) nogil:
 
 
 cdef void copy_into_ring(unsigned char* ring, u64 start, u64 mask, const unsigned char* src, size_t n, u64 capacity) nogil:
-    """Copy contiguous bytes into ring with wrap handling."""
+    """Copy contiguous bytes into ring with wrap handling.
+
+    Args:
+        ring: Pointer to the ring buffer base.
+        start: Absolute start index in the ring.
+        mask: Capacity mask.
+        src: Source buffer pointer.
+        n: Number of bytes to copy.
+        capacity: Ring buffer capacity.
+    """
     if n == 0:
         return
     cdef u64 idx = start & mask
@@ -75,7 +122,16 @@ cdef void copy_into_ring(unsigned char* ring, u64 start, u64 mask, const unsigne
 
 
 cdef void copy_from_ring(unsigned char* dst, const unsigned char* ring, u64 start, u64 mask, size_t n, u64 capacity) nogil:
-    """Copy contiguous bytes from ring with wrap handling."""
+    """Copy contiguous bytes from ring with wrap handling.
+
+    Args:
+        dst: Destination buffer pointer.
+        ring: Pointer to the ring buffer base.
+        start: Absolute start index in the ring.
+        mask: Capacity mask.
+        n: Number of bytes to copy.
+        capacity: Ring buffer capacity.
+    """
     if n == 0:
         return
     cdef u64 idx = start & mask
