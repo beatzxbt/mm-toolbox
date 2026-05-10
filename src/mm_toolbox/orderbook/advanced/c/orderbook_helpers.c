@@ -21,6 +21,9 @@
  * @note Uses DBL_EPSILON * 4.0 scaled by the absolute value to avoid precision issues near integer boundaries.
  */
 static inline uint64_t floor_with_epsilon(double value) {
+    if (!isfinite(value) || value < 0.0) {
+        return 0;  /* Invalid values return 0 to prevent undefined behavior */
+    }
     double eps = fabs(value) * DBL_EPSILON * 4.0;
     return (uint64_t)floor(value + eps);
 }
@@ -32,6 +35,9 @@ static inline uint64_t floor_with_epsilon(double value) {
  * @return          The price expressed in ticks.
  */
 uint64_t price_to_tick(double price, double tick_size) {
+    if (tick_size <= 0.0 || !isfinite(price) || price < 0.0) {
+        return 0;
+    }
     return floor_with_epsilon(price / tick_size);
 }
 
@@ -43,6 +49,9 @@ uint64_t price_to_tick(double price, double tick_size) {
  * @return                The price expressed in ticks.
  */
 uint64_t price_to_tick_fast(double price, double tick_size_recip) {
+    if (tick_size_recip <= 0.0 || !isfinite(price) || price < 0.0) {
+        return 0;
+    }
     return floor_with_epsilon(price * tick_size_recip);
 }
 
@@ -53,6 +62,9 @@ uint64_t price_to_tick_fast(double price, double tick_size_recip) {
  * @return         The size expressed in lots.
  */
 uint64_t size_to_lot(double size, double lot_size) {
+    if (lot_size <= 0.0 || !isfinite(size) || size < 0.0) {
+        return 0;
+    }
     return floor_with_epsilon(size / lot_size);
 }
 
@@ -64,6 +76,9 @@ uint64_t size_to_lot(double size, double lot_size) {
  * @return               The size expressed in lots.
  */
 uint64_t size_to_lot_fast(double size, double lot_size_recip) {
+    if (lot_size_recip <= 0.0 || !isfinite(size) || size < 0.0) {
+        return 0;
+    }
     return floor_with_epsilon(size * lot_size_recip);
 }
 
