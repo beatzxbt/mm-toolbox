@@ -1,4 +1,4 @@
-.PHONY: help format typecheck fix test-py test-c test-all coverage build-coverage sync build-lib build-test build-all \
+.PHONY: help format typecheck fix test-py test-c test-all test-coverage sync build-lib build-test build-all \
         remove-build-lib remove-build-tests rebuild-test remove-build-all rebuild-all wheel wheel-binary wheel-pep517 \
         wheel-check remove-wheel sdist remove-sdist check-dist clean-dist upload-test clean-caches %
 
@@ -25,11 +25,9 @@ test-c: ## Run C unit tests
 test-all: ## Run all tests (C + Python)
 	$(MAKE) test-c test-py
 
-build-coverage: ## Build Cython extensions with line-tracing for coverage
+test-coverage: ## Run tests with Cython-aware coverage (rebuild, test, clean)
+	$(MAKE) remove-build-lib
 	CYTHON_TRACE=1 uv run python setup.py build_ext --inplace --parallel $$(uv run python -c 'import os;print(max(1,(os.cpu_count() or 2)-1))')
-
-coverage: ## Run tests with coverage report (rebuilds Cython with tracing)
-	$(MAKE) remove-build-lib build-coverage
 	@PYTHONPATH=src uv run pytest --cov=src --cov-report=term-missing --cov-report=html; \
 	pytest_exit=$$?; \
 	find ./src -name "*.c" -type f | while read f; do [ -f "$${f%.c}.pyx" ] && rm -f "$$f"; done; \
@@ -132,10 +130,10 @@ help: ## Display this help message
 	@grep -E '^(format|typecheck|fix):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 	@echo 'Testing:'
-	@grep -E '^(test-py|test-c|test-all|coverage):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(test-py|test-c|test-all|test-coverage):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 	@echo 'Build:'
-	@grep -E '^(build-lib|build-test|build-all|build-coverage|remove-build-lib|remove-build-tests|rebuild-test|remove-build-all|rebuild-all|clean-caches):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(build-lib|build-test|build-all|remove-build-lib|remove-build-tests|rebuild-test|remove-build-all|rebuild-all|clean-caches):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 	@echo 'Distribution:'
 	@grep -E '^(wheel|wheel-binary|wheel-pep517|wheel-check|remove-wheel|sdist|remove-sdist|check-dist|clean-dist):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
