@@ -3,236 +3,310 @@ Token bucket rate limiter with optional per-second sub-buckets.
 
 Model
 -----
-- A single token bucket of size `capacity` that refills every `window_s` seconds.
-- Optionally, the window is subdivided into `window_s` one-second buckets, each
-  with a share of the capacity, capping instantaneous burst usage evenly.
-- Threshold policy annotates state (NORMAL/WARNING/BLOCKED) based on utilization.
-- Burst policy (optional) permits limited overage within the active second.
+- A single token bucket of size ``capacity`` that refills every ``window_s``
+  seconds.
+- Optionally, the window is subdivided into ``window_s`` one-second buckets,
+  each with a share of the capacity, capping instantaneous burst usage evenly.
+- Threshold policy annotates state (NORMAL / WARNING / BLOCKED) based on
+  utilization.
+- Burst policy (optional) permits limited overage within the active window.
 
-This module is single-threaded by design. No explicit locking is used and no
-nogil sections are required. Time alignment is based on the current wall clock
-at creation/refill time; per-second buckets align to second boundaries.
+This module is **single-threaded by design**. No explicit locking is used.
+Time alignment is based on monotonic time; per-second buckets are indexed
+relative to the start of the current window.
 """
 from __future__ import annotations
 
-from mm_toolbox.time.time cimport time_ms
+from mm_toolbox.time.time cimport time_monotonic_ms
 
-from libc.stdlib cimport free
+from libc.stdlib cimport malloc, free
 from libc.stdint cimport int64_t as i64
 
-from .types cimport EventTokenState
 from .result import RateLimitState, ConsumeResult
-from .state cimport make_event_token_state
-from .bucket cimport active_sub_index, refresh_sub_bucket, reset_state
-from .config import RateLimiterConfig
+from .config import RateLimiterConfig, SubBucketStrategy
 
 
 cdef class RateLimiter:
     """Token-bucket limiter with optional per-second sub-buckets.
 
-    The limiter divides time into fixed windows of length `window_s`. Each window
-    has `capacity` tokens. Optionally, it caps per-second usage by splitting the
-    window into equally allocated per-second buckets. A threshold policy marks
-    high utilization, and an optional burst policy allows limited overage.
+    The limiter divides time into fixed windows of length ``window_s``. Each
+    window has ``capacity`` tokens. Optionally, it caps per-second usage by
+    splitting the window into equally allocated per-second buckets. A threshold
+    policy marks high utilization, and an optional burst policy allows limited
+    overage.
+
+    This class is **not thread-safe**. It must be used from a single thread
+    or protected by external synchronization.
     """
 
     def __cinit__(self, object config):
         """Construct a limiter with a given configuration.
 
         Args:
-            config: RateLimiterConfig specifying capacity, window, and policies.
+            config: :class:`RateLimiterConfig` specifying capacity, window, and
+                policies.
+
+        Raises:
+            TypeError: If *config* is not a :class:`RateLimiterConfig`.
         """
+        cdef i64 n
+        cdef i64 q
+        cdef i64 r
+        cdef i64 i
+
+        if not isinstance(config, RateLimiterConfig):
+            raise TypeError(
+                f"config must be RateLimiterConfig, got {type(config).__name__}"
+            )
+
         self._config = config
-        self._state = make_event_token_state(
-            config.capacity, config.window_s, config.sub_bucket_strategy
+        self._capacity = config.capacity
+        self._window_ms = config.window_s * 1000
+        self._sub_enabled = (
+            config.sub_bucket_strategy == SubBucketStrategy.PER_SECOND
         )
+        self._num_sub_buckets = config.window_s if self._sub_enabled else 1
+        self._warn_threshold = config.state_config.warning_threshold
+        self._block_threshold = config.state_config.block_threshold
+        self._state_enabled = config.state_config.is_enabled
+        self._burst_enabled = config.burst_config.is_enabled
+        self._max_burst_tokens = config.burst_config.max_tokens
+        self._max_burst_attempts = config.burst_config.max_burst_attempts
+
+        self._used_tokens = 0
+        self._window_start_ms = time_monotonic_ms()
+        self._burst_used = 0
+
+        self._sub_allocations = NULL
+        self._sub_used = NULL
+
+        n = self._num_sub_buckets
+        self._sub_allocations = <i64*>malloc(sizeof(i64) * n)
+        self._sub_used = <i64*>malloc(sizeof(i64) * n)
+
+        if self._sub_allocations == NULL or self._sub_used == NULL:
+            raise MemoryError("Failed to allocate sub-bucket arrays")
+
+        q = self._capacity // n
+        r = self._capacity - q * n
+        for i in range(n):
+            self._sub_allocations[i] = q + (1 if i < r else 0)
+            self._sub_used[i] = 0
 
     def __dealloc__(self):
         """Free allocated sub-bucket memory."""
-        if self._state.sub_event_states != NULL:
-            free(self._state.sub_event_states)
-            self._state.sub_event_states = NULL
+        if self._sub_allocations != NULL:
+            free(self._sub_allocations)
+            self._sub_allocations = NULL
+        if self._sub_used != NULL:
+            free(self._sub_used)
+            self._sub_used = NULL
 
-    cdef void _maybe_refill(self):
+    cdef inline void _maybe_refill(self, i64 now):
         """Trigger a refill if the overall window has expired."""
-        cdef i64 now = time_ms()
-        cdef bint time_to_refill = now >= self._state.next_refill_time_ms
+        cdef i64 i
+        if now - self._window_start_ms >= self._window_ms:
+            self._window_start_ms = now
+            self._used_tokens = 0
+            self._burst_used = 0
+            for i in range(self._num_sub_buckets):
+                self._sub_used[i] = 0
 
-        if not time_to_refill:
-            return
+    cdef inline i64 _sub_index(self, i64 now):
+        """Calculate the active per-second bucket index.
 
-        reset_state(&self._state, self._config, now)
-
-    cdef inline EventTokenState get_state(self):
-        """Return the internal state structure (for testing/debugging)."""
-        return self._state
+        Returns:
+            Index of the currently active sub-bucket (0 if sub-buckets are
+            disabled).
+        """
+        cdef i64 elapsed
+        if not self._sub_enabled:
+            return 0
+        elapsed = now - self._window_start_ms
+        if elapsed < 0:
+            elapsed = 0
+        return (elapsed // 1000) % self._num_sub_buckets
 
     cpdef void refill(self):
         """Force a refill cycle immediately."""
-        cdef i64 now = time_ms()
-        reset_state(&self._state, self._config, now)
+        cdef i64 now
+        cdef i64 i
+        now = time_monotonic_ms()
+        self._window_start_ms = now
+        self._used_tokens = 0
+        self._burst_used = 0
+        for i in range(self._num_sub_buckets):
+            self._sub_used[i] = 0
 
     cpdef object try_consume(self, bint force=False):
-        """Consume a single token and return a ConsumeResult.
+        """Consume a single token and return a :class:`ConsumeResult`.
 
         Args:
-            force: When True, bypass checks and allow consumption, returning OVERRIDE.
+            force: When ``True``, bypass checks and allow consumption,
+                returning :attr:`RateLimitState.OVERRIDE`.
 
         Returns:
             ConsumeResult: Allowed flag, state, remaining, and usage.
         """
-        self._maybe_refill()
         return self.try_consume_multiple(1, force)
 
     cpdef object try_consume_multiple(self, i64 num_tokens, bint force=False):
-        """Consume multiple tokens and return a ConsumeResult.
+        """Consume multiple tokens and return a :class:`ConsumeResult`.
 
         Args:
-            num_tokens: Token count to consume.
-            force: When True, bypass checks and allow consumption, returning OVERRIDE.
+            num_tokens: Token count to consume. Values less than or equal to
+                zero return the current state without consuming any tokens,
+                which can be used as a lightweight state query.
+            force: When ``True``, bypass checks and allow consumption,
+                returning :attr:`RateLimitState.OVERRIDE`.
 
         Returns:
             ConsumeResult: Allowed flag, state, remaining, and usage.
         """
-        cdef i64 now_force = 0
-        cdef bint sub_enabled_force = 0
-        cdef i64 idx_force = 0
-        cdef i64 capacity = 0
-        cdef i64 new_used = 0
-        cdef bint sub_enabled = 0
-        cdef i64 now = 0
-        cdef i64 idx = 0
-        cdef i64 sub_new_used = 0
-        cdef bint sub_ok = 1
-        cdef bint overall_ok = 0
-        cdef double usage = 0.0
+        cdef i64 now
+        cdef i64 remaining
+        cdef double usage
+        cdef i64 new_used
+        cdef bint overall_ok
+        cdef bint sub_ok
+        cdef i64 sub_idx
+        cdef i64 sub_new_used
+        cdef double new_usage
+        cdef double post_usage
+        cdef object state
 
-        self._maybe_refill()
+        now = time_monotonic_ms()
+        self._maybe_refill(now)
+
+        remaining = self._capacity - self._used_tokens
+        usage = (
+            1.0
+            if self._capacity <= 0
+            else (<double>self._used_tokens / <double>self._capacity)
+        )
 
         if num_tokens <= 0:
             return ConsumeResult(
                 allowed=True,
                 state=RateLimitState.NORMAL,
-                remaining=<int>(self._state.allocated_tokens - self._state.used_tokens),
-                usage=float(
-                    1.0 if self._state.allocated_tokens <= 0
-                    else (<double>self._state.used_tokens / <double>self._state.allocated_tokens)
-                ),
+                remaining=<int>remaining,
+                usage=usage,
             )
 
         if force:
-            # Apply usage without enforcing capacity, annotate as OVERRIDE
-            now_force = time_ms()
-            sub_enabled_force = (
-                self._state.num_sub_event_states > 0
-                and self._state.sub_event_states != NULL
-            )
-            if sub_enabled_force:
-                idx_force = active_sub_index(&self._state, now_force)
-                refresh_sub_bucket(&self._state, now_force, idx_force)
-                self._state.sub_event_states[idx_force].used_tokens += num_tokens
-            self._state.used_tokens += num_tokens
+            self._used_tokens += num_tokens
+            if self._sub_enabled:
+                self._sub_used[self._sub_index(now)] += num_tokens
             return ConsumeResult(
                 allowed=True,
                 state=RateLimitState.OVERRIDE,
-                remaining=<int>(self._state.allocated_tokens - self._state.used_tokens),
-                usage=float(
-                    1.0 if self._state.allocated_tokens <= 0
-                    else (<double>self._state.used_tokens / <double>self._state.allocated_tokens)
+                remaining=<int>(self._capacity - self._used_tokens),
+                usage=(
+                    1.0
+                    if self._capacity <= 0
+                    else (
+                        <double>self._used_tokens / <double>self._capacity
+                    )
                 ),
             )
 
-        capacity = self._state.allocated_tokens
-        new_used = self._state.used_tokens + num_tokens
+        new_used = self._used_tokens + num_tokens
+        overall_ok = new_used <= self._capacity
+        sub_ok = True
+        sub_idx = 0
+        sub_new_used = 0
 
-        sub_enabled = (
-            self._state.num_sub_event_states > 0
-            and self._state.sub_event_states != NULL
-        )
-        now = time_ms()
-        if sub_enabled:
-            idx = active_sub_index(&self._state, now)
-            refresh_sub_bucket(&self._state, now, idx)
-            sub_new_used = self._state.sub_event_states[idx].used_tokens + num_tokens
-            sub_ok = sub_new_used <= self._state.sub_event_states[idx].allocated_tokens
+        if self._sub_enabled:
+            sub_idx = self._sub_index(now)
+            sub_new_used = self._sub_used[sub_idx] + num_tokens
+            sub_ok = sub_new_used <= self._sub_allocations[sub_idx]
 
-        overall_ok = new_used <= capacity
         if overall_ok and sub_ok:
-            usage = <double>new_used / <double>capacity
-            if self._config.state_config.is_enabled and usage > self._config.state_config.block_threshold:
+            new_usage = <double>new_used / <double>self._capacity
+            if self._state_enabled and new_usage > self._block_threshold:
                 return ConsumeResult(
                     allowed=False,
                     state=RateLimitState.BLOCKED,
-                    remaining=<int>(capacity - self._state.used_tokens),
-                    usage=float(<double>self._state.used_tokens / <double>capacity),
+                    remaining=<int>remaining,
+                    usage=usage,
                 )
-            # Apply consumption
-            self._state.used_tokens = new_used
-            if sub_enabled:
-                self._state.sub_event_states[idx].used_tokens = sub_new_used
-            if self._config.state_config.is_enabled and usage > self._config.state_config.warning_threshold:
-                return ConsumeResult(
-                    allowed=True,
-                    state=RateLimitState.WARNING,
-                    remaining=<int>(capacity - self._state.used_tokens),
-                    usage=float(<double>self._state.used_tokens / <double>capacity),
-                )
+            self._used_tokens = new_used
+            if self._sub_enabled:
+                self._sub_used[sub_idx] = sub_new_used
+            post_usage = (
+                <double>self._used_tokens / <double>self._capacity
+            )
+            state = RateLimitState.NORMAL
+            if self._state_enabled and post_usage > self._warn_threshold:
+                state = RateLimitState.WARNING
             return ConsumeResult(
                 allowed=True,
-                state=RateLimitState.NORMAL,
-                remaining=<int>(capacity - self._state.used_tokens),
-                usage=float(<double>self._state.used_tokens / <double>capacity),
+                state=state,
+                remaining=<int>(self._capacity - self._used_tokens),
+                usage=post_usage,
             )
 
-        # Handle burst allowance
-        if self._config.burst_config.is_enabled and sub_enabled:
-            if num_tokens > self._config.burst_config.max_tokens:
+        if self._burst_enabled:
+            if num_tokens > self._max_burst_tokens:
                 return ConsumeResult(
                     allowed=False,
                     state=RateLimitState.BLOCKED,
-                    remaining=<int>(capacity - self._state.used_tokens),
-                    usage=float(<double>self._state.used_tokens / <double>capacity),
+                    remaining=<int>remaining,
+                    usage=usage,
                 )
-            if self._state.burst_attempts_used < self._config.burst_config.max_burst_attempts:
-                self._state.burst_attempts_used += 1
-                # Cap usage at capacity/sub-capacity
-                self._state.used_tokens = new_used if new_used <= capacity else capacity
-                if sub_enabled:
-                    self._state.sub_event_states[idx].used_tokens = (
-                        sub_new_used if sub_new_used <= self._state.sub_event_states[idx].allocated_tokens
-                        else self._state.sub_event_states[idx].allocated_tokens
+            if self._burst_used < self._max_burst_attempts:
+                self._burst_used += 1
+                self._used_tokens = (
+                    new_used if new_used <= self._capacity else self._capacity
+                )
+                if self._sub_enabled:
+                    self._sub_used[sub_idx] = (
+                        sub_new_used
+                        if sub_new_used <= self._sub_allocations[sub_idx]
+                        else self._sub_allocations[sub_idx]
                     )
                 return ConsumeResult(
                     allowed=True,
                     state=RateLimitState.NORMAL,
-                    remaining=<int>(capacity - self._state.used_tokens),
-                    usage=float(<double>self._state.used_tokens / <double>capacity),
+                    remaining=<int>(self._capacity - self._used_tokens),
+                    usage=(
+                        1.0
+                        if self._capacity <= 0
+                        else (
+                            <double>self._used_tokens
+                            / <double>self._capacity
+                        )
+                    ),
                 )
             return ConsumeResult(
                 allowed=False,
                 state=RateLimitState.WARNING,
-                remaining=<int>(capacity - self._state.used_tokens),
-                usage=float(<double>self._state.used_tokens / <double>capacity),
+                remaining=<int>remaining,
+                usage=usage,
             )
 
         return ConsumeResult(
             allowed=False,
             state=RateLimitState.BLOCKED,
-            remaining=<int>(capacity - self._state.used_tokens),
-            usage=float(<double>self._state.used_tokens / <double>capacity),
+            remaining=<int>remaining,
+            usage=usage,
         )
 
     cpdef i64 tokens_remaining(self):
         """Return remaining tokens in the overall bucket."""
-        self._maybe_refill()
-        return self._state.allocated_tokens - self._state.used_tokens
+        cdef i64 now
+        now = time_monotonic_ms()
+        self._maybe_refill(now)
+        return self._capacity - self._used_tokens
 
     cpdef double usage(self):
         """Return the fraction of tokens used in the overall bucket."""
-        self._maybe_refill()
-        if self._state.allocated_tokens <= 0:
+        cdef i64 now
+        now = time_monotonic_ms()
+        self._maybe_refill(now)
+        if self._capacity <= 0:
             return 1.0
-        return <double>self._state.used_tokens / <double>self._state.allocated_tokens
+        return <double>self._used_tokens / <double>self._capacity
 
     @classmethod
     def per_window(cls, int capacity, int window_s):

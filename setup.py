@@ -369,16 +369,6 @@ def get_rate_limiter_extensions():
             include_dirs=base_include_dirs,
         ),
         get_extension(
-            name="mm_toolbox.rate_limiter.state",
-            sources=["src/mm_toolbox/rate_limiter/state.pyx"],
-            include_dirs=base_include_dirs,
-        ),
-        get_extension(
-            name="mm_toolbox.rate_limiter.bucket",
-            sources=["src/mm_toolbox/rate_limiter/bucket.pyx"],
-            include_dirs=base_include_dirs,
-        ),
-        get_extension(
             name="mm_toolbox.rate_limiter.limiter",
             sources=["src/mm_toolbox/rate_limiter/limiter.pyx"],
             include_dirs=base_include_dirs,
