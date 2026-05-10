@@ -78,25 +78,25 @@ class TestNumericRingBufferBasics:
         """Test creating NumericRingBuffer with different dtype specifications."""
         # Test with numpy type
         rb1 = NumericRingBuffer(5, dtype=np.float64)
-        assert rb1.raw(copy=True).dtype == np.float64
+        assert rb1.unwrapped().dtype == np.float64
 
         # Test with string
         rb2 = NumericRingBuffer(5, dtype="float64")
-        assert rb2.raw(copy=True).dtype == np.float64
+        assert rb2.unwrapped().dtype == np.float64
 
         # Test with numpy dtype object
         rb3 = NumericRingBuffer(5, dtype=np.dtype(np.float64))
-        assert rb3.raw(copy=True).dtype == np.float64
+        assert rb3.unwrapped().dtype == np.float64
 
         # Test with Python builtin
         rb4 = NumericRingBuffer(5, dtype=float)
-        assert rb4.raw(copy=True).dtype == np.float64
+        assert rb4.unwrapped().dtype == np.float64
 
     def test_basic_operations_float64(self):
         """Test basic operations with float64."""
         rb = NumericRingBuffer(5, dtype=np.float64)
         assert rb.is_empty()
-        assert rb.raw(copy=True).dtype == np.float64
+        assert rb.unwrapped().dtype == np.float64
 
         # Test batch insertion
         data = np.array([1.0, 2.0, 3.0], dtype=np.float64)
@@ -190,27 +190,6 @@ class TestNumericRingBufferBasics:
         np.testing.assert_array_equal(remaining, expected)
         assert rb.is_empty()
 
-    def test_indexing(self):
-        """Test array-like indexing."""
-        rb = NumericRingBuffer(5, dtype="float64")
-        data = np.array([10.0, 20.0, 30.0, 40.0], dtype=np.float64)
-        rb.insert_batch(data)
-
-        # Test positive indexing
-        assert rb[0] == 10.0
-        assert rb[1] == 20.0
-        assert rb[3] == 40.0
-
-        # Test negative indexing
-        assert rb[-1] == 40.0
-        assert rb[-2] == 30.0
-
-        # Test out of bounds
-        with pytest.raises(IndexError):
-            _ = rb[10]
-        with pytest.raises(IndexError):
-            _ = rb[-10]
-
 
 class TestNumericRingBufferEdgeCases:
     """Test edge cases and error conditions."""
@@ -222,9 +201,6 @@ class TestNumericRingBufferEdgeCases:
         # These should raise errors on empty buffer
         with pytest.raises((IndexError, ValueError)):
             rb.consume()
-
-        with pytest.raises(IndexError):
-            _ = rb[0]
 
     def test_single_element_buffer(self):
         """Test buffer with capacity of 1."""
@@ -319,3 +295,41 @@ class TestNumericRingBufferAsyncFunctionality:
         # aconsume should immediately return without waiting
         result = await asyncio.wait_for(rb.aconsume(), timeout=0.1)
         assert result == 100  # Should get the oldest item
+
+
+class TestNumericRingBufferTimestamps:
+    """Test timestamp tracking on numeric ringbuffers."""
+
+    def test_latest_insert_time_ns_initial(self):
+        rb = NumericRingBuffer(4, dtype="float64")
+        assert rb.latest_insert_time_ns == 0
+
+    def test_latest_insert_time_ns_updated_on_insert(self):
+        rb = NumericRingBuffer(4, dtype="float64")
+        rb.insert(1.0)
+        t1 = rb.latest_insert_time_ns
+        assert t1 > 0
+        import time
+
+        time.sleep(0.001)
+        rb.insert(2.0)
+        t2 = rb.latest_insert_time_ns
+        assert t2 > t1
+
+    def test_latest_insert_time_ns_updated_on_insert_batch(self):
+        rb = NumericRingBuffer(4, dtype="float64")
+        rb.insert_batch(np.array([1.0, 2.0], dtype=np.float64))
+        assert rb.latest_insert_time_ns > 0
+
+    def test_latest_consume_time_ns_initial(self):
+        rb = NumericRingBuffer(4, dtype="float64")
+        assert rb.latest_consume_time_ns == 0
+
+    def test_latest_consume_time_ns_updated_on_consume(self):
+        rb = NumericRingBuffer(4, dtype="float64")
+        rb.insert_batch(np.array([1.0, 2.0], dtype=np.float64))
+        t1 = rb.latest_insert_time_ns
+        rb.consume()
+        t2 = rb.latest_consume_time_ns
+        assert t2 > 0
+        assert t2 >= t1

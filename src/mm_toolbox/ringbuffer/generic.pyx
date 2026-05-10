@@ -7,6 +7,8 @@ from typing import AsyncIterator, Iterator
 
 from libc.stdint cimport uint64_t as u64
 
+from mm_toolbox.time.time cimport time_monotonic_ns
+
 """
 Performance on my machine (MacBook Air M2, 16GB RAM).
 
@@ -42,13 +44,11 @@ cdef class GenericRingBuffer:
         self._tail = 0
         self._head = 0
         self._size = 0
+        self._latest_insert_time_ns = 0
+        self._latest_consume_time_ns = 0
         self._buffer: list = [None] * self._max_capacity
         self._buffer_not_empty_event = asyncio.Event() 
         self._disable_async = disable_async
-
-    cpdef list raw(self, bint copy=True):
-        """Return a copy of the internal buffer array."""
-        return self._buffer.copy() if copy else self._buffer
 
     cpdef list unwrapped(self):
         """Return a list of the buffer's contents in logical (oldest to newest) order."""
@@ -91,6 +91,7 @@ cdef class GenericRingBuffer:
         self._head = (head + 1) & mask
         if not self._disable_async and self._size == 1:
             self._buffer_not_empty_event.set()
+        self._latest_insert_time_ns = <u64>time_monotonic_ns()
         return True
 
     cpdef bint insert_batch(self, list[object] items):
@@ -132,6 +133,7 @@ cdef class GenericRingBuffer:
 
         if not self._disable_async and was_empty:
             self._buffer_not_empty_event.set()
+        self._latest_insert_time_ns = <u64>time_monotonic_ns()
         return True
     
     cpdef bint contains(self, object item):
@@ -173,7 +175,7 @@ cdef class GenericRingBuffer:
         self._size -= 1
         if not self._disable_async and self.is_empty():
             self._buffer_not_empty_event.clear()
-
+        self._latest_consume_time_ns = <u64>time_monotonic_ns()
         return buf[tail]
 
     cpdef list consume_all(self):
@@ -246,21 +248,15 @@ cdef class GenericRingBuffer:
         """Get the number of elements currently in the buffer."""
         return self._size
 
-    def __getitem__(self, int idx):
-        """Get the element at the given index."""
-        cdef:
-            u64     size = self._size
-            u64     tail = self._tail
-            u64     mask = self._mask
-            list    buf = self._buffer
+    @property
+    def latest_insert_time_ns(self):
+        """Return the timestamp (ns) of the latest successful insert."""
+        return self._latest_insert_time_ns
 
-        if idx < 0:
-            idx += size
-        if idx < 0 or <u64>idx >= size: 
-            raise IndexError(f"Index out of range; expected within ({-size} <> {size}) but got {idx}")
-
-        fixed_idx = (tail + <u64>idx) & mask
-        return buf[fixed_idx]
+    @property
+    def latest_consume_time_ns(self):
+        """Return the timestamp (ns) of the latest successful consume."""
+        return self._latest_consume_time_ns
 
     cdef inline bint __enforce_ringbuffer_not_empty(self):
         if self.is_empty():

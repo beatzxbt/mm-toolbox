@@ -90,16 +90,11 @@ class TestBytesRingBufferBasics:
         assert remaining == [b"second", b"third"]
         assert rb.is_empty()
 
-    def test_indexing_and_contains(self):
-        """Test indexing and contains operations."""
+    def test_contains_operations(self):
+        """Test contains operations."""
         rb = BytesRingBuffer(5)
         data = [b"alpha", b"beta", b"gamma"]
         rb.insert_batch(data)
-
-        # Test indexing
-        assert rb[0] == b"alpha"
-        assert rb[1] == b"beta"
-        assert rb[-1] == b"gamma"
 
         # Test contains
         assert b"alpha" in rb
@@ -305,9 +300,6 @@ class TestBytesRingBufferEdgeCases:
         with pytest.raises((IndexError, ValueError)):
             rb.consume()
 
-        with pytest.raises(IndexError):
-            _ = rb[0]
-
     def test_single_element_buffer(self):
         """Test buffer with capacity of 1."""
         rb = BytesRingBuffer(1)
@@ -342,3 +334,74 @@ class TestBytesRingBufferEdgeCases:
         assert rb.insert(b"hello") is True
         assert rb.insert_batch([b"a", b"b"]) is True
         assert len(rb) == 3
+
+
+class TestBytesRingBufferTimestamps:
+    """Test timestamp tracking on monolithic bytes ringbuffers."""
+
+    def test_latest_insert_time_ns_initial(self):
+        rb = BytesRingBuffer(4)
+        assert rb.latest_insert_time_ns == 0
+
+    def test_latest_insert_time_ns_updated_on_insert(self):
+        rb = BytesRingBuffer(4)
+        rb.insert(b"a")
+        t1 = rb.latest_insert_time_ns
+        assert t1 > 0
+        import time
+
+        time.sleep(0.001)
+        rb.insert(b"b")
+        t2 = rb.latest_insert_time_ns
+        assert t2 > t1
+
+    def test_latest_insert_time_ns_updated_on_insert_batch(self):
+        rb = BytesRingBuffer(4)
+        rb.insert_batch([b"a", b"b"])
+        assert rb.latest_insert_time_ns > 0
+
+    def test_latest_consume_time_ns_initial(self):
+        rb = BytesRingBuffer(4)
+        assert rb.latest_consume_time_ns == 0
+
+    def test_latest_consume_time_ns_updated_on_consume(self):
+        rb = BytesRingBuffer(4)
+        rb.insert_batch([b"a", b"b"])
+        t1 = rb.latest_insert_time_ns
+        rb.consume()
+        t2 = rb.latest_consume_time_ns
+        assert t2 > 0
+        assert t2 >= t1
+
+
+class TestBytesRingBufferFastTimestamps:
+    """Test timestamp tracking on fast bytes ringbuffers."""
+
+    def test_latest_insert_time_ns_initial(self):
+        rb = BytesRingBufferFast(4)
+        assert rb.latest_insert_time_ns == 0
+
+    def test_latest_insert_time_ns_updated_on_insert(self):
+        rb = BytesRingBufferFast(4)
+        rb.insert(b"a")
+        t1 = rb.latest_insert_time_ns
+        assert t1 > 0
+        import time
+
+        time.sleep(0.001)
+        rb.insert(b"b")
+        t2 = rb.latest_insert_time_ns
+        assert t2 > t1
+
+    def test_latest_consume_time_ns_initial(self):
+        rb = BytesRingBufferFast(4)
+        assert rb.latest_consume_time_ns == 0
+
+    def test_latest_consume_time_ns_updated_on_consume(self):
+        rb = BytesRingBufferFast(4)
+        rb.insert_batch([b"a", b"b"])
+        t1 = rb.latest_insert_time_ns
+        rb.consume()
+        t2 = rb.latest_consume_time_ns
+        assert t2 > 0
+        assert t2 >= t1

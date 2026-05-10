@@ -708,3 +708,144 @@ class TestSharedBytesRingBuffer:
         finally:
             cons.close()
             prod.close()
+
+    def test_unwrapped_matches_consume_all(self, shm_path: str) -> None:
+        """unwrapped() returns same as consume_all() without consuming.
+
+        Args:
+            shm_path: Temporary file path for the shared memory ringbuffer.
+        """
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
+        cons = ShmSpscConsumer(shm_path)
+        try:
+            msgs = [b"a", b"b", b"c"]
+            prod.insert_batch(msgs)
+            unw = cons.unwrapped()
+            assert unw == msgs
+            assert len(cons) == 3
+            assert cons.consume_all() == msgs
+        finally:
+            cons.close()
+            prod.close()
+
+    def test_unwrapped_empty(self, shm_path: str) -> None:
+        """unwrapped() on empty buffer returns empty list.
+
+        Args:
+            shm_path: Temporary file path for the shared memory ringbuffer.
+        """
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
+        cons = ShmSpscConsumer(shm_path)
+        try:
+            assert cons.unwrapped() == []
+        finally:
+            cons.close()
+            prod.close()
+
+    def test_contains(self, shm_path: str) -> None:
+        """contains() and __contains__() work correctly.
+
+        Args:
+            shm_path: Temporary file path for the shared memory ringbuffer.
+        """
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
+        cons = ShmSpscConsumer(shm_path)
+        try:
+            prod.insert(b"hello")
+            assert cons.contains(b"hello")
+            assert b"hello" in cons
+            assert not cons.contains(b"missing")
+            assert b"missing" not in cons
+        finally:
+            cons.close()
+            prod.close()
+
+    def test_consumer_is_empty(self, shm_path: str) -> None:
+        """Consumer is_empty() reflects buffer state.
+
+        Args:
+            shm_path: Temporary file path for the shared memory ringbuffer.
+        """
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
+        cons = ShmSpscConsumer(shm_path)
+        try:
+            assert cons.is_empty()
+            prod.insert(b"x")
+            assert not cons.is_empty()
+            cons.consume()
+            assert cons.is_empty()
+        finally:
+            cons.close()
+            prod.close()
+
+    def test_consumer_is_full(self, shm_path: str) -> None:
+        """Consumer is_full() reflects when no space remains.
+
+        Args:
+            shm_path: Temporary file path for the shared memory ringbuffer.
+        """
+        capacity = 1 << 8
+        prod = ShmSpscProducer(shm_path, capacity, create=True)
+        cons = ShmSpscConsumer(shm_path)
+        try:
+            assert not cons.is_full()
+            # Fill buffer with messages that leave less than 8 bytes free
+            msg = b"x" * (capacity // 4 - 8)
+            for _ in range(8):
+                prod.insert(msg)
+            assert cons.is_full()
+        finally:
+            cons.close()
+            prod.close()
+
+    def test_consumer_clear(self, shm_path: str) -> None:
+        """clear() drains the buffer.
+
+        Args:
+            shm_path: Temporary file path for the shared memory ringbuffer.
+        """
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
+        cons = ShmSpscConsumer(shm_path)
+        try:
+            prod.insert_batch([b"a", b"b", b"c"])
+            cons.clear()
+            assert cons.is_empty()
+            assert len(cons) == 0
+        finally:
+            cons.close()
+            prod.close()
+
+    def test_producer_is_empty(self, shm_path: str) -> None:
+        """Producer is_empty() reflects buffer state.
+
+        Args:
+            shm_path: Temporary file path for the shared memory ringbuffer.
+        """
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
+        cons = ShmSpscConsumer(shm_path)
+        try:
+            assert prod.is_empty()
+            prod.insert(b"x")
+            assert not prod.is_empty()
+            cons.consume()
+            assert prod.is_empty()
+        finally:
+            cons.close()
+            prod.close()
+
+    def test_producer_is_full(self, shm_path: str) -> None:
+        """Producer is_full() reflects when no space remains.
+
+        Args:
+            shm_path: Temporary file path for the shared memory ringbuffer.
+        """
+        capacity = 1 << 8
+        prod = ShmSpscProducer(shm_path, capacity, create=True)
+        try:
+            assert not prod.is_full()
+            msg = b"x" * (capacity // 4 - 8)
+            for _ in range(8):
+                prod.insert(msg)
+            assert prod.is_full()
+        finally:
+            prod.close()

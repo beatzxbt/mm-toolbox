@@ -9,6 +9,7 @@ from typing import Iterator
 cimport numpy as cnp
 from libc.stdint cimport uint64_t as u64
 
+from mm_toolbox.time.time cimport time_monotonic_ns
 from .numeric cimport numeric_t
 
 _UINT64_DTYPE = np.dtype(np.uint64)
@@ -50,14 +51,12 @@ cdef class NumericRingBuffer:
         self._tail = 0
         self._head = 0
         self._size = 0
+        self._latest_insert_time_ns = 0
+        self._latest_consume_time_ns = 0
         self._dtype = resolve_numeric_dtype(dtype)
         self._buffer = np.empty(self._max_capacity, dtype=self._dtype)
         self._buffer_not_empty_event = asyncio.Event() 
         self._disable_async = disable_async
-
-    cpdef cnp.ndarray raw(self, bint copy=True):
-        """Return a copy of the internal buffer array."""
-        return self._buffer.copy() if copy else self._buffer
 
     cpdef cnp.ndarray unwrapped(self):
         """Return a list of the buffer's contents in logical (oldest to newest) order."""
@@ -115,6 +114,7 @@ cdef class NumericRingBuffer:
         self._head = (head + 1) & mask
         if not self._disable_async and was_empty:
             self._buffer_not_empty_event.set()
+        self._latest_insert_time_ns = <u64>time_monotonic_ns()
         return True
 
     def insert_batch(self, object items) -> bool:
@@ -153,6 +153,7 @@ cdef class NumericRingBuffer:
         self._size = new_size
         if not self._disable_async and was_empty:
             self._buffer_not_empty_event.set()
+        self._latest_insert_time_ns = <u64>time_monotonic_ns()
         return True
 
     cpdef bint contains(self, numeric_t item):
@@ -185,6 +186,7 @@ cdef class NumericRingBuffer:
         self._size -= 1
         if not self._disable_async and self.is_empty():
             self._buffer_not_empty_event.clear()
+        self._latest_consume_time_ns = <u64>time_monotonic_ns()
         return buf[tail]
 
     cpdef cnp.ndarray consume_all(self):
@@ -273,21 +275,15 @@ cdef class NumericRingBuffer:
         """Get the number of elements currently in the buffer."""
         return self._size
 
-    def __getitem__(self, int idx):
-        """Get the element at the given index."""
-        cdef:
-            u64 size = self._size
-            u64 tail = self._tail
-            u64 mask = self._mask
-            cnp.ndarray buf = self._buffer
+    @property
+    def latest_insert_time_ns(self):
+        """Return the timestamp (ns) of the latest successful insert."""
+        return self._latest_insert_time_ns
 
-        if idx < 0:
-            idx += size
-        if idx < 0 or <u64>idx >= size:
-            raise IndexError(f"Index out of range; expected within ({-size} <= {idx} <= {size - 1}) but got {idx}")
-
-        fixed_idx = (tail + <u64>idx) & mask
-        return buf[fixed_idx]
+    @property
+    def latest_consume_time_ns(self):
+        """Return the timestamp (ns) of the latest successful consume."""
+        return self._latest_consume_time_ns
 
     cdef inline bint __enforce_ringbuffer_not_empty(self):
         if self.is_empty():

@@ -30,12 +30,13 @@ cdef class NumericRingBuffer:
         u64 _tail
         u64 _head
         u64 _size
+        u64 _latest_insert_time_ns
+        u64 _latest_consume_time_ns
         cnp.ndarray _buffer
         object _dtype
         object _buffer_not_empty_event
 
     # def __cinit__(self, int max_capacity, object dtype, bint disable_async=False)
-    cpdef cnp.ndarray raw(self, bint copy=*)
     cpdef cnp.ndarray unwrapped(self)
     cpdef void overwrite_latest(self, numeric_t item, bint increment_count=*)
     cpdef bint contains(self, numeric_t item)
@@ -52,7 +53,6 @@ cdef class NumericRingBuffer:
 
     # def __contains__(self, object item)
     # def __len__(self)
-    # def __getitem__(self, int idx)
     cdef inline bint __enforce_ringbuffer_not_empty(self)
     cdef inline bint __enforce_async_not_disabled(self)
 

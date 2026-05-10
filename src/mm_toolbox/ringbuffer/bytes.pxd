@@ -8,11 +8,11 @@ cdef class BytesRingBuffer:
         u64         _head
         u64         _tail
         u64         _size
+        u64         _latest_insert_time_ns
+        u64         _latest_consume_time_ns
         list        _buffer
         object      _buffer_not_empty_event
         bint        _disable_async
-
-    cpdef list raw(self, bint copy=*)
     cpdef list unwrapped(self)
     cpdef void overwrite_latest(self, bytes item, bint increment_count=*)
     cpdef bint insert(self, bytes item)
@@ -31,7 +31,6 @@ cdef class BytesRingBuffer:
 
     # def __contains__(self, bytes item)
     # def __len__(self)
-    # def __getitem__(self, int idx)
     cdef inline bint __enforce_ringbuffer_not_empty(self)
     cdef inline bint __enforce_async_not_disabled(self)
 
@@ -45,13 +44,13 @@ cdef class BytesRingBufferFast:
         u64         _head
         u64         _tail
         u64         _size
+        u64         _latest_insert_time_ns
+        u64         _latest_consume_time_ns
         char*       _buffer
         u64*        _lengths
         object      _buffer_not_empty_event
         bint        _disable_async
         bint        _only_insert_unique
-
-    cpdef list raw(self, bint copy=*)
     cpdef list unwrapped(self)
     cpdef void overwrite_latest(self, bytes item, bint increment_count=*)
     cpdef bint insert(self, bytes item)
@@ -70,7 +69,6 @@ cdef class BytesRingBufferFast:
     cpdef bint is_full(self)
     # def __contains__(self, bytes item)
     # def __len__(self)
-    # def __getitem__(self, int idx)
     cdef inline char* _get_slot_ptr(self, u64 idx) nogil
     cdef inline bytes _make_bytes(self, u64 idx)
     cdef inline u64 _next_power_of_2(self, u64 n) nogil

@@ -7,11 +7,7 @@ T = TypeVar("T")
 
 
 class RingBufferProtocol(Protocol[T]):
-    """Core protocol shared by all ringbuffer implementations.
-
-    Provides the minimal interface expected from any ringbuffer:
-    insert, batch insert, consume, iterable consume, and length query.
-    """
+    """Core protocol shared by all ringbuffer implementations."""
 
     def insert(self, item: T) -> bool:
         """Insert a single item into the ringbuffer.
@@ -35,6 +31,44 @@ class RingBufferProtocol(Protocol[T]):
 
     def consume_iterable(self) -> Iterator[T]:
         """Yield items from the ringbuffer in FIFO order."""
+        ...
+
+    def unwrapped(self) -> list[T]:
+        """Return all logical contents without consuming."""
+        ...
+
+    def contains(self, item: T) -> bool:
+        """Check if item is present in the buffer."""
+        ...
+
+    def is_empty(self) -> bool:
+        """Check if the buffer is empty."""
+        ...
+
+    def is_full(self) -> bool:
+        """Check if the buffer is full."""
+        ...
+
+    def clear(self) -> None:
+        """Clear the buffer."""
+        ...
+
+    def peekleft(self) -> T:
+        """Return the oldest item without removing it."""
+        ...
+
+    def peekright(self) -> T:
+        """Return the newest item without removing it."""
+        ...
+
+    @property
+    def latest_insert_time_ns(self) -> int:
+        """Return the timestamp (ns) of the latest successful insert."""
+        ...
+
+    @property
+    def latest_consume_time_ns(self) -> int:
+        """Return the timestamp (ns) of the latest successful consume."""
         ...
 
     def __len__(self) -> int:
@@ -77,6 +111,14 @@ class RingBufferProducerProtocol(Protocol[T]):
         """
         ...
 
+    def is_empty(self) -> bool:
+        """Check if the buffer is empty."""
+        ...
+
+    def is_full(self) -> bool:
+        """Check if the buffer is full."""
+        ...
+
     def __len__(self) -> int:
         """Return the number of items currently in the ringbuffer."""
         ...
@@ -93,6 +135,34 @@ class RingBufferConsumerProtocol(Protocol[T]):
         """Yield items from the ringbuffer in FIFO order."""
         ...
 
+    def unwrapped(self) -> list[T]:
+        """Return all logical contents without consuming."""
+        ...
+
+    def contains(self, item: T) -> bool:
+        """Check if item is present in the buffer."""
+        ...
+
+    def is_empty(self) -> bool:
+        """Check if the buffer is empty."""
+        ...
+
+    def is_full(self) -> bool:
+        """Check if the buffer is full."""
+        ...
+
+    def clear(self) -> None:
+        """Clear the buffer."""
+        ...
+
+    def peekleft(self) -> T:
+        """Return the oldest item without removing it."""
+        ...
+
+    def peekright(self) -> T:
+        """Return the newest item without removing it."""
+        ...
+
     def __len__(self) -> int:
         """Return the number of items currently in the ringbuffer."""
         ...
@@ -102,3 +172,5 @@ class AsyncRingBufferConsumerProtocol(
     RingBufferConsumerProtocol[T], SupportsAsyncConsume[T], Protocol
 ):
     """Protocol for split consumers that also support async methods."""
+
+    ...

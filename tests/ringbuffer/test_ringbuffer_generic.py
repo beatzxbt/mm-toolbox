@@ -106,27 +106,6 @@ class TestGenericRingBufferBasics:
         assert all_consumed == ["b", "c"]
         assert rb.is_empty()
 
-    def test_indexing_operations(self):
-        """Test array-like indexing."""
-        rb = GenericRingBuffer(5)
-        data = ["x", "y", "z", "w"]
-        rb.insert_batch(data)
-
-        # Test positive indexing
-        assert rb[0] == "x"
-        assert rb[1] == "y"
-        assert rb[3] == "w"
-
-        # Test negative indexing
-        assert rb[-1] == "w"
-        assert rb[-2] == "z"
-
-        # Test out of bounds
-        with pytest.raises(IndexError):
-            _ = rb[10]
-        with pytest.raises(IndexError):
-            _ = rb[-10]
-
     def test_contains_operations(self):
         """Test membership testing."""
         rb = GenericRingBuffer(4)
@@ -165,9 +144,6 @@ class TestGenericRingBufferEdgeCases:
         # These should raise errors on empty buffer
         with pytest.raises((IndexError, ValueError)):
             rb.consume()
-
-        with pytest.raises(IndexError):
-            _ = rb[0]
 
         # peekleft and peekright may return None or raise errors on empty buffer
         try:
@@ -438,3 +414,41 @@ class TestGenericRingBufferPerformance:
         assert rb.insert(1) is True
         assert rb.insert_batch([2, 3]) is True
         assert len(rb) == 3
+
+
+class TestGenericRingBufferTimestamps:
+    """Test timestamp tracking on monolithic ringbuffers."""
+
+    def test_latest_insert_time_ns_initial(self):
+        rb = GenericRingBuffer(4)
+        assert rb.latest_insert_time_ns == 0
+
+    def test_latest_insert_time_ns_updated_on_insert(self):
+        rb = GenericRingBuffer(4)
+        rb.insert("a")
+        t1 = rb.latest_insert_time_ns
+        assert t1 > 0
+        import time
+
+        time.sleep(0.001)
+        rb.insert("b")
+        t2 = rb.latest_insert_time_ns
+        assert t2 > t1
+
+    def test_latest_insert_time_ns_updated_on_insert_batch(self):
+        rb = GenericRingBuffer(4)
+        rb.insert_batch(["a", "b"])
+        assert rb.latest_insert_time_ns > 0
+
+    def test_latest_consume_time_ns_initial(self):
+        rb = GenericRingBuffer(4)
+        assert rb.latest_consume_time_ns == 0
+
+    def test_latest_consume_time_ns_updated_on_consume(self):
+        rb = GenericRingBuffer(4)
+        rb.insert_batch(["a", "b"])
+        t1 = rb.latest_insert_time_ns
+        rb.consume()
+        t2 = rb.latest_consume_time_ns
+        assert t2 > 0
+        assert t2 >= t1

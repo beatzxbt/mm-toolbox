@@ -7,12 +7,13 @@ cdef class GenericRingBuffer:
         u64         _tail
         u64         _head
         u64         _size
+        u64         _latest_insert_time_ns
+        u64         _latest_consume_time_ns
         list        _buffer
         object      _buffer_not_empty_event
         bint        _disable_async
 
     # def void      __cinit__(self, int max_capacity, bint disable_async=False)
-    cpdef list      raw(self, bint copy=*)
     cpdef list      unwrapped(self)
     cpdef void      overwrite_latest(self, object item, bint increment_count=*)
     cpdef bint      insert(self, object item)
@@ -31,6 +32,5 @@ cdef class GenericRingBuffer:
 
     # def           __contains__(self, object item)
     # def           __len__(self)
-    # def           __getitem__(self, int idx)
     cdef inline bint __enforce_ringbuffer_not_empty(self)
     cdef inline bint __enforce_async_not_disabled(self)

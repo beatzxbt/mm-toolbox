@@ -461,6 +461,24 @@ cdef class ShmMpscProducer(_ShmRingBase):
     def num_rings(self) -> int:
         return <Py_ssize_t>self._num_rings
 
+    cpdef bint is_empty(self):
+        """Check if the buffer is empty."""
+        return len(self) == 0
+
+    cpdef bint is_full(self):
+        """Check if the buffer is full (no space for even a 0-byte message in any sub-ring)."""
+        cdef u64 read_pos
+        cdef u64 i
+        cdef u64 free_bytes
+        for i in range(self._num_rings):
+            with nogil:
+                read_pos = atomic_load_acquire(&self._sub_hdrs[i].read_pos)
+            self._prod_ctxs[i].cached_read = read_pos
+            free_bytes = self._per_ring_capacity - (self._prod_ctxs[i].cached_write - read_pos)
+            if free_bytes >= 8:
+                return False
+        return True
+
 
 cdef class ShmMpscConsumer(_ShmRingBase):
     """Shared-memory MPSC consumer for bytes payloads.
@@ -909,3 +927,70 @@ cdef class ShmMpscConsumer(_ShmRingBase):
         """Async iterator over consumed items."""
         while True:
             yield await self.aconsume()
+
+    cpdef list unwrapped(self):
+        """Return a list of all logical contents without consuming."""
+        cdef list res = []
+        cdef u64 msg_len = 0
+        cdef u64 pos = 0
+        cdef u64 next_pos = 0
+        cdef u64 w = 0
+        cdef u64 r = 0
+        cdef u64 mask = self._per_ring_mask
+        cdef u64 cap = self._per_ring_capacity
+        cdef bytes out
+        cdef u64 ring_idx
+        cdef u64 i
+
+        for i in range(self._num_rings):
+            ring_idx = (self._next_ring + i) % self._num_rings
+            with nogil:
+                w = atomic_load_acquire(&self._sub_hdrs[ring_idx].write_pos)
+                r = atomic_load_acquire(&self._sub_hdrs[ring_idx].read_pos)
+
+            pos = r
+            while pos < w:
+                msg_len = read_u64_le(self._sub_datas[ring_idx], pos & mask, mask)
+                if msg_len > cap or 8 + msg_len > cap:
+                    break
+                next_pos = pos + 8 + msg_len
+                if next_pos > w:
+                    break
+                out = bytes(<Py_ssize_t>msg_len)
+                copy_from_ring(<unsigned char*>out, self._sub_datas[ring_idx], pos + 8, mask, <size_t>msg_len, cap)
+                res.append(out)
+                pos = next_pos
+        return res
+
+    cpdef bint contains(self, bytes item):
+        """Check if item is present in the buffer."""
+        cdef bytes b
+        for b in self.unwrapped():
+            if b == item:
+                return True
+        return False
+
+    def __contains__(self, bytes item):
+        """Delegate to contains()."""
+        return self.contains(item)
+
+    cpdef bint is_empty(self):
+        """Check if the buffer is empty."""
+        return len(self) == 0
+
+    cpdef bint is_full(self):
+        """Check if the buffer is full (no space for even a 0-byte message in any sub-ring)."""
+        cdef u64 read_pos
+        cdef u64 write_pos
+        cdef u64 i
+        for i in range(self._num_rings):
+            with nogil:
+                read_pos = atomic_load_acquire(&self._sub_hdrs[i].read_pos)
+                write_pos = atomic_load_acquire(&self._sub_hdrs[i].write_pos)
+            if (self._per_ring_capacity - (write_pos - read_pos)) >= 8:
+                return False
+        return True
+
+    cpdef void clear(self):
+        """Drain all available items from the buffer."""
+        self.consume_all()
