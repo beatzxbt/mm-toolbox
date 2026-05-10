@@ -74,7 +74,7 @@ cdef class GenericRingBuffer:
             idx = (self._head - 1) & self._mask
             self._buffer[idx] = item
 
-    cpdef void insert(self, object item):
+    cpdef bint insert(self, object item):
         """Add a new element to the end of the buffer."""
         cdef:
             u64     head = self._head
@@ -91,8 +91,9 @@ cdef class GenericRingBuffer:
         self._head = (head + 1) & mask
         if not self._disable_async and self._size == 1:
             self._buffer_not_empty_event.set()
+        return True
 
-    cpdef void insert_batch(self, list[object] items):
+    cpdef bint insert_batch(self, list[object] items):
         """Add a batch of elements to the end of the buffer."""
         cdef: 
             u64     i, n = len(items)
@@ -106,7 +107,7 @@ cdef class GenericRingBuffer:
             list    buf = self._buffer
 
         if n == 0:
-            return
+            return True
 
         # If batch is larger than capacity, only keep the last max_capacity items
         if n >= max_capacity:
@@ -131,6 +132,7 @@ cdef class GenericRingBuffer:
 
         if not self._disable_async and was_empty:
             self._buffer_not_empty_event.set()
+        return True
     
     cpdef bint contains(self, object item):
         """Checks if the item exists in the buffer, searching from newest to oldest."""

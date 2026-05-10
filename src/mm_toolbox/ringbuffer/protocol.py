@@ -1,0 +1,104 @@
+from __future__ import annotations
+
+from collections.abc import AsyncIterator, Iterator
+from typing import Protocol, TypeVar
+
+T = TypeVar("T")
+
+
+class RingBufferProtocol(Protocol[T]):
+    """Core protocol shared by all ringbuffer implementations.
+
+    Provides the minimal interface expected from any ringbuffer:
+    insert, batch insert, consume, iterable consume, and length query.
+    """
+
+    def insert(self, item: T) -> bool:
+        """Insert a single item into the ringbuffer.
+
+        Returns:
+            True if the insertion succeeded.
+        """
+        ...
+
+    def insert_batch(self, items: list[T]) -> bool:
+        """Insert multiple items into the ringbuffer.
+
+        Returns:
+            True if the batch insertion succeeded.
+        """
+        ...
+
+    def consume(self) -> T:
+        """Remove and return the oldest item from the ringbuffer."""
+        ...
+
+    def consume_iterable(self) -> Iterator[T]:
+        """Yield items from the ringbuffer in FIFO order."""
+        ...
+
+    def __len__(self) -> int:
+        """Return the number of items currently in the ringbuffer."""
+        ...
+
+
+class SupportsAsyncConsume(Protocol[T]):
+    """Mixin protocol for ringbuffers that support async consumption."""
+
+    async def aconsume(self) -> T:
+        """Asynchronously remove and return the oldest item."""
+        ...
+
+    async def aconsume_iterable(self) -> AsyncIterator[T]:
+        """Asynchronously yield items from the ringbuffer in FIFO order."""
+        ...
+
+
+class AsyncRingBufferProtocol(RingBufferProtocol[T], SupportsAsyncConsume[T], Protocol):
+    """Protocol for ringbuffers that support both sync and async consumption."""
+
+
+class RingBufferProducerProtocol(Protocol[T]):
+    """Protocol for the producer side of a split ringbuffer design."""
+
+    def insert(self, item: T) -> bool:
+        """Insert a single item into the ringbuffer.
+
+        Returns:
+            True if the insertion succeeded.
+        """
+        ...
+
+    def insert_batch(self, items: list[T]) -> bool:
+        """Insert multiple items into the ringbuffer.
+
+        Returns:
+            True if the batch insertion succeeded.
+        """
+        ...
+
+    def __len__(self) -> int:
+        """Return the number of items currently in the ringbuffer."""
+        ...
+
+
+class RingBufferConsumerProtocol(Protocol[T]):
+    """Protocol for the consumer side of a split ringbuffer design."""
+
+    def consume(self) -> T:
+        """Remove and return the oldest item from the ringbuffer."""
+        ...
+
+    def consume_iterable(self) -> Iterator[T]:
+        """Yield items from the ringbuffer in FIFO order."""
+        ...
+
+    def __len__(self) -> int:
+        """Return the number of items currently in the ringbuffer."""
+        ...
+
+
+class AsyncRingBufferConsumerProtocol(
+    RingBufferConsumerProtocol[T], SupportsAsyncConsume[T], Protocol
+):
+    """Protocol for split consumers that also support async methods."""

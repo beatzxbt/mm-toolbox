@@ -741,3 +741,41 @@ cdef class ShmSpscConsumer(_SharedBytesRing):
             items.append(bytes(mv[off : off + L]))
             off += L
         return items
+
+    def consume_iterable(self):
+        """Iterate over items, blocking until each is available."""
+        while True:
+            yield self.consume()
+
+    async def aconsume(self):
+        """Async consume a single item."""
+        import asyncio
+        cdef u64 msg_len = 0
+        cdef u64 read_pos = 0
+        cdef int spin_count = 0
+        cdef int available = 0
+        cdef bytearray buf
+        cdef unsigned char* buf_ptr
+
+        while True:
+            with nogil:
+                available = shm_consumer_peek_available(&self._cons_ctx, &msg_len, &read_pos)
+            if available:
+                break
+            spin_count += 1
+            if spin_count >= self._spin_wait:
+                await asyncio.sleep(0)
+                spin_count = 0
+
+        buf = bytearray(<Py_ssize_t>msg_len)
+        buf_ptr = <unsigned char*>buf
+        with nogil:
+            shm_consumer_consume(&self._cons_ctx, buf_ptr, msg_len, read_pos)
+
+        self._cached_read = read_pos + 8 + msg_len
+        return bytes(buf)
+
+    async def aconsume_iterable(self):
+        """Async iterator over consumed items."""
+        while True:
+            yield await self.aconsume()

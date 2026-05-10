@@ -916,3 +916,56 @@ class TestMpscSharedBytesRingBuffer:
         finally:
             cons.close()
             prod.close()
+
+    def test_consume_iterable(self, shm_path: str) -> None:
+        """consume_iterable yields items in FIFO order."""
+        prod = ShmMpscProducer(
+            shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
+        )
+        cons = ShmMpscConsumer(shm_path)
+        try:
+            prod.insert(b"first")
+            prod.insert(b"second")
+            prod.insert(b"third")
+            gen = cons.consume_iterable()
+            assert next(gen) == b"first"
+            assert next(gen) == b"second"
+            assert next(gen) == b"third"
+        finally:
+            cons.close()
+            prod.close()
+
+    @pytest.mark.asyncio
+    async def test_aconsume(self, shm_path: str) -> None:
+        """aconsume returns items asynchronously."""
+        prod = ShmMpscProducer(
+            shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
+        )
+        cons = ShmMpscConsumer(shm_path)
+        try:
+            prod.insert(b"async")
+            result = await cons.aconsume()
+            assert result == b"async"
+        finally:
+            cons.close()
+            prod.close()
+
+    @pytest.mark.asyncio
+    async def test_aconsume_iterable(self, shm_path: str) -> None:
+        """aconsume_iterable yields items asynchronously."""
+        prod = ShmMpscProducer(
+            shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
+        )
+        cons = ShmMpscConsumer(shm_path)
+        try:
+            prod.insert(b"one")
+            prod.insert(b"two")
+            collected = []
+            async for item in cons.aconsume_iterable():
+                collected.append(item)
+                if len(collected) == 2:
+                    break
+            assert collected == [b"one", b"two"]
+        finally:
+            cons.close()
+            prod.close()

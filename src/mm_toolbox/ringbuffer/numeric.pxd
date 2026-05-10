@@ -38,8 +38,6 @@ cdef class NumericRingBuffer:
     cpdef cnp.ndarray raw(self, bint copy=*)
     cpdef cnp.ndarray unwrapped(self)
     cpdef void overwrite_latest(self, numeric_t item, bint increment_count=*)
-    cpdef void insert(self, numeric_t item)
-    cpdef void insert_batch(self, numeric_t[::1] items)
     cpdef bint contains(self, numeric_t item)
     cpdef object consume(self)
     cpdef cnp.ndarray consume_all(self)

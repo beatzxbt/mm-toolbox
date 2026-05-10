@@ -256,6 +256,13 @@ class TestNumericRingBufferEdgeCases:
         with pytest.raises(ValueError, match="Unsupported dtype"):
             NumericRingBuffer(5, dtype="complex64")
 
+    def test_insert_returns_bool(self):
+        """Test that insert returns True."""
+        rb = NumericRingBuffer(4, dtype="int64")
+        assert rb.insert(1) is True
+        assert rb.insert_batch(np.array([2, 3], dtype=np.int64)) is True
+        assert len(rb) == 3
+
 
 class TestNumericRingBufferAsyncFunctionality:
     """Test async functionality for NumericRingBuffer."""

@@ -50,10 +50,10 @@ cdef class BytesRingBuffer:
         else:
             self._buffer[idx] = item
 
-    cpdef void insert(self, bytes item):
+    cpdef bint insert(self, bytes item):
         """Add a new element to the end of the buffer."""
         if self._only_insert_unique and self.contains(item):
-            return
+            return True
 
         cdef:
             u64     head = self._head
@@ -71,8 +71,9 @@ cdef class BytesRingBuffer:
         self._tail = tail
         if not self._disable_async and self._size == 1:
             self._buffer_not_empty_event.set()
+        return True
 
-    cpdef void insert_batch(self, list[bytes] items):
+    cpdef bint insert_batch(self, list[bytes] items):
         """Add a batch of elements to the end of the buffer."""
         cdef:
             bytes item
@@ -87,7 +88,7 @@ cdef class BytesRingBuffer:
             bint unique = self._only_insert_unique
 
         if n == 0:
-            return
+            return True
 
         if not unique:
             if n >= max_capacity:
@@ -125,6 +126,7 @@ cdef class BytesRingBuffer:
 
         if not self._disable_async and old_size == 0 and self._size > 0:
             self._buffer_not_empty_event.set()
+        return True
 
     cpdef bint contains(self, bytes item):
         """Checks if the item exists in the buffer, searching from newest to oldest."""
@@ -363,10 +365,10 @@ cdef class BytesRingBufferFast:
         memcpy(dest, <const char*>item, copy_len)
         self._lengths[idx] = copy_len
 
-    cpdef void insert(self, bytes item):
+    cpdef bint insert(self, bytes item):
         """Add a new element to the end of the buffer."""
         if self._only_insert_unique and self.contains(item):
-            return
+            return True
 
         cdef:
             u64     head = self._head
@@ -394,8 +396,9 @@ cdef class BytesRingBufferFast:
         
         if not self._disable_async and self._size == 1:
             self._buffer_not_empty_event.set()
+        return True
 
-    cpdef void insert_char(self, const char* item, Py_ssize_t item_len):
+    cpdef bint insert_char(self, const char* item, Py_ssize_t item_len):
         """Add a new element directly from char* to avoid byte conversion overhead."""
         cdef:
             u64     head = self._head
@@ -422,8 +425,9 @@ cdef class BytesRingBufferFast:
         
         if not self._disable_async and self._size == 1:
             self._buffer_not_empty_event.set()
+        return True
 
-    cpdef void insert_batch(self, list[bytes] items):
+    cpdef bint insert_batch(self, list[bytes] items):
         """Add a batch of elements to the end of the buffer."""
         cdef:
             bytes item
@@ -439,7 +443,7 @@ cdef class BytesRingBufferFast:
             bint unique = self._only_insert_unique
 
         if n == 0:
-            return
+            return True
 
         if not unique:
             if n >= max_capacity:
@@ -490,6 +494,7 @@ cdef class BytesRingBufferFast:
 
         if not self._disable_async and old_size == 0 and self._size > 0:
             self._buffer_not_empty_event.set()
+        return True
 
     cpdef bint contains(self, bytes item):
         """Checks if the item exists in the buffer, searching from newest to oldest."""

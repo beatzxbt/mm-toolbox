@@ -997,3 +997,18 @@ cdef class ShmMpscConsumer(_ShmRingBase):
     @property
     def num_rings(self) -> int:
         return <Py_ssize_t>self._num_rings
+
+    def consume_iterable(self):
+        """Iterate over items, blocking until each is available."""
+        while True:
+            yield self.consume()
+
+    async def aconsume(self):
+        """Async consume a single item."""
+        import asyncio
+        return self.consume()
+
+    async def aconsume_iterable(self):
+        """Async iterator over consumed items."""
+        while True:
+            yield await self.aconsume()

@@ -97,7 +97,7 @@ cdef class NumericRingBuffer:
             idx = (head - 1) & mask
             buf[idx] = item
 
-    cpdef void insert(self, numeric_t item):
+    def insert(self, object item) -> bool:
         """Add a new element to the end of the buffer."""
         cdef:
             u64 head = self._head
@@ -105,7 +105,7 @@ cdef class NumericRingBuffer:
             u64 mask = self._mask
             bint was_empty = self._size == 0
             bint is_full = self._size == self._max_capacity
-            numeric_t[::1] buf = self._buffer
+            cnp.ndarray buf = self._buffer
 
         buf[head] = item
         if is_full:
@@ -115,8 +115,9 @@ cdef class NumericRingBuffer:
         self._head = (head + 1) & mask
         if not self._disable_async and was_empty:
             self._buffer_not_empty_event.set()
+        return True
 
-    cpdef void insert_batch(self, numeric_t[::1] items):
+    def insert_batch(self, object items) -> bool:
         """Add a batch of elements to the end of the buffer."""
         cdef:
             u64 n = len(items)
@@ -127,10 +128,10 @@ cdef class NumericRingBuffer:
             u64 mask = self._mask
             u64 max_capacity = self._max_capacity
             u64 i, new_size, overwrite_count = 0
-            numeric_t[::1] buf = self._buffer
+            cnp.ndarray buf = self._buffer
 
         if n == 0:
-            return
+            return True
 
         if n >= max_capacity:
             items = items[-max_capacity:]
@@ -152,6 +153,7 @@ cdef class NumericRingBuffer:
         self._size = new_size
         if not self._disable_async and was_empty:
             self._buffer_not_empty_event.set()
+        return True
 
     cpdef bint contains(self, numeric_t item):
         """Checks if the item exists in the buffer, searching from newest to oldest."""

@@ -335,3 +335,10 @@ class TestBytesRingBufferEdgeCases:
 
         with pytest.raises((TypeError, ValueError)):
             rb.insert([1, 2, 3])
+
+    def test_insert_returns_bool(self):
+        """Test that insert returns True."""
+        rb = BytesRingBuffer(4)
+        assert rb.insert(b"hello") is True
+        assert rb.insert_batch([b"a", b"b"]) is True
+        assert len(rb) == 3

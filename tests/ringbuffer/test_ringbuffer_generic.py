@@ -431,3 +431,10 @@ class TestGenericRingBufferPerformance:
         assert len(rb) == 50
         unwrapped = rb.unwrapped()
         assert unwrapped[-1] == "overwrite_9"
+
+    def test_insert_returns_bool(self):
+        """Test that insert returns True."""
+        rb = GenericRingBuffer(4)
+        assert rb.insert(1) is True
+        assert rb.insert_batch([2, 3]) is True
+        assert len(rb) == 3
