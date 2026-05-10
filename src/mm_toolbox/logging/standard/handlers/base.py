@@ -21,7 +21,7 @@ class BaseLogHandler(ABC):
 
         Sets up lazy JSON encoding, HTTP session, and error callback slots.
 
-        """        
+        """
         self._json_encode = None
         self._http_session = None
         self._on_error: Callable[[BaseException, str], None] | None = None

@@ -27,17 +27,13 @@ class TestVolumeCandlesSpecific:
 
         trades = [
             Trade(time_ms=1000, is_buy=True, price=100.0, size=2.0),
-            Trade(
-                time_ms=2000, is_buy=True, price=100.0, size=2.5
-            ),
+            Trade(time_ms=2000, is_buy=True, price=100.0, size=2.5),
         ]
 
         for trade in trades:
             volume_candles.process_trade(trade)
 
-        final_trade = Trade(
-            time_ms=3000, is_buy=True, price=101.0, size=1.0
-        )
+        final_trade = Trade(time_ms=3000, is_buy=True, price=101.0, size=1.0)
         volume_candles.process_trade(final_trade)
 
         assert True
@@ -81,9 +77,7 @@ class TestVolumeCandlesSpecific:
         trades = [
             Trade(time_ms=1000, is_buy=True, price=100.0, size=2.0),
             Trade(time_ms=2000, is_buy=False, price=99.0, size=1.0),
-            Trade(
-                time_ms=3000, is_buy=True, price=101.0, size=1.5
-            ),
+            Trade(time_ms=3000, is_buy=True, price=101.0, size=1.5),
             Trade(time_ms=4000, is_buy=False, price=98.0, size=0.5),
         ]
 
@@ -98,9 +92,7 @@ class TestVolumeCandlesSpecific:
 
         exact_trades = [
             Trade(time_ms=1000, is_buy=True, price=100.0, size=5.0),
-            Trade(
-                time_ms=2000, is_buy=True, price=100.0, size=5.0
-            ),
+            Trade(time_ms=2000, is_buy=True, price=100.0, size=5.0),
         ]
 
         for trade in exact_trades:
@@ -111,9 +103,7 @@ class TestVolumeCandlesSpecific:
         vc_over = VolumeCandles(1000.0)
         over_trades = [
             Trade(time_ms=1000, is_buy=True, price=100.0, size=5.0),
-            Trade(
-                time_ms=2000, is_buy=True, price=100.0, size=5.1
-            ),
+            Trade(time_ms=2000, is_buy=True, price=100.0, size=5.1),
         ]
 
         for trade in over_trades:

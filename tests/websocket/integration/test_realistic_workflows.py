@@ -85,8 +85,8 @@ class TestWebSocketWorkflows:
     ) -> None:
         """Given a server that sends invalid frames, When the reconnect iterator switches to a healthy server, Then recovery succeeds.
 
-        This simulates a real-world scenario where one endpoint is
-misbehaving and the client must transparently resume on a good one."""
+                This simulates a real-world scenario where one endpoint is
+        misbehaving and the client must transparently resume on a good one."""
         async with server_send_invalid_frames:
             ringbuffer = BytesRingBuffer(max_capacity=16, only_insert_unique=False)
             config = connection_config_factory(server_send_invalid_frames)

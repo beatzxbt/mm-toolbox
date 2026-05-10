@@ -58,8 +58,8 @@ class TestWsSingleAsyncIteration:
     ) -> None:
         """Given 4 broadcast messages, When iterating, Then the collected set matches the sent set regardless of order.
 
-        Single-connection iteration should preserve order in practice, but
-the important invariant is that no messages are lost."""
+                Single-connection iteration should preserve order in practice, but
+        the important invariant is that no messages are lost."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             payloads = [b"a", b"b", b"c", b"d"]
@@ -138,8 +138,8 @@ the important invariant is that no messages are lost."""
     ) -> None:
         """Given a burst of 10 messages, When iterated, Then all are collected without drops.
 
-        Bursts stress the ringbuffer and the frame-processing loop;
-missing messages here indicate a buffering bug."""
+                Bursts stress the ringbuffer and the frame-processing loop;
+        missing messages here indicate a buffering bug."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             payloads = [f"msg-{idx}".encode("utf-8") for idx in range(10)]

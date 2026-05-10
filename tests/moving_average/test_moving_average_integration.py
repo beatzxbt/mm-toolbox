@@ -35,6 +35,7 @@ MA_NAMES = ["SMA", "EMA", "WMA", "TEMA"]
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _reference_sma(values: np.ndarray, window: int) -> np.ndarray:
     """NumPy reference for SMA."""
     result = np.empty_like(values)
@@ -83,6 +84,7 @@ def _make_instance(ma_cls: Any, window: int, fast: bool = False) -> Any:
 # Layer 1 – Protocol compliance
 # ---------------------------------------------------------------------------
 
+
 class TestProtocolCompliance:
     """Verify every MA is an instance of ``MovingAverage``."""
 
@@ -117,6 +119,7 @@ class TestProtocolCompliance:
 # ---------------------------------------------------------------------------
 # Layer 2 – Parametrised identical-sequence tests
 # ---------------------------------------------------------------------------
+
 
 class TestIdenticalSequence:
     """Run the same price sequence through every MA."""
@@ -156,6 +159,7 @@ class TestIdenticalSequence:
 # ---------------------------------------------------------------------------
 # Layer 2 – Fast mode semantics
 # ---------------------------------------------------------------------------
+
 
 class TestFastMode:
     """Fast mode must disable history while preserving current-value accuracy."""
@@ -220,6 +224,7 @@ class TestFastMode:
 # Layer 3 – Realistic 1000-tick workflow
 # ---------------------------------------------------------------------------
 
+
 class TestRealisticWorkflow:
     """End-to-end 1000-tick price stream."""
 
@@ -265,6 +270,7 @@ class TestRealisticWorkflow:
 # ---------------------------------------------------------------------------
 # Layer 3 – Reference implementations (SMA, EMA, WMA)
 # ---------------------------------------------------------------------------
+
 
 class TestReferenceAccuracy:
     """Compare MA outputs to reference NumPy implementations."""

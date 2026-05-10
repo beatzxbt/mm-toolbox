@@ -18,8 +18,8 @@ from mm_toolbox.websocket.connection import ConnectionState, WsConnectionConfig
 class WebsocketClient(Protocol):
     """Protocol unifying WebSocket client implementations.
 
-    Both ``WsPool`` and ``WsSingle`` satisfy this interface, enabling
-generic consumers that do not need to know which variant is in use.
+        Both ``WsPool`` and ``WsSingle`` satisfy this interface, enabling
+    generic consumers that do not need to know which variant is in use.
     """
 
     async def __aenter__(self) -> Self:

@@ -58,8 +58,8 @@ class TestWsConnectionConfig:
     def test_connection_id_uniqueness(self) -> None:
         """Given 100 default factory calls, When IDs are compared, Then at least 95 are unique.
 
-        Collisions are statistically unlikely but possible; this test
-ensures the entropy source is functioning."""
+                Collisions are statistically unlikely but possible; this test
+        ensures the entropy source is functioning."""
         ids = {WsConnectionConfig.default("wss://test.com").conn_id for _ in range(100)}
         assert len(ids) >= 95
 

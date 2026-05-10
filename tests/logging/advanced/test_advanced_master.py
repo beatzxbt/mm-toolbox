@@ -50,6 +50,7 @@ class TestMasterLogger:
 
     def test_init_invalid_handler_class(self, default_config):
         """Given a handler that is not a ``BaseLogHandler`` subclass, construction raises ``TypeError``."""
+
         class InvalidHandler:
             pass
 
@@ -95,6 +96,4 @@ class TestMasterLogger:
         """Given a shut-down master, ``info()`` is silently ignored and does not raise."""
         logger = MasterLogger(config=default_config)
         logger.shutdown()
-        logger.info(
-            msg_bytes=b"msg after shutdown"
-        )
+        logger.info(msg_bytes=b"msg after shutdown")

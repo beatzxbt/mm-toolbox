@@ -62,8 +62,8 @@ class TestWsConnectionCallbacks:
     ) -> None:
         """Given a server that fragments outbound frames, When a message arrives, Then it is reassembled into the original payload.
 
-        Fragmentation is common with large messages or certain proxies; the
-driver must buffer and reassemble before surfacing to the ringbuffer."""
+                Fragmentation is common with large messages or certain proxies; the
+        driver must buffer and reassemble before surfacing to the ringbuffer."""
         async with server_with_fragmentation:
             conn = await connection_factory(server_with_fragmentation)
             payload = b"fragmented-message"
@@ -115,8 +115,8 @@ driver must buffer and reassemble before surfacing to the ringbuffer."""
     ) -> None:
         """Given a payload larger than max_frame_size, When it arrives, Then it is discarded and the ringbuffer stays empty.
 
-        This protects downstream consumers from unbounded memory growth
-when a peer sends unexpectedly large frames."""
+                This protects downstream consumers from unbounded memory growth
+        when a peer sends unexpectedly large frames."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             oversized = oversized_payload_factory()
@@ -190,8 +190,8 @@ when a peer sends unexpectedly large frames."""
     ) -> None:
         """Given an incomplete fragmented message, When disconnect occurs, Then the partial buffer is cleared.
 
-        Skipped because the underlying buffer is a cdef field inaccessible
-from Python."""
+                Skipped because the underlying buffer is a cdef field inaccessible
+        from Python."""
         pytest.skip("_unfin_msg_buffer is a cdef field inaccessible from Python")
 
     async def test_empty_payload_fast_path(
@@ -215,8 +215,8 @@ from Python."""
     ) -> None:
         """Given max_frame_size=1024, When payloads of 1023, 1024, and 1025 bytes arrive, Then only the 1025-byte payload is rejected.
 
-        Boundary testing is critical because off-by-one errors in frame-size
-logic can silently drop valid messages or admit oversized ones."""
+                Boundary testing is critical because off-by-one errors in frame-size
+        logic can silently drop valid messages or admit oversized ones."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             config.max_frame_size = 1024

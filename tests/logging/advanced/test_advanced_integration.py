@@ -84,6 +84,7 @@ def _wait_for_file_lines(path, expected: int, timeout_s: float = 5.0) -> list[st
 @pytest.fixture
 def ipc_path(tmp_path: Path):
     """Return a factory that builds unique IPC paths per test process."""
+
     def _make(name: str) -> str:
         suffix = f"{name}_{os.getpid()}"
         path = tmp_path / suffix

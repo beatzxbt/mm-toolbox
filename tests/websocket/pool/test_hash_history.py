@@ -58,8 +58,8 @@ class TestWsPoolHashHistory:
     ) -> None:
         """Given 3 connections and one broadcast, When the pool iterates, Then only one copy is yielded.
 
-        Without deduplication downstream consumers would see N copies of
-every message, breaking aggregation logic."""
+                Without deduplication downstream consumers would see N copies of
+        every message, breaking aggregation logic."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool = await WsPool.new(
@@ -89,8 +89,8 @@ every message, breaking aggregation logic."""
     ) -> None:
         """Given a consumed message in hash history, When the same payload is broadcast again, Then it is still deduplicated.
 
-        Consumption must not clear the hash entry; otherwise duplicate
-floods would pass through after the first read."""
+                Consumption must not clear the hash entry; otherwise duplicate
+        floods would pass through after the first read."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool = await WsPool.new(
@@ -121,8 +121,8 @@ floods would pass through after the first read."""
     ) -> None:
         """Given a tiny hash capacity, When enough unique messages pass through, Then an old payload can reappear.
 
-        Bounded history is required for memory safety; this test verifies
-that eviction works and does not permanently blacklist payloads."""
+                Bounded history is required for memory safety; this test verifies
+        that eviction works and does not permanently blacklist payloads."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool = await WsPool.new(
@@ -155,8 +155,8 @@ that eviction works and does not permanently blacklist payloads."""
     ) -> None:
         """Given two separate pool sessions, When the same payload is broadcast to each, Then both yield it because history does not leak across sessions.
 
-        Cross-session state leakage would cause the second pool to miss
-messages that were seen by the first."""
+                Cross-session state leakage would cause the second pool to miss
+        messages that were seen by the first."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_a = await WsPool.new(
@@ -232,8 +232,8 @@ messages that were seen by the first."""
     ) -> None:
         """Given an empty payload broadcast to 3 connections, When the pool iterates, Then only one empty bytes object is yielded.
 
-        Empty payloads are valid websocket frames; they must participate
-in deduplication like any other message."""
+                Empty payloads are valid websocket frames; they must participate
+        in deduplication like any other message."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool = await WsPool.new(

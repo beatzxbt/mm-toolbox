@@ -50,8 +50,8 @@ class TestWsPoolInterface:
     def test_callback_validation(self, config: WsConnectionConfig) -> None:
         """Given valid and invalid callbacks, Then only the valid one is accepted.
 
-        Invalid signatures (missing arg or too many args) must be caught
-early to prevent runtime frame-dispatch errors."""
+                Invalid signatures (missing arg or too many args) must be caught
+        early to prevent runtime frame-dispatch errors."""
         WsPool(config, on_message=noop_message_handler)
 
         def invalid_callback() -> None:
@@ -120,8 +120,8 @@ class TestWsPoolConnectionManagement:
     ) -> None:
         """Given a pool with an active connection, When that connection is closed and removed, Then the fastest connection is updated.
 
-        Stale references in the fast-connection slot would cause sends to
-a dead transport, so this update must happen promptly."""
+                Stale references in the fast-connection slot would cause sends to
+        a dead transport, so this update must happen promptly."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)

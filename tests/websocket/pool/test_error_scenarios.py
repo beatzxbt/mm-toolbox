@@ -48,8 +48,8 @@ class TestWsPoolErrorScenarios:
     ) -> None:
         """Given a pool connected to a close-frame server, When a message triggers disconnect, Then the pool remains CONNECTED because other connections stay alive.
 
-        This validates that a single failed connection does not bring
-down the entire pool."""
+                This validates that a single failed connection does not bring
+        down the entire pool."""
         async with server_send_close_frame:
             config = connection_config_factory(server_send_close_frame)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
@@ -70,8 +70,8 @@ down the entire pool."""
     ) -> None:
         """Given a server that sends malformed frames, When the pool receives them, Then it survives and stays CONNECTED.
 
-        Protocol errors must be isolated to the offending connection
-rather than tearing down the whole pool."""
+                Protocol errors must be isolated to the offending connection
+        rather than tearing down the whole pool."""
         async with server_send_invalid_frames:
             config = connection_config_factory(server_send_invalid_frames)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
@@ -109,8 +109,8 @@ rather than tearing down the whole pool."""
     ) -> None:
         """Given a pool where all connections were manually closed, When send_data is called, Then RuntimeError with 'No live connections' is raised.
 
-        This prevents silent no-ops when the caller expects a message to
-actually be transmitted."""
+                This prevents silent no-ops when the caller expects a message to
+        actually be transmitted."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
@@ -133,8 +133,8 @@ actually be transmitted."""
     ) -> None:
         """Given pending replacement tasks, When close() is called, Then it is safe and the pool ends in DISCONNECTED.
 
-        Closing while background coroutines are reconnecting is a common
-teardown race; this test ensures no unhandled exception propagates."""
+                Closing while background coroutines are reconnecting is a common
+        teardown race; this test ensures no unhandled exception propagates."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)

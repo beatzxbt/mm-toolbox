@@ -92,8 +92,8 @@ class TestWsSingleMessageCallbacks:
     ) -> None:
         """Given a callback that always raises, When a message arrives, Then the connection stays CONNECTED.
 
-        Callback exceptions must not tear down the transport; otherwise a
-buggy handler would kill the entire websocket session."""
+                Callback exceptions must not tear down the transport; otherwise a
+        buggy handler would kill the entire websocket session."""
         async with basic_server:
             config = connection_config_factory(basic_server)
 
@@ -115,8 +115,8 @@ buggy handler would kill the entire websocket session."""
     ) -> None:
         """Given a fragmenting server, When a message arrives, Then the callback receives the reassembled payload.
 
-        Fragmented frames must be buffered internally; delivering partial
-fragments to the callback would break message parsers."""
+                Fragmented frames must be buffered internally; delivering partial
+        fragments to the callback would break message parsers."""
         async with server_with_fragmentation:
             config = connection_config_factory(server_with_fragmentation)
             received: list[bytes] = []
@@ -139,8 +139,8 @@ fragments to the callback would break message parsers."""
     ) -> None:
         """Given one WsSingle with a callback and another with async iteration, When a message is broadcast, Then both receive it.
 
-        This validates that callback and iterator paths are independent
-and do not contend for the same ringbuffer slot."""
+                This validates that callback and iterator paths are independent
+        and do not contend for the same ringbuffer slot."""
         async with basic_server:
             config1 = connection_config_factory(basic_server)
             config2 = connection_config_factory(basic_server)
@@ -192,8 +192,8 @@ and do not contend for the same ringbuffer slot."""
     ) -> None:
         """Given a connected WsSingle, When set_on_connect is called, Then the update propagates to both the wrapper and the underlying connection.
 
-        Propagation is required so that reconnections use the new payload
-rather than the stale one."""
+                Propagation is required so that reconnections use the new payload
+        rather than the stale one."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             async with WsSingle(config) as ws:
@@ -212,8 +212,8 @@ rather than the stale one."""
     ) -> None:
         """Given an empty payload broadcast, When the callback fires, Then it receives an empty bytes object.
 
-        Empty frames are valid websocket messages and must not be silently
-dropped by the callback dispatcher."""
+                Empty frames are valid websocket messages and must not be silently
+        dropped by the callback dispatcher."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             received: list[bytes] = []

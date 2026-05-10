@@ -88,8 +88,8 @@ class TestWsPoolEvictionLogic:
     async def test_eviction_replaces_slowest_connection(self, monkeypatch) -> None:
         """Given three connections with varying latency, When eviction fires, Then the slowest is removed and the others remain.
 
-        Eviction must target the worst performer; removing a fast
-connection would degrade overall throughput."""
+                Eviction must target the worst performer; removing a fast
+        connection would degrade overall throughput."""
         config = WsPoolConfig(num_connections=3, evict_interval_s=1)
         pool = WsPool(
             config=SimpleNamespace(
@@ -175,8 +175,8 @@ connection would degrade overall throughput."""
     ) -> None:
         """Given real servers with different latencies, When eviction interval passes, Then the slowest is replaced.
 
-        Skipped because real timed eviction requires long waits and is
-covered by unit tests above."""
+                Skipped because real timed eviction requires long waits and is
+        covered by unit tests above."""
         pytest.skip(
             "Real timed eviction requires long waits and is covered by unit tests"
         )
@@ -189,8 +189,8 @@ covered by unit tests above."""
     ) -> None:
         """Given a pool where some replacements fail, When eviction runs, Then the pool survives with fewer than the target connections.
 
-        Partial failure is common during network blips; the pool must
-gracefully degrade rather than crash."""
+                Partial failure is common during network blips; the pool must
+        gracefully degrade rather than crash."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=3, evict_interval_s=60)
@@ -222,8 +222,8 @@ gracefully degrade rather than crash."""
     async def test_restart_count_logic(self) -> None:
         """Given pool sizes of 3 and 5, When restart counts are computed, Then they are 1 and 2 respectively.
 
-        Restart count scales with pool size to balance recovery speed
-against connection storm risk."""
+                Restart count scales with pool size to balance recovery speed
+        against connection storm risk."""
         config_3 = WsPoolConfig(num_connections=3, evict_interval_s=1)
         pool_3 = WsPool(
             config=SimpleNamespace(

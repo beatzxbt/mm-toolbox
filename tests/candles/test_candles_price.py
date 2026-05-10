@@ -32,9 +32,7 @@ class TestPriceCandlesSpecific:
         trade2 = Trade(time_ms=base_time + 1000, is_buy=True, price=100.02, size=1.0)
         price_candles.process_trade(trade2)
 
-        trade3 = Trade(
-            time_ms=base_time + 2000, is_buy=True, price=100.06, size=1.0
-        )
+        trade3 = Trade(time_ms=base_time + 2000, is_buy=True, price=100.06, size=1.0)
         price_candles.process_trade(trade3)
 
         assert len(price_candles) == 1

@@ -151,8 +151,8 @@ class TestWsConnectionSendOperations:
     ) -> None:
         """Given bytearray payloads of varying sizes (0 to 4096 bytes), When sent, Then all are received by the server.
 
-        This exercises internal buffer allocation paths that may behave
-differently for empty, small, and medium-large payloads."""
+                This exercises internal buffer allocation paths that may behave
+        differently for empty, small, and medium-large payloads."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             for size in [0, 1, 128, 1024, 4096]:

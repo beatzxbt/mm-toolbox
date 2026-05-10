@@ -74,7 +74,9 @@ class TestWmaNext:
         post_values = ma.get_values()
         assert post_len == pre_len
         np.testing.assert_array_equal(pre_values, post_values)
-        assert ma.get_value() == pytest.approx(np.dot([1, 2, 3], [1, 2, 3]) / 6, abs=1e-12)
+        assert ma.get_value() == pytest.approx(
+            np.dot([1, 2, 3], [1, 2, 3]) / 6, abs=1e-12
+        )
 
 
 class TestWmaUpdate:
@@ -113,11 +115,14 @@ class TestWmaUpdate:
         ma.update(4.0)
         ma.update(5.0)
         values = ma.get_values()
-        expected = np.array([
-            np.dot([1, 2, 3], [1, 2, 3]) / 6,
-            np.dot([1, 2, 3], [2, 3, 4]) / 6,
-            np.dot([1, 2, 3], [3, 4, 5]) / 6,
-        ], dtype=np.float64)
+        expected = np.array(
+            [
+                np.dot([1, 2, 3], [1, 2, 3]) / 6,
+                np.dot([1, 2, 3], [2, 3, 4]) / 6,
+                np.dot([1, 2, 3], [3, 4, 5]) / 6,
+            ],
+            dtype=np.float64,
+        )
         np.testing.assert_allclose(values, expected, rtol=1e-12)
 
 

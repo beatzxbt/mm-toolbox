@@ -53,8 +53,8 @@ class TestWsSingleErrorScenarios:
     async def test_connection_timeout(self) -> None:
         """Given an unreachable host, When connect is attempted with a short timeout, Then it fails fast.
 
-        Fast failure is important so that unresponsive endpoints do not
-block the event loop indefinitely."""
+                Fast failure is important so that unresponsive endpoints do not
+        block the event loop indefinitely."""
         config = WsConnectionConfig.default("wss://127.0.0.1:2")
         config.wss_url = "ws://127.0.0.1:2"
         ws = WsSingle(config)
@@ -96,8 +96,8 @@ block the event loop indefinitely."""
     ) -> None:
         """Given 3 rapid open/close cycles, When completed, Then no resources are leaked.
 
-        Repeated churn is a common pattern in reconnect-heavy clients;
-this guards against fd and task leaks."""
+                Repeated churn is a common pattern in reconnect-heavy clients;
+        this guards against fd and task leaks."""
         async with basic_server:
             for _ in range(3):
                 config = connection_config_factory(basic_server)
@@ -142,8 +142,8 @@ this guards against fd and task leaks."""
     ) -> None:
         """Given auto_reconnect=True and a server that closes, When the URL is switched to a healthy server, Then reconnection succeeds and messages flow again.
 
-        This simulates a real-world failover where the primary endpoint
-becomes unhealthy and the client must transparently resume."""
+                This simulates a real-world failover where the primary endpoint
+        becomes unhealthy and the client must transparently resume."""
         async with server_send_close_frame:
             config = connection_config_factory(
                 server_send_close_frame, auto_reconnect=True

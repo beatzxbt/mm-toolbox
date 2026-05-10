@@ -124,9 +124,7 @@ def _print_throughput_summary(results, trade_count: int) -> None:
             if mean_ns > 0:
                 ns_per_trade = mean_ns / trade_count
                 trades_per_sec = trade_count * 1e9 / mean_ns
-                print(
-                    f"{name:>20} {ns_per_trade:>15.2f} {trades_per_sec:>15,.0f}"
-                )
+                print(f"{name:>20} {ns_per_trade:>15.2f} {trades_per_sec:>15,.0f}")
     print("=" * 80)
 
 

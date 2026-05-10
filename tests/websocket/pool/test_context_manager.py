@@ -87,8 +87,8 @@ class TestWsPoolContextManager:
     ) -> None:
         """Given a rejecting server, When the pool is entered, Then it starts but reports zero healthy connections.
 
-        This documents the behavior where handshake succeeds but the
-server immediately closes, leaving the pool empty but not crashed."""
+                This documents the behavior where handshake succeeds but the
+        server immediately closes, leaving the pool empty but not crashed."""
         async with server_reject_connections:
             config = connection_config_factory(server_reject_connections)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)

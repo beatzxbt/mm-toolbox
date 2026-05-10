@@ -40,8 +40,8 @@ class TestWsPoolConfig:
     def test_validation_boundaries(self) -> None:
         """Given edge-case inputs, When validation runs, Then out-of-range values raise ValueError.
 
-        Minimum thresholds exist to prevent nonsensical configs (e.g., a
-pool with one connection or zero eviction interval)."""
+                Minimum thresholds exist to prevent nonsensical configs (e.g., a
+        pool with one connection or zero eviction interval)."""
         WsPoolConfig(num_connections=2, evict_interval_s=1, hash_capacity=1)
 
         with pytest.raises(ValueError):

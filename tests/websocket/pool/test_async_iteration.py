@@ -69,8 +69,8 @@ class TestWsPoolAsyncIteration:
     ) -> None:
         """Given a pool with 2 connections, When multiple messages are broadcast, Then all arrive even if ordering varies.
 
-        Cross-connection scheduling means order is not guaranteed; the
-important invariant is completeness, not sequence."""
+                Cross-connection scheduling means order is not guaranteed; the
+        important invariant is completeness, not sequence."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
@@ -148,8 +148,8 @@ important invariant is completeness, not sequence."""
     ) -> None:
         """Given a closed pool, When __anext__ is called, Then it returns within 1.5 seconds.
 
-        This prevents the iterator from hanging indefinitely when the
-underlying connections have all been torn down."""
+                This prevents the iterator from hanging indefinitely when the
+        underlying connections have all been torn down."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)

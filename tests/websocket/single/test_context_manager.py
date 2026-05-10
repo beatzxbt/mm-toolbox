@@ -113,8 +113,8 @@ class TestWsSingleAsyncContextManager:
     ) -> None:
         """Given a connection whose close() raises, When the context exits, Then the exception is swallowed and state ends DISCONNECTED.
 
-        Close failures must not propagate into user code; otherwise a
-network blip during teardown would crash the application."""
+                Close failures must not propagate into user code; otherwise a
+        network blip during teardown would crash the application."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             ws = WsSingle(config)
@@ -191,8 +191,8 @@ network blip during teardown would crash the application."""
     ) -> None:
         """Given auto_reconnect=True and a failing reconnect, When __aenter__ runs, Then it raises RuntimeError rather than hanging.
 
-        This prevents indefinite hangs when the server is unreachable and
-the reconnect iterator would loop forever."""
+                This prevents indefinite hangs when the server is unreachable and
+        the reconnect iterator would loop forever."""
         async with basic_server:
             config = connection_config_factory(basic_server, auto_reconnect=True)
 

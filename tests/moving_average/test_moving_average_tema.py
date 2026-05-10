@@ -190,8 +190,12 @@ class TestTemaFastVsNormalMode:
 
     def test_fast_mode_still_computes_value(self):
         """Given identical inputs, fast and normal modes produce the same current value."""
-        tema_fast = TimeExponentialMovingAverage(window=2, half_life_s=1.0, is_fast=True)
-        tema_norm = TimeExponentialMovingAverage(window=2, half_life_s=1.0, is_fast=False)
+        tema_fast = TimeExponentialMovingAverage(
+            window=2, half_life_s=1.0, is_fast=True
+        )
+        tema_norm = TimeExponentialMovingAverage(
+            window=2, half_life_s=1.0, is_fast=False
+        )
 
         init_vals = np.array([0.0, 0.0], dtype=np.float64)
         tema_fast.initialize(init_vals.copy())

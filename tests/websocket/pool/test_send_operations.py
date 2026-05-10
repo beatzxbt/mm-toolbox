@@ -50,8 +50,8 @@ class TestWsPoolSendOperations:
     ) -> None:
         """Given a pool with 3 connections, When only_fastest=True, Then exactly one server-side receive is recorded.
 
-        Fastest-only routing minimises outbound bandwidth for idempotent
-messages like heartbeats or subscriptions."""
+                Fastest-only routing minimises outbound bandwidth for idempotent
+        messages like heartbeats or subscriptions."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=3, evict_interval_s=60)
@@ -75,8 +75,8 @@ messages like heartbeats or subscriptions."""
     ) -> None:
         """Given a pool with 3 connections, When only_fastest=False, Then the server receives one copy per connection.
 
-        Multicast is used for state-changing messages that must reach all
-endpoints (e.g., subscription updates)."""
+                Multicast is used for state-changing messages that must reach all
+        endpoints (e.g., subscription updates)."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=3, evict_interval_s=60)
@@ -99,8 +99,8 @@ endpoints (e.g., subscription updates)."""
     ) -> None:
         """Given a pool that has not been entered, When send_data is called, Then RuntimeError is raised.
 
-        This prevents accidental no-ops when the caller forgets to start
-the pool before sending."""
+                This prevents accidental no-ops when the caller forgets to start
+        the pool before sending."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)

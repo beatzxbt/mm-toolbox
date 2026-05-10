@@ -209,8 +209,8 @@ class TestMessageFlowE2E:
     ) -> None:
         """Given a live connection, When 1000 messages are sent rapidly, Then all 1000 echoes are collected without drops.
 
-        Large bursts stress the ringbuffer and the async frame-processing
-loop; missing messages here indicate a buffering or backpressure bug."""
+                Large bursts stress the ringbuffer and the async frame-processing
+        loop; missing messages here indicate a buffering or backpressure bug."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             collected: list[bytes] = []
@@ -242,8 +242,8 @@ loop; missing messages here indicate a buffering or backpressure bug."""
     ) -> None:
         """Given max_frame_size=1024, When payloads of 1023 and 1024 bytes are sent, Then both round-trip correctly.
 
-        Boundary testing near the frame-size limit catches off-by-one
-errors in the size-check logic."""
+                Boundary testing near the frame-size limit catches off-by-one
+        errors in the size-check logic."""
         async with basic_server:
             ringbuffer = BytesRingBuffer(max_capacity=16, only_insert_unique=False)
             config = connection_config_factory(basic_server)
@@ -302,8 +302,8 @@ errors in the size-check logic."""
     ) -> None:
         """Given auto_reconnect=True, When the previous connection closes, Then the iterator yields a fresh usable connection.
 
-        This validates the iterator pattern rather than transparent
-auto-reconnect inside a single WsConnection instance."""
+                This validates the iterator pattern rather than transparent
+        auto-reconnect inside a single WsConnection instance."""
         async with basic_server:
             ringbuffer = BytesRingBuffer(max_capacity=16, only_insert_unique=False)
             config = connection_config_factory(basic_server, auto_reconnect=True)
@@ -328,8 +328,8 @@ auto-reconnect inside a single WsConnection instance."""
     ) -> None:
         """Given 500 messages sent while latency pings run every 50 ms, Then all messages are collected and the connection stays CONNECTED.
 
-        Concurrent ping and data traffic exercises the frame multiplexing
-path; dropped messages or disconnects here indicate a race condition."""
+                Concurrent ping and data traffic exercises the frame multiplexing
+        path; dropped messages or disconnects here indicate a race condition."""
         async with basic_server:
             ringbuffer = BytesRingBuffer(max_capacity=128, only_insert_unique=False)
             config = connection_config_factory(basic_server)
@@ -440,11 +440,11 @@ class TestPoolE2E:
     ) -> None:
         """Given a rejecting server, When a pool starts, Then it starts without exception but has zero healthy connections after the dust settles.
 
-        The local reject server accepts the websocket handshake before
-sending a close frame, so ws_connect succeeds and WsConnection.new
-returns normally. The connections then immediately disconnect. We
-verify the pool still starts (no exception) but has zero healthy
-connections after the dust settles."""
+                The local reject server accepts the websocket handshake before
+        sending a close frame, so ws_connect succeeds and WsConnection.new
+        returns normally. The connections then immediately disconnect. We
+        verify the pool still starts (no exception) but has zero healthy
+        connections after the dust settles."""
         async with server_reject_connections:
             pool_config = WsPoolConfig(num_connections=3, evict_interval_s=60)
             config = connection_config_factory(server_reject_connections)
@@ -462,8 +462,8 @@ connections after the dust settles."""
     ) -> None:
         """Given a multicast send to 3 connections, When the pool iterates, Then only one copy of the message is yielded.
 
-        Hash deduplication is critical for pools subscribed to the same
-exchange stream; without it downstream consumers would see N copies."""
+                Hash deduplication is critical for pools subscribed to the same
+        exchange stream; without it downstream consumers would see N copies."""
         async with basic_server:
             pool_config = WsPoolConfig(num_connections=3, evict_interval_s=60)
             config = connection_config_factory(basic_server)
@@ -576,8 +576,8 @@ class TestErrorResilienceE2E:
     ) -> None:
         """Given 1000 in-flight messages, When close() is called immediately, Then no crash occurs and the final state is DISCONNECTED.
 
-        Abrupt close during heavy traffic is a common teardown scenario;
-this test guards against use-after-free or task-leak bugs."""
+                Abrupt close during heavy traffic is a common teardown scenario;
+        this test guards against use-after-free or task-leak bugs."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             for i in range(1000):
@@ -593,8 +593,8 @@ this test guards against use-after-free or task-leak bugs."""
     ) -> None:
         """Given an on_message callback that always raises, When a message arrives, Then the exception is swallowed and the connection stays CONNECTED.
 
-        Callback exceptions must not propagate into the frame-processing
-loop and tear down the transport."""
+                Callback exceptions must not propagate into the frame-processing
+        loop and tear down the transport."""
         async with basic_server:
             config = connection_config_factory(basic_server)
 
@@ -617,8 +617,8 @@ loop and tear down the transport."""
     ) -> None:
         """Given 100 open/close cycles, When memory snapshots are compared, Then growth is bounded below 5 MB.
 
-        Unbounded growth across repeated lifecycles indicates leaked
-tasks, buffers, or transport references."""
+                Unbounded growth across repeated lifecycles indicates leaked
+        tasks, buffers, or transport references."""
         async with basic_server:
             tracemalloc.start()
             gc.collect()
@@ -658,8 +658,8 @@ class TestStressE2E:
     ) -> None:
         """Given 100 rapid open/close cycles, When file-descriptor limits are checked, Then they are unchanged.
 
-        This is a stricter regression guard than the 50-cycle E2E test;
-it validates that we are not leaking sockets or asyncio transports."""
+                This is a stricter regression guard than the 50-cycle E2E test;
+        it validates that we are not leaking sockets or asyncio transports."""
         async with basic_server:
             initial_fd = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
             for i in range(100):
@@ -679,8 +679,8 @@ it validates that we are not leaking sockets or asyncio transports."""
     ) -> None:
         """Given a 5-second burst of messages, When the collector drains, Then throughput exceeds 10 messages per second.
 
-        This is a coarse sanity check rather than a benchmark; it mainly
-guards against severe regressions in frame-parsing or ringbuffer throughput."""
+                This is a coarse sanity check rather than a benchmark; it mainly
+        guards against severe regressions in frame-parsing or ringbuffer throughput."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             ringbuffer = conn.get_ringbuffer()
