@@ -1,5 +1,9 @@
 """High-performance trading and market data toolkit.
 
+Provides modular components for quantitative trading systems including
+logging, orderbook management, WebSocket connections, ring buffers,
+moving averages, and weight calculations.
+
 Import submodules explicitly, e.g.:
 
 - mm_toolbox.candles

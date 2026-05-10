@@ -1,4 +1,8 @@
-"""Discord webhook log handler for standard logging."""
+"""Discord webhook handler for the standard logger.
+
+Pushes buffered log messages to a Discord channel via HTTP POST,
+chunking large batches to stay within Discord message limits.
+"""
 
 import asyncio
 

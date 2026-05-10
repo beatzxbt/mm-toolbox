@@ -1,4 +1,8 @@
-"""Telegram bot log handler for standard logging."""
+"""Telegram bot handler for the standard logger.
+
+Pushes buffered log messages to a Telegram chat via the Bot API,
+chunking large batches to respect Telegram message size limits.
+"""
 
 import asyncio
 

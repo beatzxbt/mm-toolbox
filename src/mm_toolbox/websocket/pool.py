@@ -67,7 +67,20 @@ class WsPool:
         on_message: Callable[[bytes], None] | None = None,
         pool_config: WsPoolConfig | None = None,
     ) -> None:
-        """Initialize WebSocket pool with configuration and message handler."""
+        """Initialize a pool of WebSocket connections.
+
+        Args:
+            config (WsConnectionConfig): Base connection configuration.
+            on_message (Callable[[bytes], None], optional): Single-argument
+                callback invoked for each unique received message.
+            pool_config (WsPoolConfig, optional): Pool-specific settings.
+                Defaults to ``WsPoolConfig.default()``.
+
+        Raises:
+            ValueError: If ``on_message`` does not accept exactly one ``bytes``
+                argument.
+
+        """
         self._config: WsConnectionConfig = config
         self._pool_config: WsPoolConfig = pool_config or WsPoolConfig.default()
         self._ringbuffer: BytesRingBuffer = BytesRingBuffer(
@@ -161,7 +174,12 @@ class WsPool:
             next_eviction_time += self._pool_config.evict_interval_s
 
     def _update_fast_connection(self) -> None:
-        """Update the fastest connection based on current latencies."""
+        """Refresh the cached fastest connection by latency.
+
+        Scans all connected sockets and stores the one with the lowest
+        ``get_latency_ms()`` value.
+
+        """
         if not self._conns:
             self._fast_conn = None
             return
@@ -236,7 +254,12 @@ class WsPool:
                 conn.send_data(msg)
 
     async def _open_new_conn(self) -> None:
-        """Establishes a new WebSocket connection and adds it to the connection pool."""
+        """Open a new WebSocket connection and add it to the pool.
+
+        Automatically derives a safe connection config from the base config
+        and updates the fast-connection cache on success.
+
+        """
         try:
             if self._should_stop:
                 return
@@ -265,7 +288,12 @@ class WsPool:
             _logger.warning("WebSocket connection failed: %s", exc)
 
     def set_on_connect(self, on_connect: list[bytes]) -> None:
-        """Sets the on_connect callback for all connections in the pool."""
+        """Update the messages sent when new connections open.
+
+        Args:
+            on_connect (list[bytes]): Payloads to transmit on connect.
+
+        """
         self._config.on_connect = on_connect
         for conn in self._conns.values():
             conn.set_on_connect(on_connect)
@@ -302,19 +330,39 @@ class WsPool:
         return pool
 
     def get_state(self) -> ConnectionState:
-        """Returns the current pool state."""
+        """Return the current aggregate pool state.
+
+        Returns:
+            ConnectionState: Overall pool state.
+
+        """
         return self._pool_state
 
     def get_config(self) -> WsConnectionConfig:
-        """Get connection configuration."""
+        """Return the base connection configuration.
+
+        Returns:
+            WsConnectionConfig: Configuration shared by all pool connections.
+
+        """
         return self._config
 
     def get_connection_count(self) -> int:
-        """Get number of active connections."""
+        """Return the number of currently connected sockets.
+
+        Returns:
+            int: Active connection count.
+
+        """
         return sum(1 for conn in self._conns.values() if conn.is_connected())
 
     def get_latency_ms(self) -> float:
-        """Return minimum latency across all active connections."""
+        """Return the lowest latency among active connections.
+
+        Returns:
+            float: Minimum latency in milliseconds, or ``0.0`` when empty.
+
+        """
         if not self._conns:
             return 0.0
         latencies = [
@@ -325,7 +373,12 @@ class WsPool:
         return min(latencies) if latencies else 0.0
 
     def get_seq_id(self) -> int:
-        """Return maximum seq_id across all active connections."""
+        """Return the highest sequence ID across active connections.
+
+        Returns:
+            int: Maximum ``seq_id``, or ``0`` when empty.
+
+        """
         if not self._conns:
             return 0
         seq_ids = [
@@ -334,7 +387,7 @@ class WsPool:
         return max(seq_ids) if seq_ids else 0
 
     def close(self) -> None:
-        """Shuts down all WebSocket connections and stops the eviction task."""
+        """Shut down the pool, cancel eviction, and close all connections."""
         self._should_stop = True
         self._pool_state = ConnectionState.DISCONNECTED
         if self._eviction_task is not None:

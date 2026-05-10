@@ -1,4 +1,8 @@
-"""Discord webhook log handler for advanced logging."""
+"""Discord webhook handler for the advanced logger.
+
+Pushes batches of ``PyLog`` entries to a Discord channel via HTTP POST,
+with rate limiting and message chunking to stay within platform limits.
+"""
 
 from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler, _RateLimiter
 from mm_toolbox.logging.advanced.pylog import PyLog

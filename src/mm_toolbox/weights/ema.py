@@ -1,4 +1,8 @@
-"""Exponential moving average weight calculations."""
+"""Exponential moving average (EMA) weight calculations.
+
+Provides ``ema_weights`` for generating normalized or raw EMA-like
+weight arrays over a fixed window.
+"""
 
 import numpy as np
 from numpy.typing import NDArray

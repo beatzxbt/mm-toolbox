@@ -52,7 +52,14 @@ class Logger:
             atexit.register(self._atexit_flush)
 
     def _should_flush(self) -> bool:
-        """Check if buffer should be flushed based on config triggers."""
+        """Determine whether the internal buffer meets flush criteria.
+
+        Evaluates size and interval thresholds configured on the logger.
+
+        Returns:
+            bool: True if the buffer should be flushed now.
+
+        """
         if (
             self._config.flush_on_size
             and len(self._buffer) >= self._config.flush_size_threshold
@@ -108,13 +115,14 @@ class Logger:
             sys.stderr.write(traceback.format_exc())
 
     def flush(self) -> None:
-        """Explicitly flush the buffer."""
+        """Flush the current buffer to all handlers immediately."""
         self._flush()
 
     def shutdown(self) -> None:
-        """Shuts down the logger, ensuring all buffered messages are flushed
+        """Shut down the logger and release all resources.
 
-        and handlers are closed.
+        Flushes any remaining buffered messages and closes attached handlers.
+
         """
         self._is_running = False
         self._flush()
@@ -184,25 +192,40 @@ class Logger:
             self._process_log(LogLevel.ERROR, msg)
 
     def set_log_level(self, level: LogLevel) -> None:
-        """Modify the logger's base log level at runtime.
+        """Change the minimum log level at runtime.
 
         Args:
-            level (LogLevel): The new base log level.
+            level (LogLevel): New base log level.
 
         """
         self.debug(f"Changing base log level from {self._config.base_level} to {level}")
         self._config.base_level = level
 
     def is_running(self) -> bool:
-        """Check if the logger is running."""
+        """Return whether the logger is still active.
+
+        Returns:
+            bool: True if the logger has not been shut down.
+
+        """
         return self._is_running
 
     def get_name(self) -> str:
-        """Get the name of the logger."""
+        """Return the logger's name.
+
+        Returns:
+            str: Logger name provided at initialization.
+
+        """
         return self._name
 
     def get_config(self) -> LoggerConfig:
-        """Get the configuration of the logger."""
+        """Return the active logger configuration.
+
+        Returns:
+            LoggerConfig: Current configuration instance.
+
+        """
         return self._config
 
     def __enter__(self):

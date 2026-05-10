@@ -17,6 +17,11 @@ class BaseLogHandler(ABC):
     """
 
     def __init__(self):
+        """Initialize shared handler resources.
+
+        Sets up lazy JSON encoding, HTTP session, and error callback slots.
+
+        """        
         self._json_encode = None
         self._http_session = None
         self._on_error: Callable[[BaseException, str], None] | None = None
@@ -24,14 +29,24 @@ class BaseLogHandler(ABC):
 
     @property
     def json_encode(self):
-        """Lazily initialize the JSON encoder."""
+        """Lazy JSON encoder.
+
+        Returns:
+            Callable[[object], bytes]: msgspec JSON encode function.
+
+        """
         if self._json_encode is None:
             self._json_encode = msgspec.json.Encoder().encode
         return self._json_encode
 
     @property
     def http_session(self):
-        """Lazily initialize the HTTP session."""
+        """Lazy aiohttp client session.
+
+        Returns:
+            aiohttp.ClientSession: Reusable HTTP session.
+
+        """
         if self._http_session is None:
             self._http_session = aiohttp.ClientSession()
         return self._http_session

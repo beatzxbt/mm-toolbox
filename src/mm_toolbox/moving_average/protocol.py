@@ -1,3 +1,9 @@
+"""Protocol definition for moving average implementations.
+
+Unifies all moving average variants behind a common interface so
+callers can swap implementations without changing consumer code.
+"""
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable

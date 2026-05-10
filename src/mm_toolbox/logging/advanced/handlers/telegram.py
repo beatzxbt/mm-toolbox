@@ -1,4 +1,8 @@
-"""Telegram bot log handler for advanced logging."""
+"""Telegram bot handler for the advanced logger.
+
+Pushes batches of ``PyLog`` entries to a Telegram chat via the Bot API,
+with rate limiting and per-message chunking for size compliance.
+"""
 
 from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler, _RateLimiter
 from mm_toolbox.logging.advanced.pylog import PyLog
