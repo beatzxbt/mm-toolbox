@@ -12,8 +12,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     Registers ``--run-live`` and ``--live-timeout`` so that network-dependent
     tests can be skipped by default and enabled on demand.
     """
-    Returns:
-        None
     try:
         parser.addoption(
             "--run-live",
