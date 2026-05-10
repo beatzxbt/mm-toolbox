@@ -147,7 +147,13 @@ cdef class WorkerLogger:
                 return
 
             batch_len = self._batch_writer.length()
+            # Check for overflow in data_len calculation
+            if batch_len > <u32>(0xFFFFFFFF) - (4 + self._len_name + 4):
+                raise ValueError("Batch data length would overflow")
             data_len = 4 + self._len_name + 4 + batch_len
+            # Check for overflow in writer allocation size
+            if data_len > <u32>(0xFFFFFFFF) - (1 + 8 + 4):
+                raise ValueError("Writer allocation would overflow")
             writer = BinaryWriter(1 + 8 + 4 + data_len)
             writer.write_u8(<u8>MessageType.LOG)
             writer.write_u64(time_ns())
@@ -192,7 +198,13 @@ cdef class WorkerLogger:
             return
 
         batch_len = self._batch_writer.length()
+        # Check for overflow in data_len calculation
+        if batch_len > <u32>(0xFFFFFFFF) - (4 + self._len_name + 4):
+            raise ValueError("Batch data length would overflow")
         data_len = 4 + self._len_name + 4 + batch_len
+        # Check for overflow in writer allocation size
+        if data_len > <u32>(0xFFFFFFFF) - (1 + 8 + 4):
+            raise ValueError("Writer allocation would overflow")
         writer = BinaryWriter(1 + 8 + 4 + data_len)
         writer.write_u8(<u8>MessageType.LOG)
         writer.write_u64(time_ns())

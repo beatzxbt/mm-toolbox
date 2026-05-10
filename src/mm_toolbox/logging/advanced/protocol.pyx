@@ -111,11 +111,20 @@ cdef class BinaryWriter:
 
         Raises:
             MemoryError: If reallocation fails.
+            ValueError: If capacity would overflow.
         """
         cdef u32 new_size
         cdef unsigned char* new_buffer
+        
+        # Check for overflow in _pos + needed
+        if needed > <u32>(0xFFFFFFFF) - self._pos:
+            raise ValueError("Buffer size would overflow u32")
+        
         if self._pos + needed > self._capacity:
             new_size = max(self._capacity * 2, self._pos + needed)
+            # Check for overflow in new_size calculation
+            if new_size < self._capacity or new_size < needed:
+                raise ValueError("Buffer capacity overflow")
             new_buffer = <unsigned char*>realloc(
                 self._buffer, new_size * sizeof(unsigned char)
             )
