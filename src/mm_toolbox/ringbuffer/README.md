@@ -58,6 +58,19 @@ Producer                       Consumer
 └──────────────────────────────┘
 ```
 
+### Shared memory (MPSC)
+
+`ShmMpscProducer` and `ShmMpscConsumer` provide a multi-producer/single-consumer
+shared-memory ring buffer built on a sharded sub-ring architecture. Each
+sub-ring is a complete SPSC queue; producers pick a sub-ring round-robin via an
+atomic counter while the consumer round-robins across all sub-rings for fairness.
+
+- File-backed mmap with power-of-two capacity per sub-ring.
+- Length-prefixed messages.
+- Blocking consumer loops with spin/yield semantics.
+- `insert_batch` on the producer batches multiple items into a single sub-ring
+  with one commit.
+
 ## In-process buffers
 
 ### BytesRingBuffer
@@ -83,13 +96,20 @@ Producer                       Consumer
 - Accepts `int`/`uint` (1/2/4/8 bytes) and `float` (4/8 bytes).
 - Best for numeric streams where NumPy interop and slicing are important.
 
-## Shared memory buffer (SPSC)
+## Shared memory buffers
 
-### shm
+### SPSC (`ShmSpscProducer` / `ShmSpscConsumer`)
 - File-backed mmap ring buffer for bytes.
 - Single-producer/single-consumer only.
 - Length-prefixed messages with power-of-two capacity.
 - Blocking consumer loops with spin/yield semantics.
+
+### MPSC (`ShmMpscProducer` / `ShmMpscConsumer`)
+- File-backed mmap ring buffer for bytes.
+- Multi-producer/single-consumer via sharded sub-rings.
+- Length-prefixed messages with power-of-two capacity per sub-ring.
+- Blocking consumer loops with spin/yield semantics.
+- Producer supports `insert`, `insert_char`, and `insert_batch`.
 
 ## Quick start
 
@@ -111,11 +131,21 @@ all_items = rb.consume_all() # [b"beta"]
 ```python
 from mm_toolbox.ringbuffer import NumericRingBuffer
 
-rb = NumericRingBuffer(max_capacity=8, dtype=float)
+rb = NumericRingBuffer(max_capacity=8, dtype=np.float64)
 rb.insert(1.0)
 rb.insert(2.0)
 values = rb.unwrapped()
 ```
+
+## Protocols
+
+The module exports protocol types for type-checked abstractions:
+
+- `RingBufferProtocol` – common interface for all ring buffers.
+- `AsyncRingBufferProtocol` – async-capable ring buffer interface.
+- `RingBufferConsumerProtocol` – consumer-side operations.
+- `RingBufferProducerProtocol` – producer-side operations.
+- `SupportsAsyncConsume` – trait for async consumption.
 
 ## Behavior notes
 

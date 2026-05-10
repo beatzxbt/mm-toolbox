@@ -18,6 +18,10 @@ rounder = Rounder(config)
 bid = rounder.bid(100.1234)
 ask = rounder.ask(100.1234)
 size = rounder.size(0.9876)
+
+# Vectorized example
+prices = np.array([100.1234, 100.5678, 101.0012])
+bids = rounder.bids(prices)
 ```
 
 ## Operations

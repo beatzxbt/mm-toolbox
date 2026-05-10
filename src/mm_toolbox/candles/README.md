@@ -6,8 +6,8 @@ exposes a live, in-progress `latest_candle`.
 
 ## Core concepts
 
-- `Trade`: time_ms, side, price, size
-- `Candle`: OHLC, buy/sell size + volume, VWAP (`vwap`), trade count, trade list
+- `Trade`: time_ms, side, price, size (a `msgspec.Struct`)
+- `Candle`: OHLC, buy/sell size + volume, VWAP (`vwap`), trade count, trade list (a `msgspec.Struct`)
 - `BaseCandles`: shared ring buffer, initialization, async notification
 
 ## Basic usage
@@ -15,7 +15,7 @@ exposes a live, in-progress `latest_candle`.
 ```python
 from mm_toolbox.candles import Trade, TimeCandles
 
-candles = TimeCandles(secs_per_bucket=1.0, num_candles=1000)
+candles = TimeCandles(secs_per_bucket=1.0, num_candles=1000, store_trades=True)
 candles.process_trade(
     Trade(time_ms=1712150000000, is_buy=True, price=100.25, size=0.1)
 )
@@ -87,5 +87,6 @@ completed candles into a ring buffer.
 
 - Stale trades (time_ms older than the last candle close) are ignored.
 - `num_candles` caps the ring buffer; older candles are dropped.
-- Each candle stores a list of trades; tune `num_candles` for memory.
-- `initialize(trades)` expects a non-empty list of `Trade` objects.
+- `store_trades=True` keeps the trade list in each candle; tune `num_candles` for memory.
+- `initialize(trades)` explicitly sets the baseline from a non-empty list of `Trade` objects.
+- `Trade` and `Candle` are lightweight `msgspec.Struct` instances.

@@ -100,7 +100,7 @@ Both implementations provide matching read-side helpers:
 - `get_price_impact(size, is_buy, is_base_currency=True)`
 - `get_size_for_price_impact_bps(impact_bps, is_buy, is_base_currency=True)`
 - `does_bbo_price_change(bid_price, ask_price)`
-- `does_bbo_cross(bid_price, ask_price)`
+- `is_bbo_crossed(bid_price, ask_price)`
 
 Ingestion order (both implementations):
 - `consume_snapshot(asks, bids)`
@@ -109,6 +109,8 @@ Ingestion order (both implementations):
 
 Advanced-only helpers:
 - `get_bids_numpy(depth=None)`, `get_asks_numpy(depth=None)`
+- `consume_snapshot_numpy`, `consume_deltas_numpy`
+- `clear()`
 - Buffer constructors: `create_orderbook_level*`, `create_orderbook_levels_from_list/numpy`
 
 ## Quick start
@@ -118,7 +120,7 @@ Advanced-only helpers:
 ```python
 from mm_toolbox.orderbook.standard import Orderbook
 
-ob = Orderbook()
+ob = Orderbook(tick_size=0.01, lot_size=0.001, size=500)
 ob.consume_snapshot(asks, bids)
 ob.consume_deltas(asks_delta, bids_delta)
 best_bid, best_ask = ob.get_bbo()
@@ -129,11 +131,13 @@ best_bid, best_ask = ob.get_bbo()
 ```python
 from mm_toolbox.orderbook.advanced import Orderbook
 
-ob = Orderbook()
+ob = Orderbook(tick_size=0.01, lot_size=0.001, num_levels=1000)
 ob.consume_snapshot(asks, bids)
 ob.consume_deltas(asks_delta, bids_delta)
 best_bid, best_ask = ob.get_bbo()
 ```
+
+**Note:** The advanced orderbook must be imported from `mm_toolbox.orderbook.advanced`.
 
 ## Behavior notes
 

@@ -5,9 +5,11 @@ optimized ring buffer storage.
 
 ## Core concepts
 
+- `MovingAverageProtocol`: shared interface implemented by all moving averages.
 - `MovingAverage`: common interface with `initialize`, `next`, `update`, and accessors.
 - `window`: number of observations that define the smoothing horizon.
 - `is_fast`: disables history storage to reduce memory and overhead.
+- `get_value()`: primary accessor that returns the current average value.
 
 ## Basic usage
 
@@ -49,6 +51,7 @@ what-if evaluation or plotting.
 
 ## Behavior notes
 
-- `is_fast=True` disables history; `get_values`, iteration, and indexing raise.
+- `is_fast=True` disables history; `get_values`, iteration, indexing, and `__len__` raise.
 - `initialize(values)` sets the baseline and warms the average.
 - `update(value)` mutates state; `next(value)` does not.
+- `get_value()` is the primary accessor for the current average value.

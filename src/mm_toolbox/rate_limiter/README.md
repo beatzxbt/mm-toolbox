@@ -20,6 +20,9 @@ limiter = RateLimiter(config)
 result = limiter.try_consume()
 if result.allowed:
     remaining = result.remaining
+
+# Consume multiple tokens at once
+multi = limiter.try_consume_multiple(3)
 ```
 
 ## Factories
@@ -35,7 +38,7 @@ per_window = RateLimiter.per_window(20, 3)
 ## Behavior notes
 
 - `SubBucketStrategy.PER_SECOND` caps per-second usage within a larger window.
-- `RateLimiterConfig.default()` enables state thresholds and disables burst.
+- `RateLimiterConfig.default()` enables state thresholds, disables burst, and defaults to `SubBucketStrategy.PER_SECOND`.
 - `force=True` bypasses checks and yields `RateLimitState.OVERRIDE`.
 
 ## How it behaves

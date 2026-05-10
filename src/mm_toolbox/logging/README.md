@@ -1,7 +1,7 @@
 # Logging
 
 This package provides two logging stacks:
-- Standard logger: single-process, low-overhead buffering with async handlers.
+- Standard logger: single-process, low-overhead buffering with a background thread.
 - Advanced logger: multi-process logging with IPC transport and a master-worker
   architecture.
 
@@ -12,7 +12,7 @@ with optional stdout mirroring.
 
 Highlights:
 - Background thread flushes buffers on a cadence.
-- Async handler fan-out (file, Discord, Telegram).
+- Handler fan-out (file, Discord, Telegram).
 - Buffered writes reduce handler overhead for high-frequency logs.
 
 ### Architecture overview
@@ -51,6 +51,7 @@ from mm_toolbox.logging.standard import FileLogHandler
 
 config = LoggerConfig(
     base_level=LogLevel.INFO,
+    flush_on_interval=True,
     flush_interval_s=0.5,
     do_stdout=True,
 )
@@ -72,7 +73,7 @@ performance and reliability are critical.
 
 ### Architecture overview
 
-The system uses a master-worker pattern with IPCRingBuffer-based IPC:
+The system uses a master-worker pattern with ShmMpscProducer/ShmMpscConsumer-based IPC:
 
 ```
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
@@ -138,7 +139,7 @@ memcpy(buffer + 9, &msg_len, sizeof(u32)) # Message length
 - Memory: dynamic buffer growth prevents pre-allocation waste
 
 #### Zero-copy messaging
-- Uses the project's `IPCRingBuffer` transport for reliability and throughput
+- Uses the project's `ShmMpscProducer`/`ShmMpscConsumer` transport for reliability and throughput
 - MPSC pattern: multiple producers to single consumer
 - Bounded backlog with backpressure semantics
 
@@ -150,7 +151,7 @@ from mm_toolbox.logging.advanced import FileLogHandler, DiscordLogHandler
 
 config = LoggerConfig(
     base_level=LogLevel.INFO,
-    path="ipc:///tmp/my_app_logger",
+    path="/tmp/my_app_logger.shm",
     flush_interval_s=1.0,
     str_format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
 )
@@ -165,6 +166,12 @@ worker = WorkerLogger(config, name="DataProcessor")
 worker.info("Processing batch 123")
 worker.error("Failed to process item", msg_bytes=error_data)
 ```
+
+Additional config fields:
+- `emit_internal` — emit internal startup/shutdown logs (default `False`).
+- `max_batch_messages` — max messages before forced flush (default `10000`).
+- `max_batch_bytes` — max bytes before forced flush (default `1MB`).
+- `shm_capacity_bytes` — shared memory ring buffer capacity in bytes (default `64MB`).
 
 ### Message flow
 

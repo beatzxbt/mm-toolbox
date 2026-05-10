@@ -8,6 +8,7 @@ latency tracking.
 - `WsConnection`: low-level connection wrapper with ping/pong latency tracking.
 - `WsSingle`: convenience wrapper for a single connection.
 - `WsPool`: manages multiple connections and selects the fastest for sends.
+- `ConnectionState`: connection state enum (`DISCONNECTED`, `CONNECTING`, `CONNECTED`).
 
 ## Architecture overview
 
@@ -56,8 +57,13 @@ config = WsConnectionConfig.default(
     wss_url="wss://fstream.binance.com/ws/btcusdt@bookTicker",
     on_connect=[b'{"method":"SUBSCRIBE","params":["btcusdt@bookTicker"],"id":1}'],
     auto_reconnect=True,
+    max_frame_size=1_048_576,
+    latency_ping_interval_ms=1000,
 )
 ```
+
+- `max_frame_size`: maximum allowed frame size in bytes (default 1 MB).
+- `latency_ping_interval_ms`: interval between internal latency pings in milliseconds (default 1000).
 
 ## Quick start
 
@@ -110,11 +116,12 @@ asyncio.run(main())
 - `WsSingle` is best when you only need one connection and want a simple
   callback or async-iterator interface.
 - `WsPool` is best when you want latency hedging, multiple subscriptions,
-  or faster sends by routing through the lowest-latency connection.
+  or faster sends by routing through the lowest-latency connection. Sends default
+  to the fastest connection; broadcast to all connections is also available.
 
 ## Behavior notes
 
-- `wss_url` must start with `wss://`.
+- `wss_url` must start with `ws://` or `wss://`.
 - Callbacks must accept a single `bytes` argument and annotate it as `bytes`.
 - Only TEXT frames are inserted into the ring buffer.
 - Auto-reconnect loops recreate connections on disconnects.

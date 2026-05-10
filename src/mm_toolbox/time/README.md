@@ -34,3 +34,4 @@ stamp = time_iso8601(ts)
 - Monotonic functions are preferred for durations and timeouts.
 - Wall-clock functions are appropriate for timestamps and logging.
 - ISO helpers expect/return seconds (float) and ISO-8601 strings.
+- Where available, the heavy-lifting paths are C-accelerated.
