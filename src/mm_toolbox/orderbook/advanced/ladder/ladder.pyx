@@ -108,11 +108,20 @@ cdef class OrderbookLadder:
         self._levels = NULL
 
     cdef inline OrderbookLadderData* get_data(self) noexcept nogil:
-        """Return a pointer to the ladder data for read-only access."""
+        """Return a pointer to the ladder data for read-only access.
+
+        Returns:
+            Pointer to the internal OrderbookLadderData struct.
+        """
         return &self._data
 
     cdef void insert_level(self, u64 index, OrderbookLevel level) noexcept nogil:
-        """Insert a level at the specified index."""
+        """Insert a level at the specified index.
+
+        Args:
+            index: Position to insert at.
+            level: OrderbookLevel to insert.
+        """
         c_ladder_insert_level(self._levels, index, &level)
 
     cdef void roll_right(self, u64 start_index) noexcept nogil:
@@ -132,25 +141,42 @@ cdef class OrderbookLadder:
         c_ladder_roll_left(&self._data, start_index)
 
     cdef inline void reset(self) noexcept nogil:
-        """Reset the ladder to empty state."""
+        """Reset the ladder to empty state.
+
+        Sets the level count to zero without freeing memory.
+        """
         self._data.num_levels = 0
 
     cdef inline void increment_count(self) noexcept nogil:
-        """Increment the level count if not at max capacity."""
+        """Increment the level count if not at max capacity.
+
+        Safe to call after roll_right to reflect the new level.
+        """
         if self._data.num_levels < self._data.max_levels:
             self._data.num_levels += 1
 
     cdef inline void decrement_count(self) noexcept nogil:
-        """Decrement the level count if not empty."""
+        """Decrement the level count if not empty.
+
+        Safe to call after roll_left to reflect the removed level.
+        """
         if self._data.num_levels > 0:
             self._data.num_levels -= 1
 
     cdef inline bint is_empty(self) noexcept nogil:
-        """Check if the ladder has no levels."""
+        """Check if the ladder has no levels.
+
+        Returns:
+            True if the ladder is empty.
+        """
         return self._data.num_levels == 0
 
     cdef inline bint is_full(self) noexcept nogil:
-        """Check if the ladder is at max capacity."""
+        """Check if the ladder is at max capacity.
+
+        Returns:
+            True if the ladder has reached its maximum number of levels.
+        """
         return self._data.num_levels == self._data.max_levels
 
     cpdef get_levels(self, bint copy=False):

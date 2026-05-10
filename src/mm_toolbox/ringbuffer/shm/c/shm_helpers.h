@@ -1,5 +1,6 @@
 /**
- * shm_helpers.h - Helper functions for SHM ring buffer memory operations.
+ * @file shm_helpers.h
+ * @brief Helper functions for SHM ring buffer memory operations.
  *
  * Provides low-level utilities for message encoding/decoding and ring buffer
  * memory operations with wrap-around handling. All functions are designed for
@@ -13,10 +14,10 @@
 #include <stddef.h>
 
 /**
- * Write 64-bit value in little-endian format with wrap-around handling.
+ * @brief Write 64-bit value in little-endian format with wrap-around handling.
  *
  * Handles the case where the 8-byte value may span the ring buffer boundary.
- * Uses direct assignment for aligned writes and byte-by-byte for edge cases.
+ * Uses memcpy for aligned writes and byte-by-byte for edge cases.
  *
  * @param base  Ring buffer data pointer.
  * @param idx   Logical index (may exceed capacity, will be masked).
@@ -26,10 +27,10 @@
 void shm_write_u64_le(unsigned char* base, uint64_t idx, uint64_t mask, uint64_t val);
 
 /**
- * Read 64-bit value in little-endian format with wrap-around handling.
+ * @brief Read 64-bit value in little-endian format with wrap-around handling.
  *
  * Handles the case where the 8-byte value may span the ring buffer boundary.
- * Uses direct assignment for aligned reads and byte-by-byte for edge cases.
+ * Uses memcpy for aligned reads and byte-by-byte for edge cases.
  *
  * @param base  Ring buffer data pointer.
  * @param idx   Logical index (may exceed capacity, will be masked).
@@ -39,7 +40,7 @@ void shm_write_u64_le(unsigned char* base, uint64_t idx, uint64_t mask, uint64_t
 uint64_t shm_read_u64_le(const unsigned char* base, uint64_t idx, uint64_t mask);
 
 /**
- * Copy contiguous bytes into ring buffer with wrap-around handling.
+ * @brief Copy contiguous bytes into ring buffer with wrap-around handling.
  *
  * Splits the copy into two memcpy calls if the data spans the buffer boundary.
  *
@@ -54,7 +55,7 @@ void shm_copy_into_ring(unsigned char* ring, uint64_t start, uint64_t mask,
                         const unsigned char* src, size_t n, uint64_t capacity);
 
 /**
- * Copy contiguous bytes from ring buffer with wrap-around handling.
+ * @brief Copy contiguous bytes from ring buffer with wrap-around handling.
  *
  * Splits the copy into two memcpy calls if the data spans the buffer boundary.
  *

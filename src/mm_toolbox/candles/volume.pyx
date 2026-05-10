@@ -1,13 +1,33 @@
+"""Volume-triggered candle aggregator.
+
+Creates a new candle once the accumulated trade size reaches a
+fixed volume threshold.
+"""
+
 from libc.math cimport fmax, fmin
 from mm_toolbox.candles.base import Trade
 from mm_toolbox.candles.base cimport BaseCandles
 
 cdef class VolumeCandles(BaseCandles):
-    """
-    Candle aggregator that creates new candles based on a fixed volume threshold.
+    """Candle aggregator triggered by a fixed volume threshold.
+
+    A new candle is created once the accumulated trade size reaches
+    ``volume_per_bucket``.
+
+    Attributes:
+        volume_per_bucket (double): Total size required to close a candle.
     """
     def __init__(self, double volume_per_bucket, int num_candles=1000, bint store_trades=True):
-        """Initialize the volume-based candle aggregator."""
+        """Initialize the volume-based candle aggregator.
+
+        Args:
+            volume_per_bucket (double): Total trade size per candle (must be > 0).
+            num_candles (int): Ring buffer capacity for closed candles.
+            store_trades (bool): Whether to retain per-trade records.
+
+        Raises:
+            ValueError: If volume_per_bucket is not positive.
+        """
         if volume_per_bucket <= 0.0:
             raise ValueError(
                 f"Invalid volume_per_bucket; expected >0 but got {volume_per_bucket}"
@@ -16,7 +36,11 @@ cdef class VolumeCandles(BaseCandles):
         self.volume_per_bucket = volume_per_bucket
 
     cpdef void process_trade(self, object trade):
-        """Process a single trade tick, updating the current candle."""
+        """Process a single trade tick, splitting across candles if needed.
+
+        Args:
+            trade (Trade): The trade to ingest.
+        """
         cdef:
             double time_ms = trade.time_ms
             bint is_buy = trade.is_buy

@@ -1,3 +1,10 @@
+"""MasterLogger implementation.
+
+Aggregates binary log messages from WorkerLogger instances, decodes them,
+and forwards decoded PyLog records to a list of handlers.  Runs a background
+thread that drains a shared-memory MPSC ring.
+"""
+
 import contextlib
 import threading
 import time
@@ -19,12 +26,18 @@ from mm_toolbox.logging.advanced.pylog import PyLog, PyLogLevel
 from mm_toolbox.time.time cimport time_ns
 
 cdef class MasterLogger:
-    """
-    The MasterLogger acts as a central aggregator for log messages sent by worker loggers.
+    """Central log aggregator that receives binary messages from workers.
 
-    It receives binary messages from workers, decodes them, and forwards them to handlers.
+    Decodes batched CLog messages and forwards PyLog records to registered
+    handlers.  Runs a background thread to drain a shared-memory MPSC ring.
 
-    Also can act as a logger itself, but it is not recommended to use it for this purpose.
+    Attributes:
+        _config (LoggerConfig): Active logger configuration.
+        _log_handlers (list[BaseLogHandler]): Registered output handlers.
+        _shm_producer (ShmMpscProducer): Shared-memory ring producer.
+        _transport (ShmMpscConsumer): IPC transport for message consumption.
+        _stop_event (threading.Event): Signals shutdown to the background thread.
+        _timed_operations_thread (threading.Thread): Background drain/flush thread.
     """
     def __cinit__(
         self, 
@@ -67,7 +80,17 @@ cdef class MasterLogger:
         self._timed_operations_thread.start()
 
     cpdef list _decode_worker_message(self, bytes serialized_message):
-        """Decode binary CLog messages from workers into PyLog objects."""
+        """Decode a batched binary message from a worker into PyLog objects.
+
+        Args:
+            serialized_message (bytes): Raw binary payload from the SHM ring.
+
+        Returns:
+            list[PyLog]: Decoded log records.
+
+        Raises:
+            ValueError: If the message is malformed or truncated.
+        """
         cdef:
             BinaryReader reader = BinaryReader(serialized_message)
             const unsigned char[:] buffer_view = serialized_message
@@ -174,7 +197,11 @@ cdef class MasterLogger:
         return decoded_logs
 
     cpdef void _timed_operations(self):
-        """Background thread that periodically receives and flushes logs."""
+        """Background thread target that drains and dispatches log messages.
+
+        Runs until ``_stop_event`` is set, then performs a final best-effort
+        drain before exiting.
+        """
         # Create IPC transport in this thread and own its lifetime here
         self._transport = ShmMpscConsumer(path=self._config.path)
 
@@ -214,7 +241,12 @@ cdef class MasterLogger:
                 self._transport.close()
 
     cdef void _log_direct(self, CLogLevel level, bytes msg_bytes):
-        """Log directly to handlers bypassing IPC."""
+        """Send a log directly to handlers without going through IPC.
+
+        Args:
+            level (CLogLevel): Severity level.
+            msg_bytes (bytes): UTF-8 encoded message payload.
+        """
         cdef object py_level
         if level == CLogLevel.TRACE:
             py_level = PyLogLevel.TRACE
@@ -242,7 +274,11 @@ cdef class MasterLogger:
                 pass
 
     cpdef void trace(self, bytes msg_bytes=b""):
-        """Send a trace-level log message."""
+        """Send a trace-level log message directly to handlers.
+
+        Args:
+            msg_bytes (bytes): UTF-8 encoded message payload.
+        """
         if (
             not self._stop_event.is_set()
             and self._config.base_level <= CLogLevel.TRACE
@@ -250,7 +286,11 @@ cdef class MasterLogger:
             self._log_direct(CLogLevel.TRACE, msg_bytes)
     
     cpdef void debug(self, bytes msg_bytes=b""):
-        """Send a debug-level log message."""
+        """Send a debug-level log message directly to handlers.
+
+        Args:
+            msg_bytes (bytes): UTF-8 encoded message payload.
+        """
         if (
             not self._stop_event.is_set()
             and self._config.base_level <= CLogLevel.DEBUG
@@ -258,7 +298,11 @@ cdef class MasterLogger:
             self._log_direct(CLogLevel.DEBUG, msg_bytes)
     
     cpdef void info(self, bytes msg_bytes=b""):
-        """Send an info-level log message."""
+        """Send an info-level log message directly to handlers.
+
+        Args:
+            msg_bytes (bytes): UTF-8 encoded message payload.
+        """
         if (
             not self._stop_event.is_set()
             and self._config.base_level <= CLogLevel.INFO
@@ -266,7 +310,11 @@ cdef class MasterLogger:
             self._log_direct(CLogLevel.INFO, msg_bytes)
     
     cpdef void warning(self, bytes msg_bytes=b""):
-        """Send a warning-level log message."""
+        """Send a warning-level log message directly to handlers.
+
+        Args:
+            msg_bytes (bytes): UTF-8 encoded message payload.
+        """
         if (
             not self._stop_event.is_set()
             and self._config.base_level <= CLogLevel.WARNING
@@ -274,7 +322,11 @@ cdef class MasterLogger:
             self._log_direct(CLogLevel.WARNING, msg_bytes)
     
     cpdef void error(self, bytes msg_bytes=b""):
-        """Send an error-level log message.""" 
+        """Send an error-level log message directly to handlers.
+
+        Args:
+            msg_bytes (bytes): UTF-8 encoded message payload.
+        """
         if (
             not self._stop_event.is_set()
             and self._config.base_level <= CLogLevel.ERROR

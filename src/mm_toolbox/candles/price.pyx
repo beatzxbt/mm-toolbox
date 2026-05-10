@@ -1,14 +1,34 @@
+"""Price-triggered candle aggregator.
+
+Creates a new candle when the price moves by a specified amount
+from the opening price of the current candle.
+"""
+
 from mm_toolbox.candles.base cimport BaseCandles
 from libc.math cimport fmax, fmin
 
 cdef class PriceCandles(BaseCandles):
-    """
-    Candle aggregator that creates new candles based on price movement.
-    
-    A new candle is created when the price moves by a specified amount from the opening price.
+    """Candle aggregator triggered by price movement.
+
+    A new candle is created when the price moves by ``price_bucket``
+    from the opening price of the current candle.
+
+    Attributes:
+        price_bucket (double): Price movement threshold.
+        upper_price_bound (double): Current upper trigger bound.
+        lower_price_bound (double): Current lower trigger bound.
     """
     def __init__(self, double price_bucket, int num_candles=1000, bint store_trades=True):
-        """Initialize the price-based candle aggregator."""
+        """Initialize the price-based candle aggregator.
+
+        Args:
+            price_bucket (double): Price movement threshold (must be > 0).
+            num_candles (int): Ring buffer capacity for closed candles.
+            store_trades (bool): Whether to retain per-trade records.
+
+        Raises:
+            ValueError: If price_bucket is not positive.
+        """
         if price_bucket <= 0.0:
             raise ValueError(f"Invalid price_bucket; expected >0 but got {price_bucket}")
         BaseCandles.__init__(self, num_candles, store_trades)
@@ -17,7 +37,11 @@ cdef class PriceCandles(BaseCandles):
         self.lower_price_bound = 0.0
 
     cpdef void process_trade(self, object trade):
-        """Process a single trade tick, updating the current candle."""
+        """Process a single trade tick.
+
+        Args:
+            trade (Trade): The trade to ingest.
+        """
         cdef:
             double time_ms = trade.time_ms
             bint is_buy = trade.is_buy

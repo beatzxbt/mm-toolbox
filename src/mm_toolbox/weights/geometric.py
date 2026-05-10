@@ -1,4 +1,8 @@
-"""Geometric weight calculations."""
+"""Geometric series weight calculations.
+
+Provides ``geometric_weights`` for generating normalized or raw
+geometric-progression weight arrays.
+"""
 
 import numpy as np
 from numpy.typing import NDArray

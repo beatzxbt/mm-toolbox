@@ -1,4 +1,8 @@
-"""Logarithmic weight calculations."""
+"""Logarithmic weight calculations.
+
+Provides ``logarithmic_weights`` for generating normalized or raw
+logarithmic weight arrays.
+"""
 
 import numpy as np
 from numpy.typing import NDArray

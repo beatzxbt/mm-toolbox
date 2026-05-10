@@ -76,7 +76,12 @@ class BaseLogHandler(ABC):
     """
 
     def __init__(self):
-        """Initialize the handler state and shared resources."""
+        """Initialize the handler state and shared resources.
+
+        Sets up lazy JSON encoding, a dedicated event loop thread, HTTP
+        session management, and error callback tracking.
+
+        """
         self._encode_json: Callable[[object], bytes] | None = None
         self._http_session: aiohttp.ClientSession | None = None
         self._ev_loop: asyncio.AbstractEventLoop | None = None
@@ -136,36 +141,44 @@ class BaseLogHandler(ABC):
             return self._ev_loop
 
     def _run_coro(self, coro: "Coroutine[object, None, object]") -> Future:
-        """Submit a coroutine to the handler loop.
+        """Submit a coroutine to the handler's dedicated event loop.
 
         Args:
             coro (Coroutine[object, None, object]): Coroutine to run.
 
         Returns:
             Future: Future tracking the coroutine execution.
+
         """
         loop = self.ev_loop
         return asyncio.run_coroutine_threadsafe(coro, loop)
 
     async def _ensure_session(self) -> None:
-        """Ensure the HTTP session exists and is open."""
+        """Ensure the HTTP session exists and is open.
+
+        Creates a new ``aiohttp.ClientSession`` if none exists or the
+        existing one has been closed.
+
+        """
         if self._http_session is None or self._http_session.closed:
             self._http_session = aiohttp.ClientSession()
 
     @property
     def primary_config(self):
-        """Get the primary config.
+        """Active logger configuration attached to this handler.
 
         Returns:
             LoggerConfig | None: Active handler config, if set.
+
         """
         return self._primary_config
 
     def add_primary_config(self, config: LoggerConfig):
-        """Add the primary config to the handler.
+        """Attach a logger configuration to this handler.
 
         Args:
             config (LoggerConfig): Configuration to apply to the handler.
+
         """
         self._primary_config = config
 
@@ -253,6 +266,7 @@ class BaseLogHandler(ABC):
 
         Args:
             fut (Future): Future returned by run_coroutine_threadsafe.
+
         """
         self._futures.append(fut)
         fut.add_done_callback(self._on_future_done)
@@ -264,7 +278,7 @@ class BaseLogHandler(ABC):
         """Capture exceptions from background handler tasks.
 
         Args:
-            fut: Future returned by run_coroutine_threadsafe.
+            fut (Future): Future returned by run_coroutine_threadsafe.
 
         """
         with contextlib.suppress(Exception):

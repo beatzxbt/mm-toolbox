@@ -1,4 +1,8 @@
-"""Configuration classes and enums for standard logging."""
+"""Configuration classes and enums for the standard buffered logger.
+
+Provides ``LogLevel`` severity enumeration and ``LoggerConfig`` for
+controlling output formatting, flush thresholds, and atexit behavior.
+"""
 
 from enum import IntEnum
 

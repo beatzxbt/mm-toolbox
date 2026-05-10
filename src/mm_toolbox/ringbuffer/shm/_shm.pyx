@@ -3,7 +3,12 @@
 # cython: wraparound=False
 # cython: cdivision=True
 
-"""Common base for shared-memory ring buffers."""
+"""
+Common base for shared-memory ring buffers.
+
+Provides constants, header sizes, and lifecycle management (mmap, unmap, close)
+for shared-memory ring buffer implementations (SPSC and MPSC).
+"""
 
 import os
 from libc.stdint cimport uint64_t as u64
@@ -23,9 +28,18 @@ cdef size_t _SUB_RING_HEADER_SIZE = align_up(sizeof(ShmSubRingHeader), _HEADER_A
 
 
 cdef class _ShmRingBase:
-    """Common lifecycle for shared ring buffers."""
+    """Common lifecycle for shared ring buffers.
+
+    Manages mmap lifecycle, file descriptors, and cleanup for shared-memory
+    ring buffer implementations.
+    """
 
     def __cinit__(self) -> None:
+        """Initialize the base shared ring buffer.
+
+        Raises:
+            OSError: If the platform is not POSIX.
+        """
         if os.name != "posix":
             raise OSError("Shared memory ringbuffer is only supported on POSIX platforms")
         self._base = NULL
@@ -48,9 +62,15 @@ cdef class _ShmRingBase:
             self._fd = -1
 
     def __dealloc__(self):
+        """Deallocate the shared ring buffer, unmapping memory."""
         self._close_map()
 
     cpdef void close(self):
+        """Close the shared ring buffer and optionally unlink the backing file.
+
+        If this instance is the owner and unlink_on_close is enabled, the
+        backing file is removed from the filesystem.
+        """
         self._close_map()
         if self._owner and self._unlink_on_close and self._path_py is not None:
             try:
@@ -60,7 +80,9 @@ cdef class _ShmRingBase:
         self._owner = False
 
     def __enter__(self):
+        """Enter context manager."""
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        """Exit context manager, closing the ring buffer."""
         self.close()

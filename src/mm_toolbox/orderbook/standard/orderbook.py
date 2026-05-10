@@ -62,39 +62,59 @@ class Orderbook:
             self.consume_snapshot(asks=initial_asks, bids=initial_bids)
 
     def is_initialized(self) -> bool:
-        """Return True if the orderbook has received at least one update."""
+        """Check whether the orderbook has received at least one update.
+
+        Returns:
+            bool: True after the first snapshot or delta is consumed.
+
+        """
         return self._is_initialized
 
     def is_populated(self) -> bool:
-        """Return True when both bid and ask sides are currently available."""
+        """Check whether both bid and ask sides currently have levels.
+
+        Returns:
+            bool: True when both sides are non-empty.
+
+        """
         return self._is_populated
 
     def _ensure_initialized(self) -> None:
-        """Check if the orderbook has received at least one update."""
+        """Guard method that raises if the orderbook has never been updated.
+
+        Raises:
+            ValueError: If the orderbook has not received any data yet.
+
+        """
         if not self._is_initialized:
             raise ValueError("Orderbook is not populated.")
 
     def _ensure_bbo_available(self) -> None:
-        """Ensure both sides are available for top-of-book calculations."""
+        """Guard method that raises if either side is empty.
+
+        Raises:
+            ValueError: If bids or asks are currently unavailable.
+
+        """
         self._ensure_initialized()
         if not self._is_populated:
             raise ValueError("Orderbook side unavailable.")
 
     def _refresh_population_state(self) -> None:
-        """Refresh two-sided availability state."""
+        """Recalculate whether both sides are non-empty."""
         self._is_populated = (
             len(self._sorted_bid_ticks) > 0 and len(self._sorted_ask_ticks) > 0
         )
 
     def _update_bbo_cache(self) -> None:
-        """Update cached BBO tick values from sorted lists."""
+        """Refresh cached best-bid/best-ask tick values from sorted lists."""
         if self._sorted_ask_ticks:
             self._best_ask_ticks = self._sorted_ask_ticks[0]
         if self._sorted_bid_ticks:
             self._best_bid_ticks = self._sorted_bid_ticks[-1]
 
     def reset(self) -> None:
-        """Reset the orderbook to its initial empty state."""
+        """Clear all levels and reset state to empty."""
         self._asks.clear()
         self._bids.clear()
         self._sorted_ask_ticks.clear()
@@ -105,7 +125,12 @@ class Orderbook:
         self._is_populated = False
 
     def _ensure_level_precision(self, level: OrderbookLevel) -> None:
-        """Populate ticks/lots unless trusted pre-computed values can be reused."""
+        """Compute ticks and lots for a level when not already present.
+
+        Args:
+            level (OrderbookLevel): Level to populate in-place.
+
+        """
         if self._trust_input_precision and level.ticks >= 0 and level.lots >= 0:
             return
         level.ticks = int(level.price * self._inv_tick_size)
@@ -117,9 +142,14 @@ class Orderbook:
         side_levels: dict[int, OrderbookLevel],
         sorted_ticks: list[int],
     ) -> None:
-        """Apply a delta batch to one side, maintaining sorted ticks incrementally."""
-        if not levels:
-            return
+        """Apply a list of delta levels to one side of the book.
+
+        Args:
+            levels (list[OrderbookLevel]): Incoming delta levels.
+            side_levels (dict[int, OrderbookLevel]): Existing side dictionary.
+            sorted_ticks (list[int]): Sorted tick list for the side.
+
+        """
 
         for level in levels:
             self._ensure_level_precision(level)
@@ -139,7 +169,12 @@ class Orderbook:
                     sorted_ticks.insert(idx, ticks)
 
     def _prune_better_bids(self, bid_ticks: int) -> None:
-        """Remove stale bid levels that are better than an authoritative BBO bid."""
+        """Remove bids that are priced better than the authoritative best bid.
+
+        Args:
+            bid_ticks (int): Authoritative best-bid tick value.
+
+        """
         cutoff = bisect_right(self._sorted_bid_ticks, bid_ticks)
         if cutoff >= len(self._sorted_bid_ticks):
             return
@@ -148,7 +183,12 @@ class Orderbook:
         del self._sorted_bid_ticks[cutoff:]
 
     def _prune_better_asks(self, ask_ticks: int) -> None:
-        """Remove stale ask levels that are better than an authoritative BBO ask."""
+        """Remove asks that are priced better than the authoritative best ask.
+
+        Args:
+            ask_ticks (int): Authoritative best-ask tick value.
+
+        """
         cutoff = bisect_left(self._sorted_ask_ticks, ask_ticks)
         if cutoff <= 0:
             return
@@ -161,11 +201,15 @@ class Orderbook:
         asks: list[OrderbookLevel],
         bids: list[OrderbookLevel],
     ) -> None:
-        """Consume a snapshot of the orderbook.
+        """Replace the entire book with a full snapshot.
 
         Args:
-            asks: List of ask levels.
-            bids: List of bid levels.
+            asks (list[OrderbookLevel]): Complete ask side.
+            bids (list[OrderbookLevel]): Complete bid side.
+
+        Raises:
+            ValueError: If either side has fewer levels than ``size``.
+
         """
         if len(asks) < self._size:
             raise ValueError(
@@ -199,11 +243,12 @@ class Orderbook:
         asks: list[OrderbookLevel],
         bids: list[OrderbookLevel],
     ) -> None:
-        """Consume deltas of the orderbook.
+        """Apply incremental updates to the existing book.
 
         Args:
-            asks: List of ask levels.
-            bids: List of bid levels.
+            asks (list[OrderbookLevel]): Ask delta levels.
+            bids (list[OrderbookLevel]): Bid delta levels.
+
         """
         if asks:
             self._consume_side_deltas(asks, self._asks, self._sorted_ask_ticks)
@@ -267,7 +312,19 @@ class Orderbook:
         self._update_bbo_cache()
 
     def get_asks(self, depth: int | None = None) -> list[OrderbookLevel]:
-        """Get ask levels sorted by price (lowest first)."""
+        """Return ask levels sorted by price ascending.
+
+        Args:
+            depth (int, optional): Maximum number of levels to return.
+                Returns all levels when ``None``.
+
+        Returns:
+            list[OrderbookLevel]: Ask levels from best to worst.
+
+        Raises:
+            ValueError: If the orderbook has not been initialized.
+
+        """
         self._ensure_initialized()
         asks = self._asks
         sorted_ask_ticks = self._sorted_ask_ticks
@@ -283,7 +340,19 @@ class Orderbook:
         return result
 
     def get_bids(self, depth: int | None = None) -> list[OrderbookLevel]:
-        """Get bid levels sorted by price (highest first)."""
+        """Return bid levels sorted by price descending.
+
+        Args:
+            depth (int, optional): Maximum number of levels to return.
+                Returns all levels when ``None``.
+
+        Returns:
+            list[OrderbookLevel]: Bid levels from best to worst.
+
+        Raises:
+            ValueError: If the orderbook has not been initialized.
+
+        """
         self._ensure_initialized()
         bids = self._bids
         sorted_bid_ticks = self._sorted_bid_ticks
@@ -300,7 +369,19 @@ class Orderbook:
         return result
 
     def iter_asks(self, depth: int | None = None) -> Iterator[OrderbookLevel]:
-        """Iterate over ask levels sorted by price (lowest -> highest)."""
+        """Yield ask levels from best to worst price.
+
+        Args:
+            depth (int, optional): Maximum number of levels to yield.
+                Yields all levels when ``None``.
+
+        Yields:
+            OrderbookLevel: Next ask level in ascending price order.
+
+        Raises:
+            ValueError: If the orderbook has not been initialized.
+
+        """
         self._ensure_initialized()
         if depth is not None and depth <= 0:
             return
@@ -316,7 +397,19 @@ class Orderbook:
                 yield asks[tick]
 
     def iter_bids(self, depth: int | None = None) -> Iterator[OrderbookLevel]:
-        """Iterate over bid levels sorted by price (highest -> lowest)."""
+        """Yield bid levels from best to worst price.
+
+        Args:
+            depth (int, optional): Maximum number of levels to yield.
+                Yields all levels when ``None``.
+
+        Yields:
+            OrderbookLevel: Next bid level in descending price order.
+
+        Raises:
+            ValueError: If the orderbook has not been initialized.
+
+        """
         self._ensure_initialized()
         if depth is not None and depth <= 0:
             return
@@ -333,26 +426,60 @@ class Orderbook:
                 yield bids[sorted_bid_ticks[i]]
 
     def get_bbo(self) -> tuple[OrderbookLevel, OrderbookLevel]:
-        """Get best bid and offer as a tuple."""
+        """Return the best bid and best ask.
+
+        Returns:
+            tuple[OrderbookLevel, OrderbookLevel]: ``(best_bid, best_ask)``.
+
+        Raises:
+            ValueError: If the orderbook is uninitialized or one side is empty.
+
+        """
         self._ensure_bbo_available()
         return self._bids[self._best_bid_ticks], self._asks[self._best_ask_ticks]
 
     def get_bbo_spread(self) -> float:
-        """Get the bid-ask spread."""
+        """Return the bid-ask spread in price terms.
+
+        Returns:
+            float: Difference between best ask and best bid prices.
+
+        Raises:
+            ValueError: If the orderbook is uninitialized or one side is empty.
+
+        """
         self._ensure_bbo_available()
         spread_ticks = self._best_ask_ticks - self._best_bid_ticks
         tick_size = self._tick_size
         return spread_ticks * tick_size
 
     def get_mid_price(self) -> float:
-        """Get the mid price between best bid and ask."""
+        """Return the simple mid price.
+
+        Returns:
+            float: Arithmetic midpoint of best bid and best ask.
+
+        Raises:
+            ValueError: If the orderbook is uninitialized or one side is empty.
+
+        """
         self._ensure_bbo_available()
         mid_ticks = (self._best_ask_ticks + self._best_bid_ticks) // 2
         tick_size = self._tick_size
         return mid_ticks * tick_size
 
     def get_wmid_price(self) -> float:
-        """Get the weighted mid price between best bid and ask."""
+        """Return the lot-weighted mid price.
+
+        Weights the midpoint by the relative lot sizes at best bid and ask.
+
+        Returns:
+            float: Weighted mid price.
+
+        Raises:
+            ValueError: If the orderbook is uninitialized or one side is empty.
+
+        """
         self._ensure_bbo_available()
         bids = self._bids
         asks = self._asks
@@ -372,7 +499,25 @@ class Orderbook:
     def get_volume_weighted_mid_price(
         self, size: float, is_base_currency: bool = True
     ) -> float:
-        """Get the mid price between the price to buy and sell 'size' on the book."""
+        """Return the mid of the prices required to buy and sell a given size.
+
+        Walks the book to determine the average execution price on each
+        side for the requested quantity, then returns their midpoint.
+
+        Args:
+            size (float): Target size to evaluate.
+            is_base_currency (bool): If True, ``size`` is in base currency.
+                Otherwise it is treated as quote notional and converted using
+                the mid price. Defaults to True.
+
+        Returns:
+            float: Midpoint of the buy and sell execution prices, or
+            ``float('inf')`` if the book is too shallow.
+
+        Raises:
+            ValueError: If the orderbook is uninitialized or one side is empty.
+
+        """
         self._ensure_bbo_available()
 
         asks = self._asks
@@ -419,8 +564,26 @@ class Orderbook:
     def get_price_impact(
         self, size: float, is_buy: bool, is_base_currency: bool = True
     ) -> float:
-        """Get the direct price impact if a theoretical size were to be
-        executed on the book."""
+        """Return the price impact for executing a theoretical size.
+
+        Walks the relevant side of the book until the full size is filled
+        and reports the distance from the touch price to the final fill price.
+
+        Args:
+            size (float): Size to execute. Must be positive.
+            is_buy (bool): If True, impact is computed on the ask side.
+                Otherwise on the bid side.
+            is_base_currency (bool): If True, ``size`` is in base currency.
+                Otherwise it is treated as quote notional. Defaults to True.
+
+        Returns:
+            float: Absolute price impact, or ``float('inf')`` if the book is
+            too shallow to fill the size.
+
+        Raises:
+            ValueError: If the orderbook is uninitialized or one side is empty.
+
+        """
         self._ensure_bbo_available()
         if size <= 0.0:
             return 0.0
@@ -518,7 +681,19 @@ class Orderbook:
         return total_base if is_base_currency else total_quote
 
     def does_bbo_price_change(self, bid_price: float, ask_price: float) -> bool:
-        """Check if the best bid/ask price will change."""
+        """Check whether proposed prices differ from current BBO.
+
+        Args:
+            bid_price (float): Candidate best bid price.
+            ask_price (float): Candidate best ask price.
+
+        Returns:
+            bool: True if either price would move the BBO ticks.
+
+        Raises:
+            ValueError: If the orderbook is uninitialized or one side is empty.
+
+        """
         self._ensure_bbo_available()
         best_bid_ticks = self._best_bid_ticks
         best_ask_ticks = self._best_ask_ticks
@@ -528,7 +703,20 @@ class Orderbook:
         return best_bid_ticks != other_bid_ticks or best_ask_ticks != other_ask_ticks
 
     def does_bbo_cross(self, bid_price: float, ask_price: float) -> bool:
-        """Check if the best bid/ask price crosses with the given price."""
+        """Check whether proposed prices would cross the current BBO.
+
+        Args:
+            bid_price (float): Candidate best bid price.
+            ask_price (float): Candidate best ask price.
+
+        Returns:
+            bool: True if the bid exceeds the current best ask or the ask
+            is below the current best bid.
+
+        Raises:
+            ValueError: If the orderbook is uninitialized or one side is empty.
+
+        """
         self._ensure_bbo_available()
         best_bid_ticks = self._best_bid_ticks
         best_ask_ticks = self._best_ask_ticks

@@ -1,5 +1,6 @@
 /**
- * shm_core.h - Core insert/consume operations for SHM ring buffer.
+ * @file shm_core.h
+ * @brief Core insert/consume operations for SHM ring buffer.
  *
  * Provides high-performance, lock-free producer and consumer operations
  * with integrated timestamping using monotonic time. All functions are
@@ -14,7 +15,7 @@
 #include <stdint.h>
 
 /**
- * ShmProducerContext - Context for producer operations (cached state).
+ * @brief Context for producer operations (cached state).
  *
  * Maintains local copies of frequently accessed values to reduce
  * atomic operations on the shared header.
@@ -37,7 +38,7 @@ typedef struct {
 } ShmProducerContext;
 
 /**
- * ShmConsumerContext - Context for consumer operations (cached state).
+ * @brief Context for consumer operations (cached state).
  *
  * Fields:
  *   hdr       - Pointer to shared memory header.
@@ -55,7 +56,7 @@ typedef struct {
 } ShmConsumerContext;
 
 /**
- * Insert a message into the ring buffer (producer-side).
+ * @brief Insert a message into the ring buffer (producer-side).
  *
  * This function combines reserve, write, and commit operations with
  * monotonic timestamping, all in C for maximum performance. If the buffer
@@ -71,20 +72,20 @@ int shm_producer_insert(ShmProducerContext* ctx, const unsigned char* payload,
                         size_t payload_len, uint64_t* dropped_out);
 
 /**
- * Check if a complete message is available (peek without consuming).
+ * @brief Check if a complete message is available (peek without consuming).
  *
  * Uses atomic acquire semantics to read producer's write position.
  *
- * @param ctx          Consumer context.
- * @param msg_len_out  Output: message length if available.
- * @param read_pos_out Output: read position if available.
- * @return             1 if message available, 0 otherwise.
+ * @param ctx           Consumer context.
+ * @param msg_len_out   Output: message length if available.
+ * @param read_pos_out  Output: read position if available.
+ * @return              1 if message available, 0 otherwise.
  */
 int shm_consumer_peek_available(ShmConsumerContext* ctx, uint64_t* msg_len_out,
                                 uint64_t* read_pos_out);
 
 /**
- * Consume a message from the ring buffer (consumer-side).
+ * @brief Consume a message from the ring buffer (consumer-side).
  *
  * Copies message data to destination buffer and commits the read position
  * with monotonic timestamping.

@@ -154,29 +154,57 @@ class WsSingle:
         self._reconnect_iter = None
 
     def get_config(self) -> WsConnectionConfig:
-        """Get connection configuration."""
+        """Return the connection configuration.
+
+        Returns:
+            WsConnectionConfig: Current configuration instance.
+
+        """
         return self._config
 
     def get_connection_count(self) -> int:
-        """Get number of active connections (0 or 1)."""
+        """Return the number of active connections.
+
+        Returns:
+            int: ``1`` if connected, otherwise ``0``.
+
+        """
         if self._ws_conn is not None and self._ws_conn.is_connected():
             return 1
         return 0
 
     def get_latency_ms(self) -> float:
-        """Get latency of the connection in milliseconds."""
+        """Return the connection latency in milliseconds.
+
+        Returns:
+            float: Latency from the underlying connection, or ``0.0`` when
+            disconnected.
+
+        """
         if self._ws_conn is not None:
             return self._ws_conn.get_latency_ms()
         return 0.0
 
     def get_seq_id(self) -> int:
-        """Get sequence ID of the connection."""
+        """Return the connection sequence ID.
+
+        Returns:
+            int: Sequence ID from the underlying connection, or ``0`` when
+            disconnected.
+
+        """
         if self._ws_conn is not None:
             return self._ws_conn.get_seq_id()
         return 0
 
     def get_state(self) -> ConnectionState:
-        """Retrieves the connection state."""
+        """Return the current connection state.
+
+        Returns:
+            ConnectionState: State of the underlying connection, or
+            ``DISCONNECTED`` when none exists.
+
+        """
         if self._ws_conn is not None:
             return self._ws_conn.get_state()
         return ConnectionState.DISCONNECTED

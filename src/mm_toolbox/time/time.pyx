@@ -18,7 +18,11 @@ cdef extern from "ctime_impl.h":
     int c_time_iso8601 (double timestamp, char* buf, size_t buf_size) nogil
 
 cpdef i64 time_s():
-    """Returns the current wall-clock time in seconds."""
+    """Return the current wall-clock time in seconds.
+
+    Returns:
+        Unix timestamp in seconds, or raises RuntimeError on failure.
+    """
     cdef i64 result
     with nogil:
         result = c_time_s()
@@ -27,7 +31,11 @@ cpdef i64 time_s():
     return result
 
 cpdef i64 time_ms():
-    """Returns the current wall-clock time in milliseconds."""
+    """Return the current wall-clock time in milliseconds.
+
+    Returns:
+        Unix timestamp in milliseconds, or raises RuntimeError on failure.
+    """
     cdef i64 result
     with nogil:
         result = c_time_ms()
@@ -36,7 +44,11 @@ cpdef i64 time_ms():
     return result
 
 cpdef i64 time_us():
-    """Returns the current wall-clock time in microseconds."""
+    """Return the current wall-clock time in microseconds.
+
+    Returns:
+        Unix timestamp in microseconds, or raises RuntimeError on failure.
+    """
     cdef i64 result
     with nogil:
         result = c_time_us()
@@ -45,7 +57,11 @@ cpdef i64 time_us():
     return result
 
 cpdef i64 time_ns():
-    """Returns the current wall-clock time in nanoseconds."""
+    """Return the current wall-clock time in nanoseconds.
+
+    Returns:
+        Unix timestamp in nanoseconds, or raises RuntimeError on failure.
+    """
     cdef i64 result
     with nogil:
         result = c_time_ns()
@@ -54,7 +70,13 @@ cpdef i64 time_ns():
     return result
 
 cpdef i64 time_monotonic_s():
-    """Returns monotonic time in seconds (never decreases, unaffected by clock changes)."""
+    """Return monotonic time in seconds.
+
+    Monotonic time never decreases and is unaffected by system clock changes.
+
+    Returns:
+        Monotonic timestamp in seconds, or raises RuntimeError on failure.
+    """
     cdef i64 result
     with nogil:
         result = c_time_monotonic_s()
@@ -63,7 +85,13 @@ cpdef i64 time_monotonic_s():
     return result
 
 cpdef i64 time_monotonic_ms():
-    """Returns monotonic time in milliseconds (never decreases, unaffected by clock changes)."""
+    """Return monotonic time in milliseconds.
+
+    Monotonic time never decreases and is unaffected by system clock changes.
+
+    Returns:
+        Monotonic timestamp in milliseconds, or raises RuntimeError on failure.
+    """
     cdef i64 result
     with nogil:
         result = c_time_monotonic_ms()
@@ -72,7 +100,13 @@ cpdef i64 time_monotonic_ms():
     return result
 
 cpdef i64 time_monotonic_us():
-    """Returns monotonic time in microseconds (never decreases, unaffected by clock changes)."""
+    """Return monotonic time in microseconds.
+
+    Monotonic time never decreases and is unaffected by system clock changes.
+
+    Returns:
+        Monotonic timestamp in microseconds, or raises RuntimeError on failure.
+    """
     cdef i64 result
     with nogil:
         result = c_time_monotonic_us()
@@ -81,7 +115,13 @@ cpdef i64 time_monotonic_us():
     return result
 
 cpdef i64 time_monotonic_ns():
-    """Returns monotonic time in nanoseconds (never decreases, unaffected by clock changes)."""
+    """Return monotonic time in nanoseconds.
+
+    Monotonic time never decreases and is unaffected by system clock changes.
+
+    Returns:
+        Monotonic timestamp in nanoseconds, or raises RuntimeError on failure.
+    """
     cdef i64 result
     with nogil:
         result = c_time_monotonic_ns()
@@ -90,20 +130,28 @@ cpdef i64 time_monotonic_ns():
     return result
 
 cpdef double iso8601_to_unix(str timestamp):
-    """Converts an ISO 8601 formatted timestamp to a Unix timestamp."""
+    """Convert an ISO 8601 formatted timestamp to a Unix timestamp.
+
+    Args:
+        timestamp: ISO 8601 formatted string.
+
+    Returns:
+        Unix timestamp as a double.
+    """
     return ciso8601.parse_datetime(timestamp).timestamp()
 
 cpdef str time_iso8601(double timestamp = 0.0):
-    """
-    Returns an ISO 8601 formatted timestamp.
-    
+    """Return an ISO 8601 formatted timestamp.
+
     Args:
-        timestamp (float, optional): Unix timestamp to format. If 0.0 (default),
-            uses the current time with optimized manual date arithmetic for 
-            maximum performance.
+        timestamp: Unix timestamp to format. If 0.0 (default), uses the
+            current time with optimized manual date arithmetic.
 
     Returns:
-        str: The formatted timestamp as 'YYYY-MM-DDTHH:MM:SS.fffZ'.
+        Formatted timestamp as 'YYYY-MM-DDTHH:MM:SS.fffZ'.
+
+    Raises:
+        RuntimeError: If formatting fails.
     """
     cdef char buf[64]
     cdef int ret

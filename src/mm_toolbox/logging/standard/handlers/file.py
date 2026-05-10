@@ -1,4 +1,8 @@
-"""File log handler for standard logging."""
+"""File handler for the standard logger.
+
+Appends buffered log messages to a local text file, optionally
+creating parent directories and the file itself on first open.
+"""
 
 import os
 

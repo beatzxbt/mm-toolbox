@@ -1,3 +1,10 @@
+"""
+Rounding utilities for prices and sizes in financial markets.
+
+Provides configurable rounding of prices and sizes to tick and lot size
+multiples. Supports both scalar and NumPy array operations with
+bid/ask/size-specific rounding directions.
+"""
 import msgspec
 import numpy as np
 cimport numpy as cnp
@@ -51,9 +58,20 @@ class RounderConfig(msgspec.Struct):
         )
 
 cdef class Rounder:
-    """Provides rounding operations on prices and sizes according to specified tick and lot sizes."""
+    """Provides rounding operations on prices and sizes according to specified tick and lot sizes.
+
+    Attributes:
+        config: RounderConfig instance with tick/lot sizes and rounding directions.
+        tick_size: Minimum price increment.
+        lot_size: Minimum size increment.
+    """
 
     def __cinit__(self, object config):
+        """Initialize a new Rounder.
+
+        Args:
+            config: RounderConfig with tick_size, lot_size, and rounding flags.
+        """
         self.config: RounderConfig = config
         self.tick_size = config.tick_size
         self.lot_size = config.lot_size
@@ -69,26 +87,62 @@ cdef class Rounder:
         self._lot_rounding_factor = _rounding_factor(self.lot_size)
 
     cdef inline double _round_to(self, double num, double factor) nogil:
-        """Round a value to a specific decimal precision."""
+        """Round a value to a specific decimal precision.
+
+        Args:
+            num: Value to round.
+            factor: Precision factor (e.g., 100.0 for 2 decimal places).
+
+        Returns:
+            Rounded value.
+        """
         return c_round(num * factor) / factor
 
     cpdef double bid(self, double price):
-        """Round a price to the nearest tick size multiple, direction depends on config."""
+        """Round a bid price to the nearest tick size multiple.
+
+        Args:
+            price: Price to round.
+
+        Returns:
+            Rounded bid price.
+        """
         cdef double value = self.tick_size * self._bid_round_func(price * self._inverse_tick_size)
         return self._round_to(value, self._tick_rounding_factor)
 
     cpdef double ask(self, double price):
-        """Round a price up to the nearest tick size multiple."""
+        """Round an ask price to the nearest tick size multiple.
+
+        Args:
+            price: Price to round.
+
+        Returns:
+            Rounded ask price.
+        """
         cdef double value = self.tick_size * self._ask_round_func(price * self._inverse_tick_size)
         return self._round_to(value, self._tick_rounding_factor)
 
     cpdef double size(self, double size):
-        """Round a size down to the nearest lot size multiple."""
+        """Round a size to the nearest lot size multiple.
+
+        Args:
+            size: Size to round.
+
+        Returns:
+            Rounded size.
+        """
         cdef double value = self.lot_size * self._size_round_func(size * self._inverse_lot_size)
         return self._round_to(value, self._lot_rounding_factor)
 
     cpdef cnp.ndarray bids(self, cnp.ndarray prices):
-        """Round an array of prices down to the nearest tick size multiple (bids)."""
+        """Round an array of prices to the nearest tick size multiple (bids).
+
+        Args:
+            prices: NumPy array of prices.
+
+        Returns:
+            NumPy array of rounded bid prices.
+        """
         cdef:
             double[:] prices_view = prices
             Py_ssize_t i, n = prices_view.shape[0]
@@ -109,7 +163,14 @@ cdef class Rounder:
         return result
 
     cpdef cnp.ndarray asks(self, cnp.ndarray prices):
-        """Round an array of prices up to the nearest tick size multiple (asks)."""
+        """Round an array of prices to the nearest tick size multiple (asks).
+
+        Args:
+            prices: NumPy array of prices.
+
+        Returns:
+            NumPy array of rounded ask prices.
+        """
         cdef:
             double[:] prices_view = prices
             Py_ssize_t i, n = prices_view.shape[0]
@@ -130,7 +191,14 @@ cdef class Rounder:
         return result
 
     cpdef cnp.ndarray sizes(self, cnp.ndarray sizes):
-        """Round an array of sizes down to the nearest lot size multiple."""
+        """Round an array of sizes to the nearest lot size multiple.
+
+        Args:
+            sizes: NumPy array of sizes.
+
+        Returns:
+            NumPy array of rounded sizes.
+        """
         cdef:
             double[:] sizes_view = sizes
             Py_ssize_t i, n = sizes_view.shape[0]

@@ -77,7 +77,11 @@ from .memory cimport (
 
 
 cdef class _SharedBytesRing(_ShmRingBase):
-    """Common mapping and header state for SPSC shared ring buffers."""
+    """Common mapping and header state for SPSC shared ring buffers.
+
+    Manages mmap lifecycle, header initialization, and attachment for
+    single-producer single-consumer shared-memory queues.
+    """
 
     cdef ShmHeader* _hdr
     cdef unsigned char* _data
@@ -233,7 +237,11 @@ cdef class _SharedBytesRing(_ShmRingBase):
 
 
 cdef class ShmSpscProducer(_SharedBytesRing):
-    """Shared-memory SPSC producer for bytes payloads."""
+    """Shared-memory SPSC producer for bytes payloads.
+
+    Inserts variable-length byte messages into a shared-memory ring buffer
+    with atomic coordination via the header.
+    """
 
     cdef ShmProducerContext _prod_ctx
 
@@ -405,11 +413,19 @@ cdef class ShmSpscProducer(_SharedBytesRing):
         return True
 
     cpdef bint is_empty(self):
-        """Check if the buffer is empty."""
+        """Check if the buffer is empty.
+
+        Returns:
+            True if no messages are available.
+        """
         return len(self) == 0
 
     cpdef bint is_full(self):
-        """Check if the buffer is full (no space for even a 0-byte message)."""
+        """Check if the buffer is full.
+
+        Returns:
+            True if no space for even a 0-byte message.
+        """
         cdef u64 read_pos
         with nogil:
             read_pos = atomic_load_acquire(&self._hdr.read_pos)
@@ -417,7 +433,11 @@ cdef class ShmSpscProducer(_SharedBytesRing):
         return (self._capacity - (self._cached_write - read_pos)) < 8
 
 cdef class ShmSpscConsumer(_SharedBytesRing):
-    """Shared-memory SPSC consumer for bytes payloads."""
+    """Shared-memory SPSC consumer for bytes payloads.
+
+    Consumes variable-length byte messages from a shared-memory ring buffer
+    with atomic coordination via the header.
+    """
 
     cdef ShmConsumerContext _cons_ctx
 

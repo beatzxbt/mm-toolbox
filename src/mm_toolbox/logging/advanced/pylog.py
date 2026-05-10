@@ -33,12 +33,25 @@ class PyLog(Struct):
     message: bytes
 
     def __iter__(self):
+        """Yield fields in fixed order: timestamp, name, level, message."""
         yield self.timestamp_ns
         yield self.name
         yield self.level
         yield self.message
 
     def __getitem__(self, index: int):
+        """Provide tuple-like indexing for log fields.
+
+        Args:
+            index (int): Field index (0-3).
+
+        Returns:
+            int | bytes | PyLogLevel: Field value at the given index.
+
+        Raises:
+            IndexError: If ``index`` is outside the range ``0..3``.
+
+        """
         if index == 0:
             return self.timestamp_ns
         if index == 1:

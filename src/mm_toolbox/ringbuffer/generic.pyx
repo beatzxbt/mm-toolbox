@@ -26,14 +26,21 @@ Consume: ~105 ns/msg
 """
 
 cdef class GenericRingBuffer:
-    """A fixed-size ring buffer for objects."""
+    """A fixed-size ring buffer for generic Python objects.
+
+    Provides FIFO semantics with optional async waiting. Stores arbitrary
+    Python objects in a circular buffer backed by a Python list.
+    """
 
     def __cinit__(self, int max_capacity, bint disable_async=False) -> None:
-        """
-        Parameters:
-            capacity (int): The maximum number of elements the buffer can hold.
-            disable_async (bool): If True, the buffer will disable use of asyncio.Event for extra performance.
-                All async methods will then raise a RuntimeError.
+        """Initialize a new GenericRingBuffer.
+
+        Args:
+            max_capacity: Maximum number of elements (rounded up to power of two).
+            disable_async: If True, disable asyncio.Event for performance.
+
+        Raises:
+            ValueError: If max_capacity is not positive.
         """
         if max_capacity <= 0:
             raise ValueError(f"Capacity cannot be negative; expected >0 but got {max_capacity}")
@@ -51,7 +58,11 @@ cdef class GenericRingBuffer:
         self._disable_async = disable_async
 
     cpdef list unwrapped(self):
-        """Return a list of the buffer's contents in logical (oldest to newest) order."""
+        """Return a list of the buffer's contents in logical (oldest to newest) order.
+
+        Returns:
+            List of objects in FIFO order.
+        """
         cdef: 
             u64     size = self._size
             u64     tail = self._tail
@@ -66,7 +77,14 @@ cdef class GenericRingBuffer:
         return buf[tail:] + buf[:(tail + size) & mask]
     
     cpdef bint insert(self, object item):
-        """Add a new element to the end of the buffer."""
+        """Add a new element to the end of the buffer.
+
+        Args:
+            item: Object to insert.
+
+        Returns:
+            True if the insert succeeded.
+        """
         cdef:
             u64     head = self._head
             u64     tail = self._tail
@@ -86,7 +104,14 @@ cdef class GenericRingBuffer:
         return True
 
     cpdef bint insert_batch(self, list[object] items):
-        """Add a batch of elements to the end of the buffer."""
+        """Add a batch of elements to the end of the buffer.
+
+        Args:
+            items: List of objects to insert.
+
+        Returns:
+            True if the batch insert succeeded.
+        """
         cdef: 
             u64     i, n = len(items)
             u64     old_size = self._size
@@ -128,7 +153,14 @@ cdef class GenericRingBuffer:
         return True
     
     cpdef bint contains(self, object item):
-        """Checks if the item exists in the buffer, searching from newest to oldest."""
+        """Checks if the item exists in the buffer, searching from newest to oldest.
+
+        Args:
+            item: Object to search for.
+
+        Returns:
+            True if the item is found in the buffer.
+        """
         cdef:
             u64     idx = (self._head - 1) & self._mask
             u64     remaining = self._size
@@ -154,7 +186,14 @@ cdef class GenericRingBuffer:
         return False
 
     cpdef object consume(self):
-        """Remove and return the first element from the buffer."""
+        """Remove and return the first element from the buffer.
+
+        Returns:
+            The oldest object in the buffer.
+
+        Raises:
+            IndexError: If the buffer is empty.
+        """
         self.__enforce_ringbuffer_not_empty()
         cdef:
             u64     tail = self._tail
@@ -170,19 +209,37 @@ cdef class GenericRingBuffer:
         return buf[tail]
 
     cpdef list consume_all(self):
-        """Remove and return all elements from the buffer."""
+        """Remove and return all elements from the buffer.
+
+        Returns:
+            List of all objects in FIFO order.
+
+        Raises:
+            IndexError: If the buffer is empty.
+        """
         self.__enforce_ringbuffer_not_empty()
         cdef list result = self.unwrapped()
         self.clear()
         return result
 
     def consume_iterable(self) -> Iterator[object]:
-        """Iterate over the elements in the buffer in order from oldest to newest."""
+        """Iterate over the elements in the buffer in order from oldest to newest.
+
+        Yields:
+            Objects in FIFO order.
+        """
         while self._size > 0:
             yield self.consume()
 
     async def aconsume(self):
-        """Remove and return the first element from the buffer."""
+        """Remove and return the first element from the buffer (async).
+
+        Returns:
+            The oldest object in the buffer.
+
+        Raises:
+            RuntimeError: If async operations are disabled.
+        """
         self.__enforce_async_not_disabled()
         if self._size > 0:
             return self.consume()
@@ -190,7 +247,14 @@ cdef class GenericRingBuffer:
         return self.consume()
 
     async def aconsume_iterable(self) -> AsyncIterator[object]:
-        """Continuously yield the first element from the buffer."""
+        """Continuously yield the first element from the buffer (async).
+
+        Yields:
+            Objects in FIFO order.
+
+        Raises:
+            RuntimeError: If async operations are disabled.
+        """
         self.__enforce_async_not_disabled()
         while True:
             if self._size > 0:
@@ -199,7 +263,11 @@ cdef class GenericRingBuffer:
             await self._buffer_not_empty_event.wait()
     
     cpdef object peekright(self):
-        """Return the last element from the buffer without removing it."""
+        """Return the last element from the buffer without removing it.
+
+        Returns:
+            The newest object in the buffer.
+        """
         cdef:
             u64     head = self._head   
             u64     mask = self._mask
@@ -208,7 +276,11 @@ cdef class GenericRingBuffer:
         return buf[(head - 1) & mask]
     
     cpdef object peekleft(self):
-        """Return the first element from the buffer without removing it."""
+        """Return the first element from the buffer without removing it.
+
+        Returns:
+            The oldest object in the buffer.
+        """
         cdef:
             u64     tail = self._tail
             list    buf = self._buffer
@@ -216,7 +288,10 @@ cdef class GenericRingBuffer:
         return buf[tail]
 
     cpdef void clear(self):
-        """Clear the buffer and reset it to its initial state."""
+        """Clear the buffer and reset it to its initial state.
+
+        All elements are discarded and the buffer is empty after this call.
+        """
         self._tail = 0
         self._head = 0
         self._size = 0
@@ -224,11 +299,19 @@ cdef class GenericRingBuffer:
             self._buffer_not_empty_event.clear()
 
     cpdef bint is_empty(self):
-        """Check if the buffer is empty."""
+        """Check if the buffer is empty.
+
+        Returns:
+            True if the buffer contains no elements.
+        """
         return self._size == 0
 
     cpdef bint is_full(self):
-        """Check if the buffer is full."""
+        """Check if the buffer is full.
+
+        Returns:
+            True if the buffer has reached its maximum capacity.
+        """
         return self._size == self._max_capacity
 
     def __contains__(self, object item):

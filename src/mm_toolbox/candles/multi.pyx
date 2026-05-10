@@ -1,18 +1,41 @@
+"""Multi-trigger candle aggregator.
+
+Creates a new candle when any of these conditions are met:
+- maximum duration is reached,
+- maximum number of ticks (trades) is reached,
+- maximum volume is reached.
+"""
+
 from mm_toolbox.candles.base import Trade
 from mm_toolbox.candles.base cimport BaseCandles
 from libc.math cimport fmax, fmin
 
 cdef class MultiCandles(BaseCandles):
-    """
-    Candle aggregator that creates new candles based on multiple trigger conditions.
-    
+    """Candle aggregator triggered by duration, tick count, or volume.
+
     A new candle is created when any of these conditions are met:
     - Maximum duration is reached
     - Maximum number of ticks (trades) is reached
     - Maximum volume is reached
+
+    Attributes:
+        max_duration_millis (double): Max candle duration in milliseconds.
+        max_ticks (int): Max number of trades per candle.
+        max_size (double): Max total trade size per candle.
     """
     def __init__(self, double max_duration_secs, int max_ticks, double max_size, int num_candles=1000, bint store_trades=True):
-        """Initialize the multi-trigger candle aggregator."""
+        """Initialize the multi-trigger candle aggregator.
+
+        Args:
+            max_duration_secs (double): Maximum candle duration in seconds.
+            max_ticks (int): Maximum number of trades per candle.
+            max_size (double): Maximum total trade size per candle.
+            num_candles (int): Ring buffer capacity for closed candles.
+            store_trades (bool): Whether to retain per-trade records.
+
+        Raises:
+            ValueError: If any limit is not positive.
+        """
         if max_duration_secs <= 0.0:
             raise ValueError(
                 f"Invalid max_duration_secs; expected >0 but got {max_duration_secs}"
@@ -28,7 +51,11 @@ cdef class MultiCandles(BaseCandles):
         self.max_size = max_size
 
     cpdef void process_trade(self, object trade):
-        """Process a single trade tick, updating the current candle.""" 
+        """Process a single trade tick, splitting across candles if needed.
+
+        Args:
+            trade (Trade): The trade to ingest.
+        """ 
         cdef:
             double time_ms = trade.time_ms
             bint is_buy = trade.is_buy

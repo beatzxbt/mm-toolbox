@@ -1,4 +1,9 @@
-"""Configuration helpers for shared-memory ring buffers."""
+"""Configuration structs for shared-memory ringbuffer variants.
+
+Provides ``ShmSpscConfig`` (single-producer single-consumer) and
+``ShmMpscConfig`` (multi-producer single-consumer) with validation,
+default factories, and kwarg helpers for producer/consumer constructors.
+"""
 
 from msgspec import Struct
 

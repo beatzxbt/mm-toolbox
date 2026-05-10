@@ -1,3 +1,10 @@
+"""Logger configuration definitions and level mapping.
+
+Provides the LoggerConfig cdef class used by both MasterLogger and
+WorkerLogger to control log levels, formatting, shared memory capacity,
+and batching behaviour.
+"""
+
 from mm_toolbox.logging.advanced.pylog import PyLogLevel
 from mm_toolbox.logging.advanced.log cimport CLogLevel
 

@@ -1,3 +1,11 @@
+"""Configuration structs and enums for the token-bucket rate limiter.
+
+Provides ``RateLimiterConfig`` and its sub-configs for state thresholds,
+burst handling, and sub-bucket strategies.
+"""
+
+from __future__ import annotations
+
 from typing import Self
 
 from msgspec import Struct

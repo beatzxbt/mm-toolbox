@@ -27,7 +27,16 @@ from .helpers cimport (
 )
 
 cdef inline OrderbookLevel create_orderbook_level(double price, double size, u64 norders=1) noexcept nogil:
-    """Create an OrderbookLevel struct without pre-computing ticks/lots."""
+    """Create an OrderbookLevel struct without pre-computing ticks/lots.
+
+    Args:
+        price: Price of the level.
+        size: Size of the level.
+        norders: Number of orders at this level (default: 1).
+
+    Returns:
+        A new OrderbookLevel struct with ticks and lots set to 0.
+    """
     cdef OrderbookLevel level = OrderbookLevel()
     level.price = price
     level.size = size
@@ -46,7 +55,18 @@ cdef inline OrderbookLevel create_orderbook_level_with_ticks_and_lots(
     double lot_size,
     u64 norders=1,
 ) noexcept nogil:
-    """Create an OrderbookLevel struct with pre-computed ticks and lots."""
+    """Create an OrderbookLevel struct with pre-computed ticks and lots.
+
+    Args:
+        price: Price of the level.
+        size: Size of the level.
+        tick_size: Tick size for price-to-tick conversion.
+        lot_size: Lot size for size-to-lot conversion.
+        norders: Number of orders at this level (default: 1).
+
+    Returns:
+        A new OrderbookLevel struct with ticks and lots pre-computed.
+    """
     cdef OrderbookLevel level = OrderbookLevel()
     level.price = price
     level.size = size
@@ -59,7 +79,15 @@ cdef inline OrderbookLevel create_orderbook_level_with_ticks_and_lots(
     return level
 
 cdef inline OrderbookLevels create_orderbook_levels(u64 num_levels, OrderbookLevel* levels) noexcept nogil:
-    """Create an OrderbookLevels struct from a pointer and count."""
+    """Create an OrderbookLevels struct from a pointer and count.
+
+    Args:
+        num_levels: Number of levels in the array.
+        levels: Pointer to the OrderbookLevel array.
+
+    Returns:
+        A new OrderbookLevels struct wrapping the given pointer and count.
+    """
     cdef OrderbookLevels levels_struct = OrderbookLevels()
     levels_struct.num_levels = num_levels
     levels_struct.levels = levels
@@ -67,7 +95,11 @@ cdef inline OrderbookLevels create_orderbook_levels(u64 num_levels, OrderbookLev
 
 
 cdef inline void free_orderbook_levels(OrderbookLevels* levels) noexcept nogil:
-    """Free the memory allocated for OrderbookLevels.levels if not NULL."""
+    """Free the memory allocated for OrderbookLevels.levels if not NULL.
+
+    Args:
+        levels: Pointer to the OrderbookLevels struct to free.
+    """
     if levels != NULL and levels.levels != NULL:
         free(<void*> levels.levels)
         levels.levels = NULL

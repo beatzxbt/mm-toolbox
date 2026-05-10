@@ -1,3 +1,9 @@
+"""WorkerLogger implementation.
+
+Lightweight per-thread logger that batches messages and forwards them
+via shared memory to the MasterLogger.  Enforces a singleton per thread.
+"""
+
 import os
 import threading
 
@@ -24,13 +30,38 @@ _worker_logger_local = threading.local()
 
 
 cdef class WorkerLogger:
-    """A lightweight worker logger that sends log messages to the master logger."""
+    """Lightweight per-thread logger that batches messages for the master.
+
+    Enforces a singleton per thread and flushes batched logs to a shared-memory
+    MPSC ring either periodically or when size limits are reached.
+
+    Attributes:
+        _config (LoggerConfig): Active logger configuration.
+        _name (bytes): UTF-8 encoded logger name.
+        _len_name (int): Byte length of the logger name.
+        _name_as_chars (unsigned char*): Pointer to the name bytes.
+        _num_pending_logs (int): Number of logs in the current batch.
+        _batch_writer (BinaryWriter): Accumulates batched log records.
+        _batch_lock (threading.Lock): Protects batch operations.
+        _transport (ShmMpscProducer): Shared-memory transport to the master.
+        _stop_event (threading.Event): Signals shutdown.
+        _timed_operations_thread (threading.Thread): Background flush thread.
+    """
 
     def __cinit__(
         self, 
         LoggerConfig config=None, 
         str name=None,
     ):
+        """Initialize the worker logger.
+
+        Args:
+            config (LoggerConfig): Logger settings; defaults to a new LoggerConfig().
+            name (str): Worker name; defaults to ``WORKER<pid>``.
+
+        Raises:
+            RuntimeError: If another WorkerLogger is already active in this thread.
+        """
         cdef bint should_create = False
 
         self._config = config if config else LoggerConfig() 
@@ -86,7 +117,11 @@ cdef class WorkerLogger:
             self.debug(msg_bytes=f"WorkerLogger started; name: {self._name.decode()}".encode('utf-8'))
 
     cpdef void _timed_operations(self):
-        """Background processing loop."""
+        """Background loop that flushes pending logs on an interval.
+
+        Sleeps for ``flush_interval_s`` and then triggers a flush if logs
+        are pending.
+        """
         while not self._stop_event.is_set():
             if self._stop_event.wait(self._config.flush_interval_s):
                 break
@@ -100,7 +135,10 @@ cdef class WorkerLogger:
                     self._num_pending_logs = 0
             
     cdef void _flush_logs(self) except *:
-        """Flush pending logs."""
+        """Flush the current batch to shared memory (thread-safe).
+
+        Acquires ``_batch_lock`` before serializing and sending.
+        """
         cdef u32 batch_len
         cdef u32 data_len
         cdef BinaryWriter writer
@@ -124,7 +162,13 @@ cdef class WorkerLogger:
             self._num_pending_logs = 0
     
     cdef void _add_log_to_batch(self, CLogLevel clevel, u32 message_len, unsigned char* message) except *:
-        """Add a log to the batch."""
+        """Append a single log record to the batch.
+
+        Args:
+            clevel (CLogLevel): Severity level.
+            message_len (u32): Byte length of the message.
+            message (unsigned char*): Pointer to the message bytes.
+        """
         cdef u64 time_now_ns
         with self._batch_lock:
             time_now_ns = time_ns()
@@ -140,7 +184,7 @@ cdef class WorkerLogger:
                 self._flush_logs_locked()
 
     cdef void _flush_logs_locked(self) except *:
-        """Flush pending logs (assumes lock is held)."""
+        """Flush the current batch (caller must hold ``_batch_lock``)."""
         cdef u32 batch_len
         cdef u32 data_len
         cdef BinaryWriter writer
@@ -163,32 +207,56 @@ cdef class WorkerLogger:
         self._num_pending_logs = 0
 
     cpdef void trace(self, bytes msg_bytes=b""):
-        """Send a trace-level log message."""
+        """Send a trace-level log message to the master.
+
+        Args:
+            msg_bytes (bytes): UTF-8 encoded message payload.
+        """
         if not self._stop_event.is_set() and CLogLevel.TRACE >= self._config.base_level:
             self._add_log_to_batch(CLogLevel.TRACE, len(msg_bytes), <unsigned char*>msg_bytes)
 
     cpdef void debug(self, bytes msg_bytes=b""):
-        """Send a debug-level log message."""
+        """Send a debug-level log message to the master.
+
+        Args:
+            msg_bytes (bytes): UTF-8 encoded message payload.
+        """
         if not self._stop_event.is_set() and CLogLevel.DEBUG >= self._config.base_level:
             self._add_log_to_batch(CLogLevel.DEBUG, len(msg_bytes), <unsigned char*>msg_bytes)
     
     cpdef void info(self, bytes msg_bytes=b""):
-        """Send an info-level log message."""
+        """Send an info-level log message to the master.
+
+        Args:
+            msg_bytes (bytes): UTF-8 encoded message payload.
+        """
         if not self._stop_event.is_set() and CLogLevel.INFO >= self._config.base_level:
             self._add_log_to_batch(CLogLevel.INFO, len(msg_bytes), <unsigned char*>msg_bytes)
     
     cpdef void warning(self, bytes msg_bytes=b""):
-        """Send a warning-level log message."""
+        """Send a warning-level log message to the master.
+
+        Args:
+            msg_bytes (bytes): UTF-8 encoded message payload.
+        """
         if not self._stop_event.is_set() and CLogLevel.WARNING >= self._config.base_level:
             self._add_log_to_batch(CLogLevel.WARNING, len(msg_bytes), <unsigned char*>msg_bytes)
     
     cpdef void error(self, bytes msg_bytes=b""):
-        """Send an error-level log message."""
+        """Send an error-level log message to the master.
+
+        Args:
+            msg_bytes (bytes): UTF-8 encoded message payload.
+        """
         if not self._stop_event.is_set() and CLogLevel.ERROR >= self._config.base_level:
             self._add_log_to_batch(CLogLevel.ERROR, len(msg_bytes), <unsigned char*>msg_bytes)
 
     cpdef void shutdown(self):
-        """Shutdown with proper cleanup."""
+        """Gracefully shut down the worker logger.
+
+        Performs a final flush, stops the background thread, and removes
+        the thread-local singleton registration.
+        """
         if self._stop_event.is_set():
             return
         
@@ -223,13 +291,25 @@ cdef class WorkerLogger:
             delattr(_worker_logger_local, 'logger')
 
     cpdef bint is_running(self):
-        """Check if the logger is running."""
+        """Check whether the logger is active.
+
+        Returns:
+            bool: True if the logger has not been shut down.
+        """
         return not self._stop_event.is_set()
     
     cpdef str get_name(self):
-        """Get the name of the logger."""
+        """Return the logger name.
+
+        Returns:
+            str: The decoded worker name.
+        """
         return self._name.decode()
 
     cpdef object get_config(self):
-        """Get the configuration of the logger."""
+        """Return the logger configuration.
+
+        Returns:
+            LoggerConfig: The active configuration object.
+        """
         return self._config

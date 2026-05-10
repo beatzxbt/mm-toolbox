@@ -1,3 +1,10 @@
+"""Protocol definitions for ringbuffer implementations.
+
+Defines the core interfaces expected by all ringbuffer variants,
+including sync and async consumption, split producer/consumer designs,
+and introspection helpers.
+"""
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
