@@ -8,8 +8,10 @@ These are Layer 3 (integration) tests executed via the compiled Cython test modu
 
 from __future__ import annotations
 
-import sys
 import os
+import sys
+
+import pytest
 
 # Go up to tests/ directory to find the compiled .so files
 # engine/test_core.py -> engine -> advanced -> orderbook -> tests
@@ -20,8 +22,6 @@ if test_dir not in sys.path:
 try:
     import cython_test_core as _native
 except ImportError as e:
-    import pytest
-
     pytest.skip(f"Native Cython test module not built: {e}", allow_module_level=True)
 
 

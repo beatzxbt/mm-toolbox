@@ -14,8 +14,10 @@ Skipped gracefully when the native test module has not been built.
 
 from __future__ import annotations
 
-import sys
 import os
+import sys
+
+import pytest
 
 # Go up to tests/ directory to find the compiled .so files
 test_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -25,8 +27,6 @@ if test_dir not in sys.path:
 try:
     import cython_test_websocket_connection as _native
 except ImportError as e:
-    import pytest
-
     pytest.skip(
         f"Native Cython test module not built: {e}. Run `make build-test`",
         allow_module_level=True,

@@ -9,6 +9,7 @@ import asyncio
 
 import pytest
 
+from mm_toolbox.candles import PriceCandles, TickCandles, TimeCandles, VolumeCandles
 from mm_toolbox.candles.base import Candle, Trade
 
 
@@ -172,13 +173,6 @@ class TestBaseCandlesFunctionality:
 
     def test_base_candles_initialization(self):
         """Given valid parameters, every subclass instantiates without error."""
-        from mm_toolbox.candles import (
-            PriceCandles,
-            TickCandles,
-            TimeCandles,
-            VolumeCandles,
-        )
-
         tc = TickCandles(5)
         vc = VolumeCandles(1000.0)
         time_c = TimeCandles(60.0)
@@ -195,8 +189,6 @@ class TestBaseCandlesFunctionality:
         VWAP = sum(price * size) / sum(size).  This is a core financial metric,
         so an off-by-one in the divisor would silently corrupt trading signals.
         """
-        from mm_toolbox.candles import TickCandles
-
         tick_candles = TickCandles(10)
 
         trades = [
@@ -215,8 +207,6 @@ class TestBaseCandlesFunctionality:
 
         A common bug is to compute mean(price) instead of sum(price*size)/sum(size).
         """
-        from mm_toolbox.candles import TickCandles
-
         tick_candles = TickCandles(3)
 
         trades = [
@@ -236,8 +226,6 @@ class TestBaseCandlesFunctionality:
         If VWAP leaked across candles, a quiet period after a volatile one would
         report an inflated average.
         """
-        from mm_toolbox.candles import TickCandles
-
         tick_candles = TickCandles(2)
 
         first_trades = [
@@ -260,8 +248,6 @@ class TestBaseCandlesFunctionality:
         Stale trades could arrive out-of-order from slow market-data feeds;
         accepting them would corrupt open/high/low/close statistics.
         """
-        from mm_toolbox.candles import TimeCandles
-
         time_candles = TimeCandles(60.0)
 
         trade1 = Trade(time_ms=1640995200000, is_buy=True, price=100.0, size=1.0)
@@ -279,8 +265,6 @@ class TestBaseCandlesFunctionality:
         The base class uses an asyncio Future to signal candle closure. Repeated
         resets must not leak or raise InvalidStateError.
         """
-        from mm_toolbox.candles import VolumeCandles
-
         volume_candles = VolumeCandles(1.0)
 
         high_volume_trades = [
@@ -296,16 +280,12 @@ class TestBaseCandlesFunctionality:
 
     def test_initialize_empty_list_raises(self):
         """Given an empty list, ``initialize`` raises ValueError."""
-        from mm_toolbox.candles import TickCandles
-
         tick_candles = TickCandles(5)
         with pytest.raises(ValueError, match="empty"):
             tick_candles.initialize([])
 
     def test_initialize_mixed_types_raises(self):
         """Given a list containing a non-Trade element, ``initialize`` raises ValueError."""
-        from mm_toolbox.candles import TickCandles
-
         tick_candles = TickCandles(5)
         with pytest.raises(ValueError, match="Trade"):
             tick_candles.initialize(

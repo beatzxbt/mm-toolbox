@@ -7,8 +7,10 @@ delegation, calculations, and clear operations.
 
 from __future__ import annotations
 
-import sys
 import os
+import sys
+
+import pytest
 
 test_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 if test_dir not in sys.path:
@@ -17,8 +19,6 @@ if test_dir not in sys.path:
 try:
     import cython_test_wrapper as _native
 except ImportError as e:
-    import pytest
-
     pytest.skip(f"Native Cython test module not built: {e}", allow_module_level=True)
 
 

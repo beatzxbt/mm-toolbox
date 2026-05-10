@@ -12,7 +12,7 @@ import contextlib
 
 import pytest
 
-from mm_toolbox.websocket.connection import ConnectionState
+from mm_toolbox.websocket.connection import ConnectionState, WsConnectionConfig
 from mm_toolbox.websocket.single import WsSingle
 
 
@@ -36,8 +36,6 @@ class TestWsSingleCallbackValidation:
         """Given valid and invalid callbacks, Then only the valid one is accepted.
 
         Early validation prevents frame-dispatch runtime errors."""
-        from mm_toolbox.websocket.connection import WsConnectionConfig
-
         config = WsConnectionConfig.default("wss://test.com")
 
         def valid_callback(msg: bytes) -> None:

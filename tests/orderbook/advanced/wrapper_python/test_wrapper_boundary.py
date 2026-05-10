@@ -6,6 +6,7 @@ are callable, and numpy arrays are accepted as inputs.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 from mm_toolbox.orderbook.advanced import AdvancedOrderbook
 from tests.orderbook.advanced.conftest import LOT_SIZE
@@ -39,8 +40,6 @@ class TestCpdefBehavior:
 
     def test_numpy_arrays_accepted(self, empty_book):
         """Given numpy arrays, When consume_snapshot_numpy is called, Then book is populated."""
-        import numpy as np
-
         bid_prices = np.array([100.0, 99.99], dtype=np.float64)
         bid_sizes = np.array([1.0, 2.0], dtype=np.float64)
         ask_prices = np.array([100.01, 100.02], dtype=np.float64)

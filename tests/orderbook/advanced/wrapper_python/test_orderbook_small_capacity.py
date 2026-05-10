@@ -518,8 +518,6 @@ class TestMinimumCapacityBehavior:
         book.consume_snapshot(asks, bids)
 
         # BBO update
-        from mm_toolbox.orderbook.advanced import OrderbookLevel
-
         new_ask = OrderbookLevel.with_ticks_and_lots(
             100.015, 2.0, TICK_SIZE, LOT_SIZE, 1
         )

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import os
+import os as _os
 import random
 import struct
 import threading
@@ -360,8 +361,6 @@ class TestMpscSharedBytesRingBuffer:
             shm_path, 1 << 16, num_rings=0, create=True, unlink_on_close=True
         )
         try:
-            import os as _os
-
             expected = _os.cpu_count() or 4
             assert prod.num_rings == expected
         finally:

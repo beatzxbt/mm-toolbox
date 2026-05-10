@@ -6,6 +6,7 @@ data types, performance options, and timestamp tracking.
 """
 
 import asyncio
+import time
 
 import pytest
 
@@ -400,8 +401,6 @@ class TestGenericRingBufferTimestamps:
         rb.insert("a")
         t1 = rb.latest_insert_time_ns
         assert t1 > 0
-        import time
-
         time.sleep(0.001)
         rb.insert("b")
         t2 = rb.latest_insert_time_ns

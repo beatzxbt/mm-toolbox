@@ -6,6 +6,7 @@ async operations, insert_char/consume_into, timestamps, and edge cases.
 """
 
 import asyncio
+import time
 
 import pytest
 
@@ -477,8 +478,6 @@ class TestBytesRingBufferTimestamps:
         rb.insert(b"a")
         t1 = rb.latest_insert_time_ns
         assert t1 > 0
-        import time
-
         time.sleep(0.001)
         rb.insert(b"b")
         t2 = rb.latest_insert_time_ns
@@ -520,8 +519,6 @@ class TestBytesRingBufferFastTimestamps:
         rb.insert(b"a")
         t1 = rb.latest_insert_time_ns
         assert t1 > 0
-        import time
-
         time.sleep(0.001)
         rb.insert(b"b")
         t2 = rb.latest_insert_time_ns

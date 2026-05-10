@@ -11,7 +11,7 @@ import asyncio
 
 import pytest
 
-from mm_toolbox.websocket.connection import ConnectionState
+from mm_toolbox.websocket.connection import ConnectionState, WsConnectionConfig
 from mm_toolbox.websocket.single import WsSingle
 
 
@@ -46,8 +46,6 @@ class TestWsSingleInterface:
         Returns:
             Config instance for WsSingle.
         """
-        from mm_toolbox.websocket.connection import WsConnectionConfig
-
         return WsConnectionConfig.default("wss://test.com")
 
     def test_initialization(self, config) -> None:

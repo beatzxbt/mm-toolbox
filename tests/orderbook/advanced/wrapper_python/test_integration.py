@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from mm_toolbox.orderbook.advanced import (
+    OrderbookLevel,
     OrderbookLevels,
 )
 from tests.orderbook.advanced.conftest import (
@@ -54,8 +55,6 @@ class TestEndToEnd:
         book.consume_deltas(delta_asks, empty_bids)
 
         # BBO
-        from mm_toolbox.orderbook.advanced import OrderbookLevel
-
         new_ask = OrderbookLevel.with_ticks_and_lots(
             100.015, 2.0, TICK_SIZE, LOT_SIZE, 1
         )

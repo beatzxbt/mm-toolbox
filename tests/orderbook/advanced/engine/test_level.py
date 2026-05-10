@@ -7,8 +7,10 @@ These are Layer 1 (primitive) tests executed via the compiled Cython test module
 
 from __future__ import annotations
 
-import sys
 import os
+import sys
+
+import pytest
 
 # Go up to tests/ directory to find the compiled .so files
 # engine/test_level.py -> engine -> advanced -> orderbook -> tests
@@ -19,8 +21,6 @@ if test_dir not in sys.path:
 try:
     import cython_test_level as _native
 except ImportError as e:
-    import pytest
-
     pytest.skip(f"Native Cython test module not built: {e}", allow_module_level=True)
 
 

@@ -6,6 +6,8 @@ chunking large batches to respect Telegram message size limits.
 
 import asyncio
 
+import aiohttp
+
 from mm_toolbox.logging.standard.handlers.base import BaseLogHandler
 
 
@@ -65,8 +67,6 @@ class TelegramLogHandler(BaseLogHandler):
 
     async def _push_chunks(self, chunks: list[str]) -> None:
         """Send chunks to Telegram Bot API."""
-        import aiohttp
-
         async with aiohttp.ClientSession() as session:
             for chunk in chunks:
                 payload = {

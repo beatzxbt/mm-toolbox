@@ -7,6 +7,7 @@ string expansion.
 """
 
 import pytest
+import time
 
 from mm_toolbox.logging.standard.config import LoggerConfig, LogLevel
 from mm_toolbox.logging.standard.handlers import BaseLogHandler
@@ -336,8 +337,6 @@ class TestLoggerBufferManagement:
         )
         logger = Logger(config=config, handlers=[handler])
         logger.info("interval message")
-        import time
-
         time.sleep(0.1)
         logger.info("trigger flush")
         logger.shutdown()

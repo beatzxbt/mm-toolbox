@@ -8,6 +8,7 @@ patterns.
 
 import asyncio
 
+import mm_toolbox.candles as candles_module
 import pytest
 
 from mm_toolbox.candles import PriceCandles, TickCandles, TimeCandles, VolumeCandles
@@ -23,8 +24,6 @@ class TestCandlesModuleIntegration:
 
     def test_all_candle_types_import(self):
         """Given the candles package, all five public types are importable."""
-        import mm_toolbox.candles as candles_module
-
         expected_types = [
             "TickCandles",
             "VolumeCandles",
