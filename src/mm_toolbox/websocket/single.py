@@ -11,7 +11,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import AsyncIterator, Callable
-from typing import Self, get_type_hints
+from inspect import get_annotations
+from typing import Self
 
 import msgspec
 
@@ -60,7 +61,7 @@ class WsSingle:
                 )
             param = next(iter(sig.parameters.values()))
             try:
-                type_hints = get_type_hints(on_message)
+                type_hints = get_annotations(on_message, eval_str=False)
             except Exception:
                 type_hints = {}
             param_type = type_hints.get(param.name, param.annotation)

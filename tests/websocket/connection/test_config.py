@@ -7,7 +7,6 @@ This ensures user-supplied limits are respected by the transport layer.
 
 from __future__ import annotations
 
-import pytest
 
 from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
 from mm_toolbox.websocket.connection import WsConnection, WsConnectionConfig
