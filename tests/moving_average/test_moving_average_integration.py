@@ -1,4 +1,4 @@
-"""Integration tests for all moving-average implementations.
+"""Layer 3 — Integration tests for all moving-average implementations.
 
 Validates protocol compliance, cross-MA behavioural consistency, fast-mode
 semantics, and numerical accuracy against reference NumPy

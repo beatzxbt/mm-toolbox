@@ -1,4 +1,10 @@
-"""Tests for configurable trade storage behavior in candle aggregators."""
+"""Layer 2 — Component tests for configurable trade storage in candle aggregators.
+
+Validates the ``store_trades`` flag: when disabled, individual trade objects
+must not be created or stored (important for high-frequency paths where object
+allocation is the bottleneck). Also covers ``Candle.copy()`` behaviour with and
+without trade payloads.
+"""
 
 import asyncio
 
@@ -17,9 +23,14 @@ from mm_toolbox.candles.base import Candle, Trade as BaseTrade
 
 
 class TestCandleCopyTrades:
-    """Validate Candle.copy(include_trades=...) behavior."""
+    """Layer 1 — ``Candle.copy(include_trades=...)`` primitive tests."""
 
     def test_copy_include_trades_true_deepcopies(self):
+        """Given ``include_trades=True``, the copied candle references distinct lists.
+
+        Because ``Trade`` is frozen (immutable), the individual trade objects are
+        shared rather than duplicated, which is safe and memory-efficient.
+        """
         trade = BaseTrade(time_ms=1000, is_buy=True, price=100.0, size=1.0)
         candle = Candle(
             open_time_ms=1000,
@@ -41,11 +52,11 @@ class TestCandleCopyTrades:
 
         assert copied is not candle
         assert copied.trades is not candle.trades
-        # Frozen trades are immutable, so they are shared (not duplicated)
         assert copied.trades[0] is candle.trades[0]
         assert copied.num_trades == candle.num_trades
 
     def test_copy_include_trades_false_omits_trade_payload(self):
+        """Given ``include_trades=False``, the trade list is empty but metadata remains."""
         trade = BaseTrade(time_ms=1000, is_buy=False, price=99.0, size=2.0)
         candle = Candle(
             open_time_ms=1000,
@@ -101,6 +112,7 @@ class TestCandleCopyTrades:
     ],
 )
 def test_store_trades_controls_latest_trade_list(factory, trade):
+    """Given ``store_trades=True/False``, the latest candle trade list length differs."""
     with_trades = factory(True)
     without_trades = factory(False)
 
@@ -117,6 +129,7 @@ def test_store_trades_controls_latest_trade_list(factory, trade):
 def test_insert_and_reset_copy_respects_store_trades(
     store_trades, expected_trade_count
 ):
+    """Given ``store_trades`` flag, closed candles via async iterator respect it."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
@@ -132,6 +145,12 @@ def test_insert_and_reset_copy_respects_store_trades(
 
 
 def test_volume_split_trade_object_not_created_when_store_trades_false(monkeypatch):
+    """Given ``store_trades=False``, split trades in ``VolumeCandles`` do not allocate ``Trade`` objects.
+
+    VolumeCandles may split an incoming trade when it exceeds the bucket size.
+    When trade storage is disabled, the split logic should skip creating
+    intermediate ``Trade`` instances entirely to avoid garbage pressure.
+    """
     calls = {"count": 0}
 
     def counting_trade(*args, **kwargs):
@@ -155,6 +174,7 @@ def test_volume_split_trade_object_not_created_when_store_trades_false(monkeypat
 
 
 def test_multi_split_trade_object_not_created_when_store_trades_false(monkeypatch):
+    """Given ``store_trades=False``, split trades in ``MultiCandles`` do not allocate ``Trade`` objects."""
     calls = {"count": 0}
 
     def counting_trade(*args, **kwargs):

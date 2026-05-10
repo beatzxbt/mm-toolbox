@@ -1,4 +1,10 @@
-"""Tests for Weighted Moving Average (WMA) implementation."""
+"""Layer 2 — Component tests for Weighted Moving Average (WMA).
+
+Validates initialisation (linear weights, wrong length rejection, minimum
+window), ``next()`` projection without mutation, ``update()`` rolling weighted
+sum, comparison against a naive NumPy reference, historical value tracking, and
+edge cases (constant values, large windows, monotonic sequences).
+"""
 
 import numpy as np
 import pytest
@@ -7,10 +13,10 @@ from mm_toolbox.moving_average import WeightedMovingAverage
 
 
 class TestWmaInitialize:
-    """Test WMA initialization behavior."""
+    """Layer 1 — WMA initialisation behaviour."""
 
     def test_initialize_correctness_with_linear_weights(self):
-        """Test initialize() computes correct WMA with linear weights."""
+        """Given a 5-value array, the WMA equals the dot-product of linear weights and values."""
         window = 5
         values = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         ma = WeightedMovingAverage(window=window)
@@ -20,7 +26,7 @@ class TestWmaInitialize:
         assert result == pytest.approx(expected, abs=1e-12)
 
     def test_initialize_wrong_length_raises(self):
-        """Test initialize() with wrong array length raises ValueError."""
+        """Given an array shorter or longer than *window*, ``initialize()`` raises ``ValueError``."""
         ma = WeightedMovingAverage(window=5)
         with pytest.raises(ValueError, match="Input array length must match window"):
             ma.initialize(np.array([1.0, 2.0, 3.0]))
@@ -28,7 +34,7 @@ class TestWmaInitialize:
             ma.initialize(np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
 
     def test_initialize_minimum_window(self):
-        """Test WMA initialize() with minimum window size."""
+        """Given the minimum window (2), the WMA uses weights [1, 2]."""
         values = np.array([2.0, 4.0])
         ma = WeightedMovingAverage(window=2)
         result = ma.initialize(values)
@@ -37,10 +43,10 @@ class TestWmaInitialize:
 
 
 class TestWmaNext:
-    """Test WMA next() behavior without state mutation."""
+    """Layer 2 — ``next()`` projection without state mutation."""
 
     def test_next_returns_correct_future_value(self):
-        """Test next() returns correct value without mutating state."""
+        """Given a warm WMA, ``next()`` returns the weighted mean of the future window."""
         ma = WeightedMovingAverage(window=3)
         ma.initialize(np.array([1.0, 2.0, 3.0]))
         initial_value = ma.get_value()
@@ -52,13 +58,13 @@ class TestWmaNext:
         assert ma.get_value() == pytest.approx(initial_value, abs=1e-12)
 
     def test_next_before_warm_raises(self):
-        """Test next() before initialize() raises ValueError."""
+        """Given an uninitialised WMA, ``next()`` raises ``ValueError``."""
         ma = WeightedMovingAverage(window=3)
         with pytest.raises(ValueError, match="initialized"):
             ma.next(1.0)
 
     def test_next_does_not_mutate_internal_state(self):
-        """Test that next() does not change internal buffer or value."""
+        """Given ``next()``, internal buffer length and contents remain unchanged."""
         ma = WeightedMovingAverage(window=3)
         ma.initialize(np.array([1.0, 2.0, 3.0]))
         pre_len = len(ma)
@@ -72,10 +78,10 @@ class TestWmaNext:
 
 
 class TestWmaUpdate:
-    """Test WMA update() behavior with rolling weighted sum."""
+    """Layer 2 — ``update()`` rolling weighted sum behaviour."""
 
     def test_update_rolling_weighted_sum(self):
-        """Test update() maintains correct rolling weighted sum."""
+        """Given successive updates, each result equals the weighted mean of the current window."""
         ma = WeightedMovingAverage(window=3)
         ma.initialize(np.array([1.0, 2.0, 3.0]))
         result = ma.update(4.0)
@@ -85,7 +91,7 @@ class TestWmaUpdate:
         assert result == pytest.approx(expected, abs=1e-12)
 
     def test_update_against_naive_weighted_mean(self):
-        """Compare WMA update() against naive np.dot(weights, values) / sum(weights)."""
+        """Given 20 random updates, WMA matches a hand-rolled rolling weighted mean."""
         window = 5
         np.random.seed(42)
         initial = np.random.randn(window)
@@ -101,7 +107,7 @@ class TestWmaUpdate:
             assert result == pytest.approx(expected, abs=1e-10)
 
     def test_update_tracks_historical_values(self):
-        """Test that update() stores historical values correctly."""
+        """Given two updates, ``get_values()`` contains the rolling window of WMAs."""
         ma = WeightedMovingAverage(window=3)
         ma.initialize(np.array([1.0, 2.0, 3.0]))
         ma.update(4.0)
@@ -116,10 +122,10 @@ class TestWmaUpdate:
 
 
 class TestWmaEdgeCases:
-    """Test WMA edge cases and numerical stability."""
+    """Layer 2 — Edge cases and numerical stability."""
 
     def test_constant_values(self):
-        """Test WMA with constant input values."""
+        """Given constant input values, the WMA remains constant."""
         ma = WeightedMovingAverage(window=4)
         ma.initialize(np.array([5.0, 5.0, 5.0, 5.0]))
         assert ma.get_value() == pytest.approx(5.0, abs=1e-12)
@@ -128,7 +134,7 @@ class TestWmaEdgeCases:
             assert result == pytest.approx(5.0, abs=1e-12)
 
     def test_large_window(self):
-        """Test WMA with a larger window size."""
+        """Given a 50-element window, the WMA equals the weighted sum of the initial array."""
         window = 50
         values = np.arange(window, dtype=np.float64)
         ma = WeightedMovingAverage(window=window)
@@ -138,7 +144,7 @@ class TestWmaEdgeCases:
         assert result == pytest.approx(expected, abs=1e-10)
 
     def test_increasing_values(self):
-        """Test WMA with monotonically increasing values."""
+        """Given monotonically increasing values, the WMA tracks the weighted trend."""
         ma = WeightedMovingAverage(window=4)
         ma.initialize(np.array([1.0, 2.0, 3.0, 4.0]))
         result = ma.update(5.0)

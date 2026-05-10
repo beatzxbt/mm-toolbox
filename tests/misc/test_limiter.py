@@ -1,4 +1,10 @@
-"""Tests for rate limiter utilities."""
+"""Layer 1–2 — Primitives and component tests for rate limiter utilities.
+
+Covers ``RateLimitStateConfig`` and ``RateLimitBurstConfig`` validation,
+``RateLimiterConfig`` defaults, token consumption, sub-bucket allocation,
+burst allowances, state transitions (NORMAL → WARNING → BLOCKED), refill
+behaviour, and exact boundary conditions.
+"""
 
 from __future__ import annotations
 
@@ -17,7 +23,11 @@ from mm_toolbox.rate_limiter import (
 
 
 def _avoid_second_boundary(buffer_s: float = 0.05) -> None:
-    """Sleep briefly to avoid crossing a second boundary mid-test."""
+    """Sleep briefly to avoid crossing a second boundary mid-test.
+
+    Args:
+        buffer_s: Seconds before the boundary that trigger a sleep.
+    """
     if time.time() % 1.0 > 1.0 - buffer_s:
         time.sleep(buffer_s * 2.0)
 
@@ -34,7 +44,22 @@ def make_limiter(
     max_attempts: int = 0,
     sub_bucket_strategy: SubBucketStrategy = SubBucketStrategy.PER_SECOND,
 ) -> RateLimiter:
-    """Create a limiter with explicit configuration controls."""
+    """Create a ``RateLimiter`` with explicit configuration controls.
+
+    Args:
+        capacity: Token capacity per window.
+        window_s: Window duration in seconds.
+        warn: Warning threshold as a fraction of capacity.
+        block: Block threshold as a fraction of capacity.
+        state_enabled: Whether state transitions are active.
+        burst_enabled: Whether burst tokens are allowed.
+        max_tokens: Maximum burst tokens.
+        max_attempts: Maximum burst attempts.
+        sub_bucket_strategy: Sub-bucket allocation strategy.
+
+    Returns:
+        Configured ``RateLimiter`` instance.
+    """
     state_cfg = RateLimitStateConfig(
         is_enabled=state_enabled,
         warning_threshold=warn,
@@ -56,10 +81,10 @@ def make_limiter(
 
 
 class TestRateLimitStateConfig:
-    """Test RateLimitStateConfig validation and defaults."""
+    """Layer 1 — ``RateLimitStateConfig`` primitive validation and defaults."""
 
     def test_default_thresholds(self) -> None:
-        """Default thresholds are enabled and ordered."""
+        """Given no arguments, defaults are enabled with warn=0.75 and block=0.95."""
         cfg = RateLimitStateConfig.default()
         assert cfg.is_enabled is True
         assert cfg.warning_threshold == 0.75
@@ -78,7 +103,7 @@ class TestRateLimitStateConfig:
     def test_invalid_thresholds(
         self, warning_threshold: float, block_threshold: float
     ) -> None:
-        """Thresholds must be in (0, 1) and strictly increasing."""
+        """Given thresholds outside (0, 1) or non-monotonic, construction raises ``ValueError``."""
         with pytest.raises(ValueError):
             RateLimitStateConfig(
                 is_enabled=True,
@@ -88,10 +113,10 @@ class TestRateLimitStateConfig:
 
 
 class TestRateLimitBurstConfig:
-    """Test RateLimitBurstConfig validation and defaults."""
+    """Layer 1 — ``RateLimitBurstConfig`` primitive validation and defaults."""
 
     def test_default_config(self) -> None:
-        """Default burst config is disabled."""
+        """Given no arguments, burst is disabled with zero limits."""
         cfg = RateLimitBurstConfig.default()
         assert cfg.is_enabled is False
         assert cfg.max_tokens == 0
@@ -99,7 +124,7 @@ class TestRateLimitBurstConfig:
 
     @pytest.mark.parametrize("max_tokens, max_attempts", [(0, 1), (1, 0), (-1, 2)])
     def test_invalid_enabled_settings(self, max_tokens: int, max_attempts: int) -> None:
-        """Enabled burst config requires positive limits."""
+        """Given enabled burst with non-positive limits, construction raises ``ValueError``."""
         with pytest.raises(ValueError):
             RateLimitBurstConfig(
                 is_enabled=True,
@@ -108,7 +133,7 @@ class TestRateLimitBurstConfig:
             )
 
     def test_valid_enabled_settings(self) -> None:
-        """Enabled burst config accepts positive limits."""
+        """Given enabled burst with positive limits, construction succeeds."""
         cfg = RateLimitBurstConfig(
             is_enabled=True,
             max_tokens=2,
@@ -120,10 +145,10 @@ class TestRateLimitBurstConfig:
 
 
 class TestRateLimiterConfig:
-    """Test RateLimiterConfig validation and defaults."""
+    """Layer 1 — ``RateLimiterConfig`` primitive validation and defaults."""
 
     def test_default_config(self) -> None:
-        """Default config wires state and burst policies."""
+        """Given ``default()``, state is enabled, burst is disabled, and strategy is PER_SECOND."""
         cfg = RateLimiterConfig.default(capacity=5, window_s=2)
         assert cfg.capacity == 5
         assert cfg.window_s == 2
@@ -133,16 +158,16 @@ class TestRateLimiterConfig:
 
     @pytest.mark.parametrize("capacity, window_s", [(0, 1), (-1, 1), (1, 0), (1, -2)])
     def test_invalid_capacity_or_window(self, capacity: int, window_s: int) -> None:
-        """Capacity and window duration must be positive."""
+        """Given non-positive capacity or window, ``default()`` raises ``ValueError``."""
         with pytest.raises(ValueError):
             RateLimiterConfig.default(capacity=capacity, window_s=window_s)
 
 
 class TestRateLimiterBasicOperations:
-    """Test core consume and accounting behavior."""
+    """Layer 2 — Core consume and accounting behaviour."""
 
     def test_basic_consumption_and_usage(self) -> None:
-        """Consuming tokens updates remaining count and usage."""
+        """Given a capacity of 4, consuming 1 token leaves 3 and usage=0.25."""
         rl = make_limiter(
             capacity=4,
             window_s=1,
@@ -171,7 +196,7 @@ class TestRateLimiterBasicOperations:
         assert rl.usage() == pytest.approx(0.25)
 
     def test_force_consumption_over_capacity(self) -> None:
-        """Force mode bypasses checks and marks OVERRIDE."""
+        """Given ``force=True``, consumption bypasses limits and marks ``OVERRIDE``."""
         rl = make_limiter(
             capacity=2,
             window_s=1,
@@ -188,10 +213,10 @@ class TestRateLimiterBasicOperations:
 
 
 class TestRateLimiterThresholds:
-    """Test warning and blocking thresholds."""
+    """Layer 2 — Warning and blocking threshold behaviour."""
 
     def test_warning_and_block_transitions(self) -> None:
-        """Warning triggers at > warn and block triggers at > block."""
+        """Given warn=0.5 and block=0.75, state transitions from NORMAL to WARNING to BLOCKED."""
         rl = make_limiter(
             capacity=4,
             window_s=1,
@@ -220,10 +245,10 @@ class TestRateLimiterThresholds:
 
 
 class TestRateLimiterSubBuckets:
-    """Test per-second sub-bucket behavior."""
+    """Layer 2 — Per-second sub-bucket behaviour."""
 
     def test_sub_bucket_limits_same_second(self) -> None:
-        """Sub-buckets cap per-second usage even when capacity remains."""
+        """Given PER_SECOND with capacity=4 and window=2, only 2 tokens are available in the first second."""
         _avoid_second_boundary()
         rl = make_limiter(
             capacity=4,
@@ -248,10 +273,10 @@ class TestRateLimiterSubBuckets:
 
 
 class TestRateLimiterBurst:
-    """Test burst allowance behavior."""
+    """Layer 2 — Burst allowance behaviour."""
 
     def test_burst_allows_limited_overage(self) -> None:
-        """Burst allows one extra attempt within configured limits."""
+        """Given burst with max_tokens=2 and max_attempts=1, one extra request succeeds."""
         rl = make_limiter(
             capacity=2,
             window_s=2,
@@ -274,10 +299,10 @@ class TestRateLimiterBurst:
 
 
 class TestRateLimiterFactories:
-    """Test RateLimiter factory constructors."""
+    """Layer 1 — ``RateLimiter`` factory constructors."""
 
     def test_factory_constructors(self) -> None:
-        """Factory methods return functional limiters with expected capacity."""
+        """Given factory methods, each returns a limiter with the expected initial capacity."""
         per_second = RateLimiter.per_second(3)
         per_minute = RateLimiter.per_minute(4)
         per_window = RateLimiter.per_window(5, 2)
@@ -288,13 +313,13 @@ class TestRateLimiterFactories:
 
 
 class TestRateLimiterDistribution:
-    """Test token allocation across sub-buckets."""
+    """Layer 2 — Token allocation across sub-buckets."""
 
     def test_odd_capacity_distribution(self) -> None:
-        """Odd capacity distributes remainder to early sub-buckets.
+        """Given capacity=5 and window=2, PER_SECOND allocates [3, 2] tokens.
 
-        With capacity=5 and window_s=2, PER_SECOND should allocate
-        [3, 2] tokens across the two one-second sub-buckets.
+        Odd capacity must distribute the remainder to early sub-buckets;
+        otherwise a 5-token limiter would allow 2+2=4 tokens instead of 5.
         """
         _avoid_second_boundary()
         rl = make_limiter(
@@ -304,32 +329,28 @@ class TestRateLimiterDistribution:
             sub_bucket_strategy=SubBucketStrategy.PER_SECOND,
         )
 
-        # First sub-bucket should hold 3 tokens.
         first = rl.try_consume_multiple(3)
         assert first.allowed is True
         assert first.remaining == 2
 
-        # 4th token in the same second should hit sub-bucket cap.
         denied = rl.try_consume()
         assert denied.allowed is False
 
         time.sleep(1.05)
 
-        # Second sub-bucket should hold 2 tokens.
         second = rl.try_consume_multiple(2)
         assert second.allowed is True
         assert second.remaining == 0
 
-        # 3rd token in the second second should hit sub-bucket cap.
         denied2 = rl.try_consume()
         assert denied2.allowed is False
 
 
 class TestRateLimiterConsumeMethods:
-    """Test direct consume methods and large requests."""
+    """Layer 2 — Direct consume methods and large requests."""
 
     def test_try_consume_directly(self) -> None:
-        """try_consume() works independently of try_consume_multiple(1)."""
+        """Given ``try_consume()``, it behaves like ``try_consume_multiple(1)``."""
         rl = make_limiter(
             capacity=2,
             window_s=1,
@@ -343,7 +364,7 @@ class TestRateLimiterConsumeMethods:
         assert result.usage == pytest.approx(0.5)
 
     def test_exceed_capacity_single_call(self) -> None:
-        """A single request larger than remaining capacity is denied immediately."""
+        """Given a request larger than remaining capacity, it is denied immediately."""
         rl = make_limiter(
             capacity=2,
             window_s=1,
@@ -351,9 +372,7 @@ class TestRateLimiterConsumeMethods:
             sub_bucket_strategy=SubBucketStrategy.DISABLED,
         )
 
-        # Consume 2 of 2 tokens.
         rl.try_consume_multiple(2)
-        # Request 10 more – should be denied outright.
         denied = rl.try_consume_multiple(10)
         assert denied.allowed is False
         assert denied.state == RateLimitState.BLOCKED
@@ -361,10 +380,10 @@ class TestRateLimiterConsumeMethods:
 
 
 class TestRateLimiterRefillBehavior:
-    """Test explicit and implicit refill behavior."""
+    """Layer 2 — Explicit and implicit refill behaviour."""
 
     def test_explicit_refill_resets_usage(self) -> None:
-        """Calling refill() mid-window resets all usage counters to zero."""
+        """Given ``refill()``, all usage counters reset to zero mid-window."""
         rl = make_limiter(
             capacity=4,
             window_s=2,
@@ -380,7 +399,7 @@ class TestRateLimiterRefillBehavior:
         assert rl.usage() == pytest.approx(0.0)
 
     def test_tokens_remaining_triggers_refill(self) -> None:
-        """tokens_remaining() auto-refills once the window has expired."""
+        """Given an expired window, ``tokens_remaining()`` auto-refills."""
         _avoid_second_boundary()
         rl = make_limiter(
             capacity=2,
@@ -396,7 +415,7 @@ class TestRateLimiterRefillBehavior:
         assert rl.tokens_remaining() == 2
 
     def test_burst_resets_after_refill(self) -> None:
-        """Burst attempts are restored after the window expires."""
+        """Given an expired window, burst attempts are restored."""
         _avoid_second_boundary()
         rl = make_limiter(
             capacity=2,
@@ -408,30 +427,26 @@ class TestRateLimiterRefillBehavior:
             sub_bucket_strategy=SubBucketStrategy.DISABLED,
         )
 
-        # Consume all normal tokens.
         rl.try_consume_multiple(2)
-        # Use the single burst attempt.
         burst = rl.try_consume()
         assert burst.allowed is True
 
-        # Burst is now exhausted.
         exhausted = rl.try_consume()
         assert exhausted.allowed is False
         assert exhausted.state == RateLimitState.WARNING
 
         time.sleep(1.05)
 
-        # After refill, burst should be available again.
         rl.try_consume_multiple(2)
         burst2 = rl.try_consume()
         assert burst2.allowed is True
 
 
 class TestRateLimiterThresholdsExtended:
-    """Test state transitions with and without sub-buckets."""
+    """Layer 2 — State transitions with and without sub-buckets."""
 
     def test_thresholds_with_per_second(self) -> None:
-        """Warning/block transitions behave correctly when PER_SECOND is enabled."""
+        """Given PER_SECOND enabled, warning and block thresholds behave correctly across buckets."""
         _avoid_second_boundary()
         rl = make_limiter(
             capacity=8,
@@ -442,7 +457,6 @@ class TestRateLimiterThresholdsExtended:
             sub_bucket_strategy=SubBucketStrategy.PER_SECOND,
         )
 
-        # First sub-bucket holds 4 tokens.
         normal = rl.try_consume_multiple(4)
         assert normal.allowed is True
         assert normal.state == RateLimitState.NORMAL
@@ -450,7 +464,6 @@ class TestRateLimiterThresholdsExtended:
 
         time.sleep(1.05)
 
-        # Cross into WARNING in the second sub-bucket.
         warning = rl.try_consume_multiple(1)
         assert warning.allowed is True
         assert warning.state == RateLimitState.WARNING
@@ -461,13 +474,12 @@ class TestRateLimiterThresholdsExtended:
         assert warning2.state == RateLimitState.WARNING
         assert warning2.usage == pytest.approx(0.75)
 
-        # Next request would exceed block threshold.
         blocked = rl.try_consume_multiple(1)
         assert blocked.allowed is False
         assert blocked.state == RateLimitState.BLOCKED
 
     def test_thresholds_disabled(self) -> None:
-        """Warning/block behavior without sub-buckets (DISABLED path)."""
+        """Given DISABLED strategy, state transitions behave linearly across the whole window."""
         rl = make_limiter(
             capacity=10,
             window_s=2,
@@ -497,7 +509,7 @@ class TestRateLimiterThresholdsExtended:
         assert blocked.state == RateLimitState.BLOCKED
 
     def test_burst_with_state_thresholds(self) -> None:
-        """Burst-allowed requests report NORMAL state even above block threshold."""
+        """Given burst above the block threshold, the state reports ``NORMAL`` instead of ``BLOCKED``."""
         rl = make_limiter(
             capacity=4,
             window_s=1,
@@ -510,13 +522,11 @@ class TestRateLimiterThresholdsExtended:
             sub_bucket_strategy=SubBucketStrategy.PER_SECOND,
         )
 
-        # Reach WARNING state.
         warning = rl.try_consume_multiple(3)
         assert warning.allowed is True
         assert warning.state == RateLimitState.WARNING
         assert warning.usage == pytest.approx(0.75)
 
-        # Burst should still be allowed and report NORMAL.
         burst = rl.try_consume_multiple(2)
         assert burst.allowed is True
         assert burst.state == RateLimitState.NORMAL
@@ -524,7 +534,7 @@ class TestRateLimiterThresholdsExtended:
         assert burst.usage == pytest.approx(1.0)
 
     def test_blocked_without_burst(self) -> None:
-        """Over-capacity requests return BLOCKED when burst is disabled."""
+        """Given burst disabled, over-capacity requests return ``BLOCKED``."""
         rl = make_limiter(
             capacity=2,
             window_s=1,
@@ -541,10 +551,10 @@ class TestRateLimiterThresholdsExtended:
 
 
 class TestRateLimiterSubBucketBurst:
-    """Test burst interaction with per-second sub-buckets."""
+    """Layer 2 — Burst interaction with per-second sub-buckets."""
 
     def test_sub_bucket_exhaustion_with_burst(self) -> None:
-        """Burst caps sub-bucket usage at the sub-allocation limit."""
+        """Given burst, sub-bucket usage is still capped at the sub-allocation limit."""
         _avoid_second_boundary()
         rl = make_limiter(
             capacity=4,
@@ -556,22 +566,18 @@ class TestRateLimiterSubBucketBurst:
             sub_bucket_strategy=SubBucketStrategy.PER_SECOND,
         )
 
-        # Exhaust the first sub-bucket (allocation = 2).
         rl.try_consume_multiple(2)
 
-        # Burst should be allowed but sub-usage capped at allocation.
         burst = rl.try_consume_multiple(1)
         assert burst.allowed is True
         assert burst.remaining == 1
 
-        # Further requests in the same second should still be denied
-        # because the sub-bucket remains exhausted and burst is spent.
         denied = rl.try_consume()
         assert denied.allowed is False
         assert denied.state == RateLimitState.WARNING
 
     def test_burst_cap_at_capacity(self) -> None:
-        """Burst does not let used_tokens exceed overall capacity."""
+        """Given burst, ``used_tokens`` never exceeds overall capacity."""
         rl = make_limiter(
             capacity=2,
             window_s=1,
@@ -582,17 +588,15 @@ class TestRateLimiterSubBucketBurst:
             sub_bucket_strategy=SubBucketStrategy.DISABLED,
         )
 
-        # Use all normal capacity.
         rl.try_consume_multiple(2)
 
-        # Burst request that would push used_tokens past capacity.
         burst = rl.try_consume_multiple(2)
         assert burst.allowed is True
         assert burst.remaining == 0
         assert burst.usage == pytest.approx(1.0)
 
     def test_force_increments_sub_bucket(self) -> None:
-        """force=True increments sub-bucket usage as well as overall usage."""
+        """Given ``force=True``, sub-bucket usage is incremented even though the limit was bypassed."""
         _avoid_second_boundary()
         rl = make_limiter(
             capacity=4,
@@ -601,28 +605,23 @@ class TestRateLimiterSubBucketBurst:
             sub_bucket_strategy=SubBucketStrategy.PER_SECOND,
         )
 
-        # Use half the first sub-bucket.
         rl.try_consume_multiple(2)
 
-        # Force bypasses sub-bucket limits.
         forced = rl.try_consume(force=True)
         assert forced.allowed is True
         assert forced.state == RateLimitState.OVERRIDE
 
-        # The forced token was counted in the sub-bucket, so a normal
-        # request in the same second should now be blocked.
         blocked = rl.try_consume()
         assert blocked.allowed is False
 
 
 class TestRateLimiterForceEdgeCases:
-    """Test force mode edge cases."""
+    """Layer 2 — Force mode edge cases."""
 
     def test_force_usage_one_at_min_capacity(self) -> None:
-        """Force consumption at minimum valid capacity returns usage=1.0.
+        """Given capacity=1 and ``force=True``, usage returns exactly 1.0.
 
-        This exercises the defensive ``capacity <= 0`` branch in the force
-        path by testing the boundary where the formula yields exactly 1.0.
+        This exercises the defensive ``capacity <= 0`` branch boundary.
         """
         rl = make_limiter(
             capacity=1,
@@ -639,10 +638,10 @@ class TestRateLimiterForceEdgeCases:
 
 
 class TestRateLimiterIntegration:
-    """Test refill behavior in a realistic loop."""
+    """Layer 3 — Refill behaviour in a realistic loop."""
 
     def test_refill_resets_after_window(self, wait_for) -> None:
-        """Tokens are restored after the window elapses."""
+        """Given a full-window consumption, tokens are restored after the window elapses."""
         rl = make_limiter(
             capacity=2,
             window_s=1,
@@ -658,10 +657,10 @@ class TestRateLimiterIntegration:
 
 
 class TestRateLimiterInvalidConfig:
-    """Test configuration type validation."""
+    """Layer 1 — Configuration type validation."""
 
     def test_invalid_config_raises_typeerror(self) -> None:
-        """Passing None or dict raises TypeError with clear message."""
+        """Given ``None`` or a ``dict``, construction raises ``TypeError``."""
         with pytest.raises(TypeError, match="config must be RateLimiterConfig"):
             RateLimiter(None)
 
@@ -670,10 +669,10 @@ class TestRateLimiterInvalidConfig:
 
 
 class TestRateLimiterThresholdBoundaries:
-    """Test exact boundary behavior for warning and block thresholds."""
+    """Layer 2 — Exact boundary behaviour for warning and block thresholds."""
 
     def test_exact_warning_boundary_is_normal(self) -> None:
-        """Usage exactly at warn threshold returns NORMAL, not WARNING."""
+        """Given usage exactly at warn=0.5, the state is ``NORMAL``, not ``WARNING``."""
         rl = make_limiter(
             capacity=4,
             window_s=1,
@@ -694,7 +693,7 @@ class TestRateLimiterThresholdBoundaries:
         assert result.usage == pytest.approx(0.75)
 
     def test_exact_block_boundary_is_allowed(self) -> None:
-        """Usage exactly at block threshold is allowed, not BLOCKED."""
+        """Given usage exactly at block=0.75, the request is allowed, not ``BLOCKED``."""
         rl = make_limiter(
             capacity=4,
             window_s=1,
@@ -716,10 +715,10 @@ class TestRateLimiterThresholdBoundaries:
 
 
 class TestRateLimiterBurstDisabledSubBuckets:
-    """Test burst behavior when sub-buckets are disabled."""
+    """Layer 2 — Burst behaviour when sub-buckets are disabled."""
 
     def test_burst_with_disabled_strategy(self) -> None:
-        """Burst works correctly when sub-bucket strategy is DISABLED."""
+        """Given DISABLED strategy, burst still functions correctly."""
         rl = make_limiter(
             capacity=2,
             window_s=2,
@@ -740,7 +739,7 @@ class TestRateLimiterBurstDisabledSubBuckets:
         assert burst.remaining == 0
 
     def test_burst_blocks_when_request_exceeds_max_tokens(self) -> None:
-        """Request larger than max_burst_tokens is blocked even with burst."""
+        """Given a request larger than ``max_burst_tokens``, it is blocked even with burst enabled."""
         rl = make_limiter(
             capacity=2,
             window_s=2,
@@ -762,10 +761,10 @@ class TestRateLimiterBurstDisabledSubBuckets:
 
 
 class TestRateLimiterBurstExhaustion:
-    """Test burst attempt counter and exhaustion."""
+    """Layer 2 — Burst attempt counter and exhaustion."""
 
     def test_multiple_burst_attempts_exhaustion(self) -> None:
-        """Burst attempts increment and exhaust correctly."""
+        """Given 3 burst attempts, the 4th request is denied."""
         rl = make_limiter(
             capacity=2,
             window_s=2,
@@ -792,10 +791,10 @@ class TestRateLimiterBurstExhaustion:
 
 
 class TestRateLimiterSubBucketRemainder:
-    """Test sub-bucket allocation with remainder tokens."""
+    """Layer 2 — Sub-bucket allocation with remainder tokens."""
 
     def test_sub_bucket_remainder_handling(self) -> None:
-        """Capacity remainder is distributed to earlier sub-buckets."""
+        """Given capacity=5 and window=2, 3 tokens are in the first bucket and 2 in the second."""
         _avoid_second_boundary()
         rl = make_limiter(
             capacity=5,
@@ -829,7 +828,7 @@ class TestRateLimiterLowPriority:
     """Low priority edge-case and consistency tests."""
 
     def test_per_second_with_window_s_one(self) -> None:
-        """PER_SECOND with window_s=1 creates exactly 1 sub-bucket."""
+        """Given PER_SECOND with window_s=1, exactly 1 sub-bucket is created."""
         rl = make_limiter(
             capacity=5,
             window_s=1,
@@ -846,7 +845,7 @@ class TestRateLimiterLowPriority:
         assert blocked.state == RateLimitState.BLOCKED
 
     def test_sequential_consumes_to_exact_capacity(self) -> None:
-        """Consuming exactly all remaining tokens returns remaining=0."""
+        """Given sequential consumes, exactly all remaining tokens can be consumed."""
         rl = make_limiter(
             capacity=4,
             window_s=1,
@@ -864,7 +863,7 @@ class TestRateLimiterLowPriority:
         assert second.usage == pytest.approx(1.0)
 
     def test_consume_after_blocked(self) -> None:
-        """After hitting block threshold, further requests continue to deny."""
+        """Given a blocked state, further requests continue to be denied."""
         rl = make_limiter(
             capacity=4,
             window_s=1,
@@ -888,12 +887,11 @@ class TestRateLimiterLowPriority:
         assert blocked_again.remaining == 1
 
     def test_usage_with_capacity_zero(self) -> None:
-        """usage() returns 1.0 when capacity is zero or negative.
+        """Given full consumption, usage reaches 1.0.
 
-        The ``capacity <= 0`` guard in limiter.pyx:307-309 is unreachable
-        through normal construction (validated by RateLimiterConfig), so we
-        verify the equivalent observable bound: usage reaches 1.0 at full
-        capacity.
+        The ``capacity <= 0`` guard in limiter.pyx is unreachable through
+        normal construction (validated by ``RateLimiterConfig``), so we
+        verify the observable bound: usage reaches 1.0 at full capacity.
         """
         rl = make_limiter(
             capacity=4,
@@ -906,7 +904,7 @@ class TestRateLimiterLowPriority:
         assert rl.usage() == pytest.approx(1.0)
 
     def test_usage_triggers_refill_after_window(self) -> None:
-        """usage() auto-refills and returns 0.0 after the window expires."""
+        """Given an expired window, ``usage()`` auto-refills and returns 0.0."""
         rl = make_limiter(
             capacity=2,
             window_s=1,
@@ -921,7 +919,7 @@ class TestRateLimiterLowPriority:
         assert rl.usage() == pytest.approx(0.0)
 
     def test_try_consume_after_block_no_state_mutation(self) -> None:
-        """Blocked request does not mutate partial state."""
+        """Given a blocked request, partial state is not mutated."""
         rl = make_limiter(
             capacity=4,
             window_s=1,
@@ -945,7 +943,7 @@ class TestRateLimiterLowPriority:
         assert rl.usage() == pytest.approx(before_usage)
 
     def test_window_not_expired_no_refill(self) -> None:
-        """Calls within the window do not trigger unexpected refills."""
+        """Given calls within the window, no unexpected refill occurs."""
         rl = make_limiter(
             capacity=4,
             window_s=2,

@@ -1,14 +1,15 @@
-"""Tests for the binary protocol layer of the advanced logging system.
+"""Layer 3 — Integration tests for the advanced logging binary protocol.
 
-Note: BinaryWriter and BinaryReader are cdef-only Cython classes, so we test
-the protocol indirectly through the worker/master integration.
+Because ``BinaryWriter`` and ``BinaryReader`` are cdef-only Cython classes,
+the protocol is validated indirectly through worker/master integration.
+Covers round-trip correctness, batching, binary payloads (null/high bytes),
+multiprocess delivery, empty messages, 1 MB messages, and unicode worker names.
 """
 
 from __future__ import annotations
 
 import multiprocessing
 import time
-
 
 from mm_toolbox.logging.advanced.config import LoggerConfig
 from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
@@ -18,24 +19,29 @@ from mm_toolbox.logging.advanced.worker import WorkerLogger
 
 
 class CaptureHandler(BaseLogHandler):
-    """Handler that captures all received logs."""
+    """Test-double handler that captures every received log for inspection."""
 
     def __init__(self):
-        """Initialize the capture handler."""
         super().__init__()
         self.logs = []
 
     def push(self, logs: list[PyLog]) -> None:
-        """Capture logs.
+        """Append the entire batch to an internal list.
 
         Args:
-            logs: Batch of log entries.
+            logs: Batch of log entries received from the master.
         """
         self.logs.extend(logs)
 
 
 def _protocol_worker(path: str, name: str, messages: list[bytes]) -> None:
-    """Worker process that sends binary messages."""
+    """Target function for a multiprocessing worker that sends binary messages.
+
+    Args:
+        path: IPC shared-memory path.
+        name: Worker name tag.
+        messages: List of raw byte payloads to log.
+    """
     config = LoggerConfig(path=path)
     logger = WorkerLogger(config=config, name=name)
     for msg in messages:
@@ -44,10 +50,10 @@ def _protocol_worker(path: str, name: str, messages: list[bytes]) -> None:
 
 
 class TestProtocolIndirect:
-    """Indirect protocol tests via worker/master integration."""
+    """Layer 3 — Indirect protocol validation via worker/master integration."""
 
     def test_protocol_roundtrip_basic(self, tmp_path):
-        """Verify basic message serialization/deserialization roundtrip."""
+        """Given a single INFO message, the master receives the exact name, level, and payload."""
         path = str(tmp_path / "test_protocol_basic.shm")
         config = LoggerConfig(path=path)
         handler = CaptureHandler()
@@ -58,7 +64,6 @@ class TestProtocolIndirect:
         logger.info(msg_bytes=b"hello world")
         logger.shutdown()
 
-        # Give master time to consume
         time.sleep(0.1)
         master.shutdown()
 
@@ -68,7 +73,7 @@ class TestProtocolIndirect:
         assert handler.logs[0].level == PyLogLevel.INFO
 
     def test_protocol_multiple_messages(self, tmp_path):
-        """Verify multiple messages are correctly batched and decoded."""
+        """Given 25 messages, all are decoded and delivered despite batching boundaries."""
         path = str(tmp_path / "test_protocol_multi.shm")
         config = LoggerConfig(path=path, max_batch_messages=10)
         handler = CaptureHandler()
@@ -89,7 +94,7 @@ class TestProtocolIndirect:
             assert msg in received_messages
 
     def test_protocol_binary_payload(self, tmp_path):
-        """Verify binary payloads with null bytes and high bytes."""
+        """Given payloads with null bytes, high bytes, and mixed content, they survive round-trip intact."""
         path = str(tmp_path / "test_protocol_binary.shm")
         config = LoggerConfig(path=path)
         handler = CaptureHandler()
@@ -98,7 +103,6 @@ class TestProtocolIndirect:
 
         logger = WorkerLogger(config=config, name="BINARY")
 
-        # Payloads with null bytes, high bytes, and mixed content
         payloads = [
             b"\x00\x01\x02\x03",
             b"\xff\xfe\xfd\xfc",
@@ -119,7 +123,7 @@ class TestProtocolIndirect:
             assert payload in received
 
     def test_protocol_multiprocess(self, tmp_path):
-        """Verify protocol works correctly across processes."""
+        """Given a separate process emitting 10 messages, the master receives all of them."""
         path = str(tmp_path / "test_protocol_mp.shm")
         config = LoggerConfig(path=path)
         handler = CaptureHandler()
@@ -144,7 +148,7 @@ class TestProtocolIndirect:
             assert msg in received
 
     def test_protocol_empty_message(self, tmp_path):
-        """Verify empty message is handled correctly."""
+        """Given an empty byte string, the master receives a log with an empty message."""
         path = str(tmp_path / "test_protocol_empty.shm")
         config = LoggerConfig(path=path)
         handler = CaptureHandler()
@@ -162,7 +166,7 @@ class TestProtocolIndirect:
         assert handler.logs[0].message == b""
 
     def test_protocol_large_message(self, tmp_path):
-        """Verify large message (1MB) is handled correctly."""
+        """Given a 1 MB payload, the master receives it without truncation or corruption."""
         path = str(tmp_path / "test_protocol_large.shm")
         config = LoggerConfig(path=path)
         handler = CaptureHandler()
@@ -181,7 +185,7 @@ class TestProtocolIndirect:
         assert handler.logs[0].message == large_msg
 
     def test_protocol_unicode_name(self, tmp_path):
-        """Verify unicode worker names are handled correctly."""
+        """Given a unicode worker name, it is UTF-8 encoded and decoded correctly."""
         path = str(tmp_path / "test_protocol_unicode.shm")
         config = LoggerConfig(path=path)
         handler = CaptureHandler()
