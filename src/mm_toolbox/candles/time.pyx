@@ -1,18 +1,42 @@
+"""Time-interval candle aggregator.
+
+Creates a new candle at fixed time intervals (e.g. every N seconds).
+"""
+
 from libc.math cimport fmax, fmin
 from mm_toolbox.time.time cimport time_ms
 from mm_toolbox.candles.base cimport BaseCandles
 
 cdef class TimeCandles(BaseCandles):
-    """Candle aggregator that creates new candles based on a fixed time interval."""
-    
+    """Candle aggregator triggered by fixed time intervals.
+
+    A new candle is created each time the interval ``secs_per_bucket``
+    elapses.
+
+    Attributes:
+        millis_per_bucket (double): Interval length in milliseconds.
+        next_candle_close_time (double): Timestamp when the current candle
+            should close.
+    """
+
     def __init__(self, double secs_per_bucket, int num_candles=1000, bint store_trades=True):
-        """Initialize the time-based candle aggregator."""
+        """Initialize the time-based candle aggregator.
+
+        Args:
+            secs_per_bucket (double): Candle duration in seconds.
+            num_candles (int): Ring buffer capacity for closed candles.
+            store_trades (bool): Whether to retain per-trade records.
+        """
         BaseCandles.__init__(self, num_candles, store_trades)
         self.millis_per_bucket = secs_per_bucket * 1000.0
         self.next_candle_close_time = time_ms() + self.millis_per_bucket
 
     cpdef void process_trade(self, object trade):
-        """Process a single trade tick, updating the current candle."""
+        """Process a single trade tick.
+
+        Args:
+            trade (Trade): The trade to ingest.
+        """
         cdef:
             double time_ms = trade.time_ms
             bint is_buy = trade.is_buy

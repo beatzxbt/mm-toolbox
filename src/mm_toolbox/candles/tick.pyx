@@ -1,21 +1,42 @@
+"""Tick-count candle aggregator.
+
+Creates a new candle after a fixed number of trades (ticks).
+"""
+
 from mm_toolbox.candles.base cimport BaseCandles
 from libc.math cimport fmax, fmin
 
 cdef class TickCandles(BaseCandles):
-    """
-    Candle aggregator that creates new candles based on a fixed number of trades.
-    
-    A new candle is created when the specified number of trades is reached.
+    """Candle aggregator triggered by a fixed number of trades.
+
+    A new candle is created once ``ticks_per_bucket`` trades have been
+    accumulated.
+
+    Attributes:
+        ticks_per_bucket (int): Number of trades required to close a candle.
     """
     def __init__(self, int ticks_per_bucket, int num_candles=1000, bint store_trades=True):
-        """Initialize the tick-based candle aggregator."""
+        """Initialize the tick-based candle aggregator.
+
+        Args:
+            ticks_per_bucket (int): Number of trades per candle (must be > 0).
+            num_candles (int): Ring buffer capacity for closed candles.
+            store_trades (bool): Whether to retain per-trade records.
+
+        Raises:
+            ValueError: If ticks_per_bucket is not positive.
+        """
         if ticks_per_bucket <= 0:
             raise ValueError(f"Invalid ticks_per_bucket; expected >0 but got {ticks_per_bucket}")
         BaseCandles.__init__(self, num_candles, store_trades)
         self.ticks_per_bucket = ticks_per_bucket
 
     cpdef void process_trade(self, object trade):
-        """Process a single trade tick, updating the current candle."""
+        """Process a single trade tick.
+
+        Args:
+            trade (Trade): The trade to ingest.
+        """
         cdef:
             double time_ms = trade.time_ms
             bint is_buy = trade.is_buy
