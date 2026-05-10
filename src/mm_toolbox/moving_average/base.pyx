@@ -107,27 +107,6 @@ cdef class MovingAverage:
         self.__enforce_not_fast()
         return len(self._values) 
 
-    def __iter__(self):
-        """Iterate over stored values from oldest to newest.
-
-        Returns:
-            Iterator[float]: Iterator over stored values.
-        """
-        self.__enforce_not_fast()
-        return iter(self._values)
-
-    def __getitem__(self, int idx):
-        """Get the stored value at the given index.
-
-        Args:
-            idx (int): Index of the element to retrieve.
-
-        Returns:
-            float: Stored moving average value.
-        """
-        self.__enforce_not_fast()
-        return self._values[idx]
-
     cdef inline void ensure_warm(self):
         """Ensure the moving average has been initialized.
 

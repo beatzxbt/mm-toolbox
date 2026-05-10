@@ -8,8 +8,8 @@ cdef class SimpleMovingAverage(MovingAverage):
     The SMA uses equal weights 1/N, where N is the window size.
     """
 
-    def __init__(self, int window, bint fast=False):
-        super().__init__(window, fast)
+    def __init__(self, int window, bint is_fast=False):
+        super().__init__(window, is_fast)
         
         self._raw_values = NumericRingBuffer(window, dtype='float64') 
         self._rolling_sum = 0.0
@@ -26,13 +26,13 @@ cdef class SimpleMovingAverage(MovingAverage):
                 f"Input array length must match window; expected {self._window} but got {n}"
             )
 
-        self._values.fast_reset()
+        self._values.clear()
         self._rolling_sum = 0.0
         
         for i in range(n):
             raw_value = values_view[i]
             self._rolling_sum += raw_value
-            self._raw_values.append(raw_value)
+            self._raw_values.insert(raw_value)
         
         self._value = self._rolling_sum / self._window
         self._is_warm = True
@@ -45,7 +45,7 @@ cdef class SimpleMovingAverage(MovingAverage):
 
         cdef: 
             double new_rolling_sum
-            double old_raw_value = self._raw_values[0]
+            double old_raw_value = self._raw_values.peekleft()
         
         new_rolling_sum = self._rolling_sum + (new_val - old_raw_value)
         return new_rolling_sum / self._window
@@ -53,10 +53,10 @@ cdef class SimpleMovingAverage(MovingAverage):
     cpdef double update(self, double new_val):
         self.ensure_warm()
         
-        cdef double old_raw_value = self._raw_values.popleft()
+        cdef double old_raw_value = self._raw_values.consume()
         
         self._rolling_sum += (new_val - old_raw_value)
-        self._raw_values.append(new_val)
+        self._raw_values.insert(new_val)
         self._value = self._rolling_sum / self._window
         self.push_to_ringbuffer()
         return self._value

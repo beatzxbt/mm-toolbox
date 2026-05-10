@@ -37,7 +37,7 @@ cdef class TimeExponentialMovingAverage(MovingAverage):
                 f"Input array too short; expected >1 but got {n}"
             )
 
-        self._values.fast_reset()
+        self._values.clear()
         self._value = values[0]
         self.push_to_ringbuffer()
         self._is_warm = True
@@ -49,10 +49,7 @@ cdef class TimeExponentialMovingAverage(MovingAverage):
 
     cpdef double next(self, double new_val):
         if not self._is_warm:
-            self._time_s = time_s()
-            self._value = new_val
-            self._is_warm = True
-            return self._value
+            return new_val
 
         cdef:
             double time_now = time_s()

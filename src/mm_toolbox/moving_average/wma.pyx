@@ -8,8 +8,8 @@ cdef class WeightedMovingAverage(MovingAverage):
     The WMA uses linearly increasing weights from 1 to N, where N is the window size.
     """
 
-    def __init__(self, int window, bint fast=False):
-        super().__init__(window, fast)
+    def __init__(self, int window, bint is_fast=False):
+        super().__init__(window, is_fast)
         
         # Cast window to a double as many calculations require
         # so below. Messy, but speeds things up considerably.
@@ -30,8 +30,8 @@ cdef class WeightedMovingAverage(MovingAverage):
                 f"Input array length must match window; expected {self._window} but got {n}"
             )
 
-        self._values.fast_reset()
-        self._raw_values.fast_reset()
+        self._values.clear()
+        self._raw_values.clear()
         self._rolling_sum = 0.0
         self._rolling_wsum = 0.0
 
@@ -39,7 +39,7 @@ cdef class WeightedMovingAverage(MovingAverage):
             val = values_view[i]
             self._rolling_sum += val
             self._rolling_wsum += (i + 1) * val
-            self._raw_values.append(val)
+            self._raw_values.insert(val)
 
         # Denominator = N(N + 1)/2
         self._value = self._rolling_wsum / (self._window_double * (self._window_double + 1.0) / 2.0)
@@ -54,7 +54,7 @@ cdef class WeightedMovingAverage(MovingAverage):
         cdef:
             double new_sum
             double new_wsum
-            double old_val = self._raw_values[0]
+            double old_val = self._raw_values.peekleft()
 
         new_sum = self._rolling_sum - old_val + new_val
         new_wsum = self._rolling_wsum - self._rolling_sum + self._window_double * new_val
@@ -64,13 +64,13 @@ cdef class WeightedMovingAverage(MovingAverage):
         self.ensure_warm()
 
         cdef:
-            double old_val = self._raw_values.popleft()
+            double old_val = self._raw_values.consume()
             double old_sum = self._rolling_sum
             double old_wsum = self._rolling_wsum
 
         self._rolling_sum = old_sum - old_val + new_val
         self._rolling_wsum = old_wsum - old_sum + self._window_double * new_val
-        self._raw_values.append(new_val)
+        self._raw_values.insert(new_val)
 
         # Denominator = N(N + 1)/2
         self._value = self._rolling_wsum / (self._window_double * (self._window_double + 1.0) / 2.0)
