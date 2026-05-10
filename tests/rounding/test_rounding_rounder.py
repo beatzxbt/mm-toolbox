@@ -1,4 +1,9 @@
-"""Tests for Rounder implementation."""
+"""Tests for Rounder implementation.
+
+Layer 2 tests: validate RounderConfig validation, basic rounding operations,
+custom configurations, different tick/lot sizes, array operations, and edge
+cases including extreme values, boundary conditions, and numerical stability.
+"""
 
 import numpy as np
 import pytest
@@ -8,10 +13,10 @@ from mm_toolbox.rounding.rounder import RounderConfig
 
 
 class TestRounderConfig:
-    """Test RounderConfig validation comprehensively."""
+    """Layer 1: Test RounderConfig validation comprehensively."""
 
     def test_valid_config_creation(self):
-        """Test creating valid configurations."""
+        """Given valid params, When creating RounderConfig, Then succeeds."""
         cfg = RounderConfig(
             tick_size=0.01,
             lot_size=0.001,
@@ -26,7 +31,7 @@ class TestRounderConfig:
         assert cfg.round_size_up is True
 
     def test_tick_size_validation(self):
-        """Test tick_size validation."""
+        """Given various tick sizes, When creating RounderConfig, Then validates correctly."""
         # Valid tick sizes
         valid_tick_sizes = [0.01, 0.001, 0.0001, 1.0, 0.5]
         for tick_size in valid_tick_sizes:
@@ -54,7 +59,7 @@ class TestRounderConfig:
                 )
 
     def test_lot_size_validation(self):
-        """Test lot_size validation."""
+        """Given various lot sizes, When creating RounderConfig, Then validates correctly."""
         # Valid lot sizes
         valid_lot_sizes = [0.01, 0.001, 0.0001, 1.0, 0.5]
         for lot_size in valid_lot_sizes:
@@ -82,7 +87,7 @@ class TestRounderConfig:
                 )
 
     def test_default_config_creation(self):
-        """Test default configuration creation."""
+        """Given default factory, When creating RounderConfig, Then correct defaults."""
         cfg = RounderConfig.default(tick_size=0.01, lot_size=0.001)
         assert cfg.tick_size == 0.01
         assert cfg.lot_size == 0.001
@@ -91,7 +96,7 @@ class TestRounderConfig:
         assert cfg.round_size_up is True
 
     def test_custom_rounding_configurations(self):
-        """Test different rounding direction configurations."""
+        """Given custom rounding directions, When creating RounderConfig, Then set correctly."""
         # Custom configuration: round bids up, asks down, sizes down
         cfg = RounderConfig(
             tick_size=0.01,
@@ -106,10 +111,10 @@ class TestRounderConfig:
 
 
 class TestRounderBasicOperations:
-    """Test basic Rounder operations."""
+    """Layer 2: Test basic Rounder operations."""
 
     def test_rounder_creation(self):
-        """Test creating Rounder instances."""
+        """Given valid config, When creating Rounder, Then succeeds."""
         cfg = RounderConfig.default(0.01, 0.001)
         rounder = Rounder(cfg)
 
@@ -119,7 +124,7 @@ class TestRounderBasicOperations:
         assert isinstance(rounder.size(1.234), float)
 
     def test_single_bid_rounding_default(self):
-        """Test single bid rounding with default configuration (round down)."""
+        """Given default config (round down), When bid called, Then rounds down."""
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
 
         # Test exact tick multiples
@@ -137,7 +142,7 @@ class TestRounderBasicOperations:
         assert rounder.bid(1.019) == 1.01
 
     def test_single_ask_rounding_default(self):
-        """Test single ask rounding with default configuration (round up)."""
+        """Given default config (round up), When ask called, Then rounds up."""
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
 
         # Test exact tick multiples
@@ -151,7 +156,7 @@ class TestRounderBasicOperations:
         assert rounder.ask(1.025) == 1.03
 
     def test_single_size_rounding_default(self):
-        """Test single size rounding with default configuration (round up)."""
+        """Given default config (round up), When size called, Then rounds up."""
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
 
         # Test exact lot multiples
@@ -165,7 +170,7 @@ class TestRounderBasicOperations:
         assert rounder.size(1.0025) == 1.003
 
     def test_array_bids_basic(self):
-        """Test basic array bid rounding."""
+        """Given price array, When bids called, Then array rounded down."""
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
         prices = np.array([1.234, 1.231, 1.237, 1.240, 1.245])
         expected = np.array([1.23, 1.23, 1.23, 1.24, 1.24])
@@ -175,7 +180,7 @@ class TestRounderBasicOperations:
         assert result.dtype == np.float64
 
     def test_array_asks_basic(self):
-        """Test basic array ask rounding."""
+        """Given price array, When asks called, Then array rounded up."""
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
         prices = np.array([1.234, 1.231, 1.237, 1.240, 1.245])
         expected = np.array([1.24, 1.24, 1.24, 1.24, 1.25])
@@ -185,7 +190,7 @@ class TestRounderBasicOperations:
         assert result.dtype == np.float64
 
     def test_array_sizes_basic(self):
-        """Test basic array size rounding."""
+        """Given size array, When sizes called, Then array rounded up."""
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
         sizes = np.array([1.234, 1.231, 1.237, 1.240, 1.245])
         expected = np.array([1.234, 1.231, 1.237, 1.240, 1.245])
@@ -196,10 +201,10 @@ class TestRounderBasicOperations:
 
 
 class TestRounderCustomConfigurations:
-    """Test Rounder with custom configurations."""
+    """Layer 2: Test Rounder with custom configurations."""
 
     def test_custom_bid_rounding(self):
-        """Test bid rounding with custom configuration (round up)."""
+        """Given custom config (round bids up), When bid called, Then rounds up."""
         cfg = RounderConfig(
             tick_size=0.01,
             lot_size=0.001,
@@ -215,7 +220,7 @@ class TestRounderCustomConfigurations:
         assert rounder.bid(1.025) == 1.03
 
     def test_custom_ask_rounding(self):
-        """Test ask rounding with custom configuration (round down)."""
+        """Given custom config (round asks down), When ask called, Then rounds down."""
         cfg = RounderConfig(
             tick_size=0.01,
             lot_size=0.001,
@@ -231,7 +236,7 @@ class TestRounderCustomConfigurations:
         assert rounder.ask(1.025) == 1.02
 
     def test_custom_size_rounding(self):
-        """Test size rounding with custom configuration (round down)."""
+        """Given custom config (round sizes down), When size called, Then rounds down."""
         cfg = RounderConfig(
             tick_size=0.01,
             lot_size=0.001,
@@ -247,7 +252,7 @@ class TestRounderCustomConfigurations:
         assert rounder.size(1.0025) == 1.002
 
     def test_array_operations_custom_config(self):
-        """Test array operations with custom configurations."""
+        """Given custom config, When array operations called, Then respects directions."""
         cfg = RounderConfig(
             tick_size=0.01,
             lot_size=0.001,
@@ -270,7 +275,7 @@ class TestRounderCustomConfigurations:
         np.testing.assert_allclose(result_asks, expected_asks, rtol=0, atol=1e-12)
 
     def test_rounding_direction_consistency(self):
-        """Test that rounding direction is consistent with configuration."""
+        """Given different configs, When rounding, Then directions consistent."""
         default_rounder = Rounder(RounderConfig.default(0.01, 0.001))
         custom_cfg = RounderConfig(
             tick_size=0.01,
@@ -293,10 +298,10 @@ class TestRounderCustomConfigurations:
 
 
 class TestRounderDifferentTickSizes:
-    """Test Rounder with different tick and lot sizes."""
+    """Layer 2: Test Rounder with different tick and lot sizes."""
 
     def test_small_tick_precision(self):
-        """Test precision with very small tick sizes."""
+        """Given very small tick size, When rounding, Then precise."""
         rounder = Rounder(RounderConfig.default(0.0001, 0.00001))
 
         # Test 0.0001 tick size
@@ -306,7 +311,7 @@ class TestRounderDifferentTickSizes:
         assert rounder.ask(1.12346) == 1.1235
 
     def test_large_tick_rounding(self):
-        """Test rounding with large tick sizes."""
+        """Given large tick size, When rounding, Then handles correctly."""
         rounder = Rounder(RounderConfig.default(1.0, 0.1))
 
         # Test 1.0 tick size
@@ -316,7 +321,7 @@ class TestRounderDifferentTickSizes:
         assert rounder.ask(1.6) == 2.0
 
     def test_fractional_tick_sizes(self):
-        """Test with fractional tick sizes."""
+        """Given fractional tick size, When rounding, Then handles correctly."""
         rounder = Rounder(RounderConfig.default(0.5, 0.1))
 
         # Test 0.5 tick size (simpler fractions to avoid precision issues)
@@ -336,7 +341,7 @@ class TestRounderDifferentTickSizes:
         assert rounder.ask(1.5) == 1.5
 
     def test_lot_size_variations(self):
-        """Test with different lot sizes."""
+        """Given different lot sizes, When rounding size, Then handles correctly."""
         rounder = Rounder(RounderConfig.default(0.01, 0.01))
 
         # Test 0.01 lot size
@@ -346,10 +351,10 @@ class TestRounderDifferentTickSizes:
 
 
 class TestRounderArrayOperations:
-    """Test array operations comprehensively."""
+    """Layer 2: Test array operations comprehensively."""
 
     def test_empty_arrays(self):
-        """Test handling of empty arrays."""
+        """Given empty arrays, When rounding called, Then returns empty arrays."""
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
         empty_prices = np.array([])
         empty_sizes = np.array([])
@@ -366,7 +371,7 @@ class TestRounderArrayOperations:
         assert result_sizes.dtype == np.float64
 
     def test_single_element_arrays(self):
-        """Test arrays with single elements."""
+        """Given single-element arrays, When rounding called, Then correct results."""
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
         single_price = np.array([1.234])
         single_size = np.array([1.234])
@@ -383,7 +388,7 @@ class TestRounderArrayOperations:
         assert result_size[0] == 1.234
 
     def test_large_arrays(self):
-        """Test with reasonably large arrays."""
+        """Given large arrays, When rounding called, Then correct results."""
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
         large_array = np.random.uniform(1.0, 2.0, 1000)
 
@@ -399,7 +404,7 @@ class TestRounderArrayOperations:
         assert result_sizes.dtype == np.float64
 
     def test_different_dtypes(self):
-        """Test handling of different numpy dtypes."""
+        """Given different numpy dtypes, When rounding called, Then converts correctly."""
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
 
         # The Cython implementation expects double precision, so we test conversion
@@ -415,7 +420,7 @@ class TestRounderArrayOperations:
         np.testing.assert_allclose(result_32, result_64, rtol=0, atol=1e-12)
 
     def test_scalar_array_consistency(self):
-        """Test that scalar and array methods produce consistent results."""
+        """Given same data via scalar and array APIs, When rounded, Then consistent results."""
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
         prices = np.array([1.234, 1.231, 1.237])
 
@@ -437,10 +442,10 @@ class TestRounderArrayOperations:
 
 
 class TestRounderEdgeCases:
-    """Test edge cases and error handling."""
+    """Layer 2: Test edge cases and error handling."""
 
     def test_zero_and_negative_values(self):
-        """Test handling of zero and negative values."""
+        """Given zero and negative values, When rounded, Then handles correctly."""
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
 
         # Zero values
@@ -454,7 +459,7 @@ class TestRounderEdgeCases:
         assert rounder.size(-1.234) == -1.234
 
     def test_extreme_values(self):
-        """Test handling of extreme values."""
+        """Given extreme values, When rounded, Then handles correctly."""
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
 
         # Very large values
@@ -468,7 +473,7 @@ class TestRounderEdgeCases:
         assert rounder.ask(small_price) == 0.01
 
     def test_boundary_values(self):
-        """Test values exactly at tick boundaries."""
+        """Given values at tick boundaries, When rounded, Then exact multiples."""
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
 
         # Test values exactly at tick boundaries
@@ -482,7 +487,7 @@ class TestRounderEdgeCases:
         assert rounder.ask(1.001) == 1.01
 
     def test_lot_size_boundaries(self):
-        """Test lot size rounding edge cases."""
+        """Given values at lot boundaries, When rounded, Then exact multiples."""
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
 
         # Test values exactly at lot boundaries
@@ -495,7 +500,7 @@ class TestRounderEdgeCases:
         assert rounder.size(1.0015) == 1.002
 
     def test_numerical_stability(self):
-        """Test numerical stability with floating point arithmetic."""
+        """Given repeated rounding, When applied, Then no error accumulation."""
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
 
         # Test that repeated operations don't accumulate errors
@@ -517,7 +522,7 @@ class TestRounderEdgeCases:
         assert result == pytest.approx(1.00001, abs=1e-6)
 
     def test_memory_efficiency(self):
-        """Test that array operations don't create unnecessary copies."""
+        """Given array operations, When executed, Then doesn't modify input."""
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
         prices = np.array([1.234, 1.231, 1.237])
 
@@ -531,7 +536,7 @@ class TestRounderEdgeCases:
         assert result.base is not prices.base if prices.base is not None else True
 
     def test_precision_edge_cases(self):
-        """Test precision edge cases with different tick sizes."""
+        """Given prices near tick boundaries, When rounded, Then valid multiples."""
         # Test with simpler tick size to avoid floating point precision issues
         rounder = Rounder(RounderConfig.default(0.01, 0.001))
 

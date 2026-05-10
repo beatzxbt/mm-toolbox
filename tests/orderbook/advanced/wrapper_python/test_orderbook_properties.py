@@ -1,5 +1,4 @@
-"""
-Property-based and invariant tests for AdvancedOrderbook.
+"""Property-based and invariant tests for AdvancedOrderbook.
 
 Tests that certain properties and invariants hold across a wide range of inputs
 and sequences of operations. Uses pytest parametrization and randomized testing
@@ -76,11 +75,11 @@ def _generate_valid_snapshot(
 
 @pytest.mark.property
 class TestBBOInvariant:
-    """Test that best_bid <= best_ask invariant holds."""
+    """Layer 3: Test that best_bid <= best_ask invariant holds."""
 
     @pytest.mark.parametrize("seed", range(20))
     def test_bbo_invariant_after_snapshot(self, seed):
-        """After any valid snapshot, best_bid <= best_ask."""
+        """Given any valid snapshot, When consumed, Then best_bid <= best_ask."""
         rng = random.Random(seed)
         book = _mk_book(num_levels=64)
 
@@ -103,7 +102,7 @@ class TestBBOInvariant:
 
     @pytest.mark.parametrize("seed", range(10))
     def test_bbo_invariant_after_deltas(self, seed):
-        """After delta updates, BBO invariant maintained."""
+        """Given delta updates, When applied, Then BBO invariant maintained."""
         rng = random.Random(seed)
         book = _mk_book(num_levels=64)
 
@@ -136,7 +135,7 @@ class TestBBOInvariant:
 
 @pytest.mark.property
 class TestCapacityInvariant:
-    """Test that capacity is never exceeded."""
+    """Layer 3: Test that capacity is never exceeded."""
 
     @pytest.mark.parametrize(
         "capacity,snapshot_size",
@@ -149,7 +148,7 @@ class TestCapacityInvariant:
         ],
     )
     def test_capacity_never_exceeded_snapshot(self, capacity, snapshot_size):
-        """Orderbook never stores more than max_levels per side."""
+        """Given snapshot larger than capacity, When consumed, Then truncates to capacity."""
         book = _mk_book(num_levels=capacity)
 
         # Generate large snapshot
@@ -176,7 +175,7 @@ class TestCapacityInvariant:
 
     @pytest.mark.parametrize("seed", range(10))
     def test_capacity_never_exceeded_deltas(self, seed):
-        """Capacity maintained through delta updates."""
+        """Given delta updates at capacity, When applied, Then capacity maintained."""
         rng = random.Random(seed)
         capacity = 64
         book = _mk_book(num_levels=capacity)
@@ -206,11 +205,11 @@ class TestCapacityInvariant:
 
 @pytest.mark.property
 class TestSortedOrderInvariant:
-    """Test that sorted order is maintained."""
+    """Layer 3: Test that sorted order is maintained."""
 
     @pytest.mark.parametrize("seed", range(15))
     def test_bids_descending_after_snapshot(self, seed):
-        """Bids always in descending price order."""
+        """Given any valid snapshot, When consumed, Then bids in descending price order."""
         book = _mk_book(num_levels=64)
 
         asks, bids = _generate_valid_snapshot(15, 15, rng=random.Random(seed))
@@ -227,7 +226,7 @@ class TestSortedOrderInvariant:
 
     @pytest.mark.parametrize("seed", range(15))
     def test_asks_ascending_after_snapshot(self, seed):
-        """Asks always in ascending price order."""
+        """Given any valid snapshot, When consumed, Then asks in ascending price order."""
         book = _mk_book(num_levels=64)
 
         asks, bids = _generate_valid_snapshot(15, 15, rng=random.Random(seed))
@@ -244,7 +243,7 @@ class TestSortedOrderInvariant:
 
     @pytest.mark.parametrize("seed", range(10))
     def test_sorted_order_after_deltas(self, seed):
-        """Sorted order maintained after delta updates."""
+        """Given delta updates, When applied, Then sorted order maintained."""
         rng = random.Random(seed)
         book = _mk_book(num_levels=64)
 
@@ -281,10 +280,10 @@ class TestSortedOrderInvariant:
 
 @pytest.mark.property
 class TestSnapshotClearEquivalence:
-    """Test that snapshot → clear ≡ fresh orderbook."""
+    """Layer 3: Test that snapshot then clear equals fresh orderbook."""
 
     def test_snapshot_then_clear_equivalent_to_new_book(self):
-        """Snapshot → Clear ≡ Fresh orderbook."""
+        """Given snapshot then clear, When compared to fresh book, Then behave identically."""
         book1 = _mk_book(num_levels=64)
         book2 = _mk_book(num_levels=64)
 
@@ -310,7 +309,7 @@ class TestSnapshotClearEquivalence:
             book2.get_mid_price()
 
     def test_multiple_clear_operations_idempotent(self):
-        """Calling clear() multiple times is safe."""
+        """Given populated book, When clear called multiple times, Then remains empty."""
         book = _mk_book(num_levels=64)
 
         asks, bids = _generate_valid_snapshot(5, 5, rng=random.Random(123))
@@ -328,11 +327,11 @@ class TestSnapshotClearEquivalence:
 
 @pytest.mark.property
 class TestOperationSequenceConsistency:
-    """Test that sequences of operations maintain consistency."""
+    """Layer 3: Test that sequences of operations maintain consistency."""
 
     @pytest.mark.parametrize("seed", range(5))
     def test_random_sequence_maintains_invariants(self, seed):
-        """10-100 random ops maintain consistency."""
+        """Given random operations, When applied, Then invariants maintained."""
         rng = random.Random(seed)
         book = _mk_book(num_levels=64)
 
@@ -393,7 +392,7 @@ class TestOperationSequenceConsistency:
                 pass
 
     def test_interleaved_snapshot_and_delta_updates(self):
-        """Alternating snapshots and deltas."""
+        """Given alternating snapshots and deltas, When applied, Then consistency maintained."""
         book = _mk_book(num_levels=64)
 
         for i in range(20):
@@ -423,7 +422,7 @@ class TestOperationSequenceConsistency:
 
     @pytest.mark.slow
     def test_stress_rapid_updates(self):
-        """Stress test with 1000 rapid sequential updates."""
+        """Given 1000 rapid sequential updates, When applied, Then book remains valid."""
         rng = random.Random(999)
         book = _mk_book(num_levels=64)
 
@@ -453,10 +452,10 @@ class TestOperationSequenceConsistency:
 
 @pytest.mark.property
 class TestDataIntegrityInvariants:
-    """Test that data integrity is maintained."""
+    """Layer 3: Test that data integrity is maintained."""
 
     def test_no_negative_prices(self):
-        """All prices must be positive."""
+        """Given valid snapshot, When consumed, Then all prices are positive."""
         book = _mk_book(num_levels=64)
 
         # Valid snapshot
@@ -470,7 +469,7 @@ class TestDataIntegrityInvariants:
         assert np.all(bids_arr["price"] > 0)
 
     def test_no_negative_sizes(self):
-        """All sizes must be non-negative."""
+        """Given valid snapshot, When consumed, Then all sizes are non-negative."""
         book = _mk_book(num_levels=64)
 
         asks, bids = _generate_valid_snapshot(5, 5, rng=random.Random(888))
@@ -483,7 +482,7 @@ class TestDataIntegrityInvariants:
         assert np.all(bids_arr["size"] >= 0)
 
     def test_no_zero_prices(self):
-        """Orderbook should not contain levels with price=0."""
+        """Given valid snapshot, When consumed, Then no levels with price=0."""
         book = _mk_book(num_levels=64)
 
         asks, bids = _generate_valid_snapshot(5, 5, rng=random.Random(111))
@@ -498,7 +497,7 @@ class TestDataIntegrityInvariants:
 
     @pytest.mark.parametrize("seed", range(10))
     def test_norders_consistency(self, seed):
-        """When size > 0, norders should be > 0."""
+        """Given valid snapshot, When consumed, Then size > 0 implies norders > 0."""
         book = _mk_book(num_levels=64)
 
         asks, bids = _generate_valid_snapshot(8, 8, rng=random.Random(seed))

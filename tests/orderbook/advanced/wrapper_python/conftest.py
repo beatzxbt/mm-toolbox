@@ -1,4 +1,8 @@
-"""Fixtures specific to Python wrapper tests."""
+"""Fixtures specific to Python wrapper tests.
+
+Provides pre-populated and empty orderbook fixtures for wrapper Python tests.
+Re-exports shared fixtures from the parent conftest.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +18,11 @@ from tests.orderbook.advanced.conftest import (
 
 @pytest.fixture
 def standard_book():
-    """Pre-populated orderbook with 3 levels per side."""
+    """Pre-populated orderbook with 3 levels per side.
+
+    Returns:
+        PyAdvancedOrderbook with bids at 100.0/99.99/99.98 and asks at 100.01/100.02/100.03.
+    """
     book = _mk_book(num_levels=64)
     bids, _ = _make_levels(
         prices=[100.0, 99.99, 99.98],
@@ -34,5 +42,9 @@ def standard_book():
 
 @pytest.fixture
 def empty_book():
-    """Fresh unpopulated orderbook."""
+    """Fresh unpopulated orderbook.
+
+    Returns:
+        PyAdvancedOrderbook with no levels.
+    """
     return _mk_book(num_levels=64)

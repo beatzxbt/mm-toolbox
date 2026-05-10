@@ -1,7 +1,7 @@
 """MPSC shared-memory ring buffer tests.
 
-Exercises multi-producer single-consumer behavior, batch semantics, and
-header validation for the sharded sub-ring architecture.
+Layer 3 tests: exercises multi-producer single-consumer behavior, batch semantics,
+and header validation for the sharded sub-ring architecture.
 """
 
 from __future__ import annotations
@@ -80,12 +80,12 @@ def _mpsc_consumer_proc(path: str, n: int, q: mp.Queue) -> None:
 
 
 class TestMpscSharedBytesRingBuffer:
-    """Tests for MpscSharedBytesRingBuffer implementation."""
+    """Layer 3: Tests for MpscSharedBytesRingBuffer implementation."""
 
     # --- Basic functionality ---
 
     def test_basic_send_receive(self, shm_path: str) -> None:
-        """Send one payload and confirm it round-trips correctly."""
+        """Given one payload, When sent and received, Then round-trips correctly."""
         prod = ShmMpscProducer(
             shm_path, 1 << 16, num_rings=4, create=True, unlink_on_close=True
         )
@@ -101,7 +101,7 @@ class TestMpscSharedBytesRingBuffer:
             assert not os.path.exists(shm_path)
 
     def test_multiple_producers_single_consumer(self, shm_path: str) -> None:
-        """Two producers insert; single consumer receives both messages."""
+        """Given two producers, When both insert, Then consumer receives both."""
         prod1 = ShmMpscProducer(
             shm_path, 1 << 16, num_rings=4, create=True, unlink_on_close=False
         )
@@ -120,7 +120,7 @@ class TestMpscSharedBytesRingBuffer:
                 os.unlink(shm_path)
 
     def test_message_ordering_within_subring(self, shm_path: str) -> None:
-        """With one ring, ordering is preserved like SPSC."""
+        """Given single ring, When messages inserted, Then ordering preserved like SPSC."""
         prod = ShmMpscProducer(
             shm_path, 1 << 14, num_rings=1, create=True, unlink_on_close=True
         )
@@ -136,7 +136,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_batch_and_drain(self, shm_path: str) -> None:
-        """Insert a batch and drain in order on a single sub-ring."""
+        """Given batch insert on single sub-ring, When drained, Then order preserved."""
         prod = ShmMpscProducer(
             shm_path, 1 << 15, num_rings=1, create=True, unlink_on_close=True
         )
@@ -153,7 +153,7 @@ class TestMpscSharedBytesRingBuffer:
     # --- Edge cases ---
 
     def test_empty_payload_insert(self, shm_path: str) -> None:
-        """Empty payload should insert and consume correctly."""
+        """Given empty payload, When inserted, Then round-trips correctly."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
@@ -167,7 +167,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_exact_capacity_message(self, shm_path: str) -> None:
-        """Insert a message of exactly capacity - 8 bytes (the max)."""
+        """Given message of exactly capacity - 8 bytes, When inserted, Then accepted."""
         capacity = 1 << 12
         prod = ShmMpscProducer(
             shm_path, capacity, num_rings=1, create=True, unlink_on_close=True
@@ -183,7 +183,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_oversize_rejected(self, shm_path: str) -> None:
-        """Reject inserts that exceed capacity."""
+        """Given oversized message, When inserted, Then rejected."""
         capacity = 1 << 12
         prod = ShmMpscProducer(
             shm_path, capacity, num_rings=1, create=True, unlink_on_close=True
@@ -195,7 +195,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_insert_overwrites_oldest(self, shm_path: str) -> None:
-        """Ensure overwrites drop oldest items when capacity is exceeded."""
+        """Given capacity exceeded, When inserted, Then overwrites oldest."""
         capacity = 1 << 12
         prod = ShmMpscProducer(
             shm_path, capacity, num_rings=1, create=True, unlink_on_close=True
@@ -214,7 +214,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_insert_batch_empty_list(self, shm_path: str) -> None:
-        """insert_batch with empty list returns True."""
+        """Given empty list, When insert_batch called, Then returns True."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
@@ -224,7 +224,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_consume_all_empty(self, shm_path: str) -> None:
-        """consume_all on empty buffer returns empty list."""
+        """Given empty buffer, When consume_all called, Then returns empty list."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
@@ -236,7 +236,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_peekleft_empty_returns_none(self, shm_path: str) -> None:
-        """peekleft on empty buffer returns None."""
+        """Given empty buffer, When peekleft called, Then returns None."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
@@ -248,7 +248,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_peekright_empty_returns_none(self, shm_path: str) -> None:
-        """peekright on empty buffer returns None."""
+        """Given empty buffer, When peekright called, Then returns None."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
@@ -260,7 +260,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_peekleft_nonempty(self, shm_path: str) -> None:
-        """peekleft returns an item without consuming it.
+        """Given populated buffer, When peekleft called, Then returns item without consuming.
 
         Uses a single ring so ordering is deterministic.
         """
@@ -279,7 +279,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_peekright_nonempty(self, shm_path: str) -> None:
-        """peekright returns last item without consuming it.
+        """Given populated buffer, When peekright called, Then returns last item without consuming.
 
         Uses a single ring so ordering is deterministic.
         """
@@ -300,27 +300,27 @@ class TestMpscSharedBytesRingBuffer:
     # --- Config validation ---
 
     def test_config_validation_empty_path(self) -> None:
-        """ShmMpscConfig with empty path raises ValueError."""
+        """Given empty path, When creating ShmMpscConfig, Then raises ValueError."""
         with pytest.raises(ValueError):
             ShmMpscConfig(path="", capacity_bytes=1024)
 
     def test_config_validation_zero_capacity(self) -> None:
-        """ShmMpscConfig with zero capacity raises ValueError."""
+        """Given zero capacity, When creating ShmMpscConfig, Then raises ValueError."""
         with pytest.raises(ValueError):
             ShmMpscConfig(path="/tmp/x", capacity_bytes=0)
 
     def test_config_validation_negative_num_rings(self) -> None:
-        """ShmMpscConfig with negative num_rings raises ValueError."""
+        """Given negative num_rings, When creating ShmMpscConfig, Then raises ValueError."""
         with pytest.raises(ValueError):
             ShmMpscConfig(path="/tmp/x", capacity_bytes=1024, num_rings=-1)
 
     def test_config_validation_zero_spin_wait(self) -> None:
-        """ShmMpscConfig with spin_wait=0 raises ValueError."""
+        """Given spin_wait=0, When creating ShmMpscConfig, Then raises ValueError."""
         with pytest.raises(ValueError):
             ShmMpscConfig(path="/tmp/x", capacity_bytes=1024, spin_wait=0)
 
     def test_config_validation_unlink_without_create(self) -> None:
-        """ShmMpscConfig with unlink_on_close=True and create=False raises ValueError."""
+        """Given unlink_on_close=True and create=False, When creating ShmMpscConfig, Then raises ValueError."""
         with pytest.raises(ValueError):
             ShmMpscConfig(
                 path="/tmp/x",
@@ -330,7 +330,7 @@ class TestMpscSharedBytesRingBuffer:
             )
 
     def test_config_default(self) -> None:
-        """ShmMpscConfig.default() returns valid config with expected defaults."""
+        """Given ShmMpscConfig.default(), When called, Then returns valid config."""
         cfg = ShmMpscConfig.default()
         assert cfg.path == "/tmp/shm_mpsc_ring.bin"
         assert cfg.capacity_bytes == 1 << 20
@@ -340,7 +340,7 @@ class TestMpscSharedBytesRingBuffer:
         assert cfg.spin_wait == 1024
 
     def test_config_kwargs(self) -> None:
-        """producer_kwargs and consumer_kwargs return correct dicts."""
+        """Given config, When producer_kwargs/consumer_kwargs called, Then correct dicts."""
         cfg = ShmMpscConfig(
             path="/tmp/x", capacity_bytes=2048, num_rings=2, spin_wait=512
         )
@@ -355,7 +355,7 @@ class TestMpscSharedBytesRingBuffer:
         assert "capacity_bytes" not in ckw
 
     def test_num_rings_auto_detects(self, shm_path: str) -> None:
-        """num_rings=0 auto-detects CPU count."""
+        """Given num_rings=0, When creating producer, Then auto-detects CPU count."""
         prod = ShmMpscProducer(
             shm_path, 1 << 16, num_rings=0, create=True, unlink_on_close=True
         )
@@ -368,7 +368,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_num_rings_one(self, shm_path: str) -> None:
-        """num_rings=1 degrades to SPSC-like behavior."""
+        """Given num_rings=1, When creating producer, Then degrades to SPSC-like behavior."""
         prod = ShmMpscProducer(
             shm_path, 1 << 16, num_rings=1, create=True, unlink_on_close=True
         )
@@ -383,7 +383,7 @@ class TestMpscSharedBytesRingBuffer:
     # --- Resource management ---
 
     def test_idempotent_close(self, shm_path: str) -> None:
-        """Calling close twice should not crash."""
+        """Given closed producer, When close called again, Then no crash."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
@@ -392,7 +392,7 @@ class TestMpscSharedBytesRingBuffer:
         assert not os.path.exists(shm_path)
 
     def test_context_manager_producer(self, shm_path: str) -> None:
-        """Use producer as a context manager and verify auto-close."""
+        """Given producer as context manager, When exited, Then auto-closed."""
         with ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         ) as prod:
@@ -400,7 +400,7 @@ class TestMpscSharedBytesRingBuffer:
         assert not os.path.exists(shm_path)
 
     def test_context_manager_consumer(self, shm_path: str) -> None:
-        """Use consumer as a context manager and verify auto-close."""
+        """Given consumer as context manager, When exited, Then auto-closed."""
         prod = ShmMpscProducer(shm_path, 1 << 12, num_rings=2, create=True)
         try:
             prod.insert(b"ctx")
@@ -410,7 +410,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_len_property(self, shm_path: str) -> None:
-        """Verify len(producer) behavior across inserts, consumes, and overwrites."""
+        """Given various operations, When len checked, Then reflects state."""
         capacity = 1 << 12
         prod = ShmMpscProducer(
             shm_path, capacity, num_rings=1, create=True, unlink_on_close=True
@@ -431,7 +431,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_unlink_on_close_false(self, shm_path: str) -> None:
-        """Close producer with unlink_on_close=False; file still exists."""
+        """Given unlink_on_close=False, When closed, Then file persists."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=False
         )
@@ -442,19 +442,19 @@ class TestMpscSharedBytesRingBuffer:
     # --- Error handling ---
 
     def test_invalid_path_oserror(self) -> None:
-        """Invalid path raises OSError."""
+        """Given invalid path, When creating producer, Then raises OSError."""
         with pytest.raises(OSError):
             ShmMpscProducer("/nonexistent/dir/file", 1 << 12, create=True)
 
     def test_truncated_file_rejected(self, shm_path: str) -> None:
-        """File smaller than 64 bytes is rejected on consumer attach."""
+        """Given file smaller than 64 bytes, When consumer attaches, Then rejected."""
         with open(shm_path, "wb") as f:
             f.write(b"\x00" * 32)
         with pytest.raises(RuntimeError):
             ShmMpscConsumer(shm_path)
 
     def test_corrupted_header_rejected(self, shm_path: str) -> None:
-        """Reject attaching to a ringbuffer with a corrupted header."""
+        """Given corrupted header, When consumer attaches, Then raises RuntimeError."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=False
         )
@@ -470,7 +470,7 @@ class TestMpscSharedBytesRingBuffer:
                 os.unlink(shm_path)
 
     def test_create_false_attach(self, shm_path: str) -> None:
-        """Create with create=True, then attach a second producer with create=False."""
+        """Given existing buffer, When attaching with create=False, Then works."""
         prod1 = ShmMpscProducer(shm_path, 1 << 12, num_rings=2, create=True)
         try:
             prod2 = ShmMpscProducer(shm_path, 1 << 12, num_rings=2, create=False)
@@ -489,7 +489,7 @@ class TestMpscSharedBytesRingBuffer:
                 os.unlink(shm_path)
 
     def test_capacity_bytes_zero_handled(self, shm_path: str) -> None:
-        """capacity_bytes=0 uses pow2_at_least(1) and does not crash."""
+        """Given capacity_bytes=0, When creating producer, Then uses pow2_at_least(1)."""
         prod = ShmMpscProducer(
             shm_path, 0, num_rings=1, create=True, unlink_on_close=False
         )
@@ -505,7 +505,7 @@ class TestMpscSharedBytesRingBuffer:
     # --- Timestamp properties ---
 
     def test_timestamp_properties(self, shm_path: str) -> None:
-        """Timestamps are non-zero and monotonically increase."""
+        """Given various operations, When timestamps checked, Then monotonic."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
@@ -534,7 +534,7 @@ class TestMpscSharedBytesRingBuffer:
     # --- Multi-producer scenarios ---
 
     def test_two_producers_in_threads(self, shm_path: str) -> None:
-        """Two threads producing via separate instances, one thread consuming."""
+        """Given two threads producing via separate instances, Then consumer receives all."""
         n = 500
         prod1 = ShmMpscProducer(
             shm_path, 1 << 18, num_rings=4, create=True, unlink_on_close=False
@@ -576,7 +576,7 @@ class TestMpscSharedBytesRingBuffer:
             os.unlink(shm_path)
 
     def test_different_message_sizes(self, shm_path: str) -> None:
-        """Producers with different message sizes."""
+        """Given different message sizes, When inserted, Then all roundtrip."""
         prod = ShmMpscProducer(
             shm_path, 1 << 16, num_rings=4, create=True, unlink_on_close=True
         )
@@ -592,7 +592,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_four_producers_multiprocess(self, shm_path: str) -> None:
-        """Four producers in separate processes, consumer in main process."""
+        """Given four producers in separate processes, Then consumer receives all."""
         n_per_prod = 500
         num_prods = 4
         total = n_per_prod * num_prods
@@ -626,7 +626,7 @@ class TestMpscSharedBytesRingBuffer:
             os.unlink(shm_path)
 
     def test_eight_producers_stress(self, shm_path: str) -> None:
-        """Eight producers in separate processes (stress test)."""
+        """Given eight producers in separate processes, Then consumer receives all (stress test)."""
         n_per_prod = 1000
         num_prods = 8
         total = n_per_prod * num_prods
@@ -671,7 +671,7 @@ class TestMpscSharedBytesRingBuffer:
     # --- Multi-process scenarios ---
 
     def test_multiprocess_consumer_producers_main(self, shm_path: str) -> None:
-        """Consumer in separate process, producers in main process."""
+        """Given consumer in separate process, Then receives all messages."""
         n = 1000
         prod = ShmMpscProducer(shm_path, 1 << 20, num_rings=4, create=True)
         try:
@@ -693,7 +693,7 @@ class TestMpscSharedBytesRingBuffer:
                 os.unlink(shm_path)
 
     def test_all_separate_processes(self, shm_path: str) -> None:
-        """All producers and consumer in separate processes."""
+        """Given all producers and consumer in separate processes, Then all messages received."""
         n_per_prod = 250
         num_prods = 4
         total = n_per_prod * num_prods
@@ -730,7 +730,7 @@ class TestMpscSharedBytesRingBuffer:
     # --- Performance / stress ---
 
     def test_high_throughput_100k(self, shm_path: str) -> None:
-        """High-throughput test: 100K messages across 4 producers."""
+        """Given 100K messages across 4 producers, Then consumer receives all."""
         n = 100_000
         num_prods = 4
         prod_init = ShmMpscProducer(shm_path, 1 << 22, num_rings=4, create=True)
@@ -764,7 +764,7 @@ class TestMpscSharedBytesRingBuffer:
             os.unlink(shm_path)
 
     def test_large_messages_16kb(self, shm_path: str) -> None:
-        """Large message test: 16KB messages."""
+        """Given 16KB messages, When inserted, Then roundtrip correctly."""
         capacity = 1 << 16
         prod = ShmMpscProducer(
             shm_path, capacity, num_rings=2, create=True, unlink_on_close=True
@@ -780,7 +780,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_insert_batch_exceeds_capacity(self, shm_path: str) -> None:
-        """Batch whose total size exceeds capacity returns False."""
+        """Given batch exceeding capacity, When inserted, Then returns False."""
         capacity = 1 << 8
         prod = ShmMpscProducer(
             shm_path, capacity, num_rings=1, create=True, unlink_on_close=True
@@ -792,7 +792,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_spin_wait_small(self, shm_path: str) -> None:
-        """Producer and consumer with spin_wait=1 work correctly."""
+        """Given spin_wait=1, When producer/consumer used, Then works correctly."""
         prod = ShmMpscProducer(
             shm_path,
             1 << 12,
@@ -810,7 +810,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_spin_wait_large(self, shm_path: str) -> None:
-        """Producer and consumer with spin_wait=65536 work correctly."""
+        """Given spin_wait=65536, When producer/consumer used, Then works correctly."""
         prod = ShmMpscProducer(
             shm_path,
             1 << 12,
@@ -828,7 +828,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_mismatched_spin_wait(self, shm_path: str) -> None:
-        """Producer and consumer with different spin_wait values interoperate."""
+        """Given mismatched spin_wait, When producer/consumer used, Then interoperate."""
         prod = ShmMpscProducer(
             shm_path,
             1 << 12,
@@ -846,7 +846,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_insert_char_roundtrip(self, shm_path: str) -> None:
-        """insert_char(b'hello', 5) should round-trip through consume()."""
+        """Given insert_char data, When consumed, Then roundtrips correctly."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
@@ -860,7 +860,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_consume_iterable(self, shm_path: str) -> None:
-        """consume_iterable yields items in FIFO order."""
+        """Given populated buffer, When consume_iterable called, Then yields FIFO."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
@@ -879,7 +879,7 @@ class TestMpscSharedBytesRingBuffer:
 
     @pytest.mark.asyncio
     async def test_aconsume(self, shm_path: str) -> None:
-        """aconsume returns items asynchronously."""
+        """Given async consumer, When data available, Then returns asynchronously."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
@@ -894,7 +894,7 @@ class TestMpscSharedBytesRingBuffer:
 
     @pytest.mark.asyncio
     async def test_aconsume_iterable(self, shm_path: str) -> None:
-        """aconsume_iterable yields items asynchronously."""
+        """Given async iterable consumer, When data available, Then yields asynchronously."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
@@ -913,7 +913,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_unwrapped_matches_consume_all(self, shm_path: str) -> None:
-        """unwrapped() returns contents without consuming."""
+        """Given populated buffer, When unwrapped and consume_all called, Then same results."""
         prod = ShmMpscProducer(
             shm_path, 1 << 14, num_rings=1, create=True, unlink_on_close=True
         )
@@ -931,7 +931,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_unwrapped_empty(self, shm_path: str) -> None:
-        """unwrapped() on empty buffer returns empty list."""
+        """Given empty buffer, When unwrapped called, Then returns empty list."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
@@ -943,7 +943,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_contains(self, shm_path: str) -> None:
-        """contains() and __contains__() work correctly."""
+        """Given populated buffer, When contains checked, Then correct results."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=1, create=True, unlink_on_close=True
         )
@@ -959,7 +959,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_consumer_is_empty(self, shm_path: str) -> None:
-        """Consumer is_empty() reflects buffer state."""
+        """Given various states, When is_empty checked, Then reflects buffer state."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
@@ -975,7 +975,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_consumer_is_full(self, shm_path: str) -> None:
-        """Consumer is_full() reflects when no space remains."""
+        """Given full buffer, When is_full checked, Then returns True."""
         capacity = 1 << 8
         prod = ShmMpscProducer(
             shm_path, capacity, num_rings=1, create=True, unlink_on_close=True
@@ -992,7 +992,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_consumer_clear(self, shm_path: str) -> None:
-        """clear() drains the buffer."""
+        """Given populated buffer, When clear called, Then emptied."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
@@ -1007,7 +1007,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_producer_is_empty(self, shm_path: str) -> None:
-        """Producer is_empty() reflects buffer state."""
+        """Given various states, When producer is_empty checked, Then reflects buffer state."""
         prod = ShmMpscProducer(
             shm_path, 1 << 12, num_rings=2, create=True, unlink_on_close=True
         )
@@ -1023,7 +1023,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
 
     def test_producer_is_full(self, shm_path: str) -> None:
-        """Producer is_full() reflects when no space remains."""
+        """Given full buffer, When producer is_full checked, Then returns True."""
         capacity = 1 << 8
         prod = ShmMpscProducer(
             shm_path, capacity, num_rings=1, create=True, unlink_on_close=True

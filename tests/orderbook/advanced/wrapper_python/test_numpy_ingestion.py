@@ -1,4 +1,9 @@
-"""Tests for NumPy array ingestion methods."""
+"""Tests for NumPy array ingestion methods.
+
+Layer 2 tests: validate direct numpy array ingestion for snapshots and deltas,
+including mismatched lengths, norders handling, modifications, deletions,
+and equivalence with PyOrderbookLevels ingestion.
+"""
 
 from __future__ import annotations
 
@@ -13,10 +18,10 @@ from tests.orderbook.advanced.conftest import (
 
 
 class TestNumpyIngestion:
-    """Test direct numpy array ingestion methods."""
+    """Layer 2: Test direct numpy array ingestion methods."""
 
     def test_basic_snapshot_with_numpy_arrays(self):
-        """Test basic snapshot ingestion using numpy arrays."""
+        """Given numpy arrays, When consume_snapshot_numpy called, Then book populated correctly."""
         ob = _mk_book(num_levels=64)
 
         bid_prices = np.array([100.0, 99.99, 99.98], dtype=np.float64)
@@ -34,7 +39,7 @@ class TestNumpyIngestion:
         assert ob.get_bbo_spread() == pytest.approx(0.01)
 
     def test_snapshot_mismatched_lengths_raise(self):
-        """Mismatched numpy array lengths should raise."""
+        """Given mismatched numpy array lengths, When consume_snapshot_numpy called, Then raises ValueError."""
         ob = _mk_book(num_levels=64)
 
         bid_prices = np.array([100.0, 99.99], dtype=np.float64)
@@ -46,7 +51,7 @@ class TestNumpyIngestion:
             ob.consume_snapshot_numpy(ask_prices, ask_sizes, bid_prices, bid_sizes)
 
     def test_snapshot_norders_length_mismatch_raise(self):
-        """Norders arrays must match the price/size length."""
+        """Given norders arrays not matching price/size length, When consume_snapshot_numpy called, Then raises ValueError."""
         ob = _mk_book(num_levels=64)
 
         bid_prices = np.array([100.0, 99.99], dtype=np.float64)
@@ -62,7 +67,7 @@ class TestNumpyIngestion:
             )
 
     def test_snapshot_with_norders(self):
-        """Test snapshot ingestion with explicit norders arrays."""
+        """Given explicit norders arrays, When consume_snapshot_numpy called, Then norders stored correctly."""
         ob = _mk_book(num_levels=64)
 
         bid_prices = np.array([100.0, 99.99], dtype=np.float64)
@@ -81,7 +86,7 @@ class TestNumpyIngestion:
         assert list(ask_arr["norders"]) == [3, 7]
 
     def test_snapshot_without_norders_defaults_to_one(self):
-        """Test that norders defaults to 1 when not provided."""
+        """Given no norders arrays, When consume_snapshot_numpy called, Then defaults to 1."""
         ob = _mk_book(num_levels=64)
 
         bid_prices = np.array([100.0, 99.99], dtype=np.float64)
@@ -96,7 +101,7 @@ class TestNumpyIngestion:
         assert list(ask_arr["norders"]) == [1, 1]
 
     def test_basic_deltas_with_numpy_arrays(self):
-        """Test basic delta ingestion using numpy arrays."""
+        """Given numpy delta arrays, When consume_deltas_numpy called, Then levels updated correctly."""
         ob = _mk_book(num_levels=64)
 
         # Initial snapshot
@@ -121,7 +126,7 @@ class TestNumpyIngestion:
         assert list(ask_arr["price"]) == [100.01, 100.02, 100.03, 100.04]
 
     def test_deltas_mismatched_lengths_raise(self):
-        """Mismatched numpy array lengths should raise for deltas."""
+        """Given mismatched numpy delta array lengths, When consume_deltas_numpy called, Then raises ValueError."""
         ob = _mk_book(num_levels=64)
 
         ask_prices = np.array([100.01], dtype=np.float64)
@@ -133,7 +138,7 @@ class TestNumpyIngestion:
             ob.consume_deltas_numpy(ask_prices, ask_sizes, bid_prices, bid_sizes)
 
     def test_deltas_norders_length_mismatch_raise(self):
-        """Norders arrays must match the price/size length for deltas."""
+        """Given norders arrays not matching delta length, When consume_deltas_numpy called, Then raises ValueError."""
         ob = _mk_book(num_levels=64)
 
         ask_prices = np.array([100.01, 100.02], dtype=np.float64)
@@ -149,7 +154,7 @@ class TestNumpyIngestion:
             )
 
     def test_deltas_modify_existing_level(self):
-        """Test delta modifying an existing level."""
+        """Given delta modifying existing level, When consume_deltas_numpy called, Then level updated."""
         ob = _mk_book(num_levels=64)
 
         # Initial snapshot
@@ -180,7 +185,7 @@ class TestNumpyIngestion:
         assert bid_arr["norders"][0] == 10
 
     def test_deltas_delete_level_with_zero_size(self):
-        """Test delta deleting a level by setting size to zero."""
+        """Given delta with size=0, When consume_deltas_numpy called, Then level deleted."""
         ob = _mk_book(num_levels=64)
 
         # Initial snapshot
@@ -205,7 +210,7 @@ class TestNumpyIngestion:
         assert list(bid_arr["price"]) == [99.99, 99.98]
 
     def test_numpy_vs_pyorderbooklevels_equivalence(self):
-        """Test that numpy ingestion produces identical results to PyOrderbookLevels ingestion."""
+        """Given same data via numpy and PyOrderbookLevels, When consumed, Then produce identical results."""
         ob_numpy = _mk_book(num_levels=64)
         ob_py = _mk_book(num_levels=64)
 
@@ -248,7 +253,7 @@ class TestNumpyIngestion:
         assert ob_numpy.get_bbo_spread() == ob_py.get_bbo_spread()
 
     def test_empty_arrays_snapshot(self):
-        """Test snapshot with empty arrays for one side."""
+        """Given empty arrays for one side, When consume_snapshot_numpy called, Then that side is empty."""
         ob = _mk_book(num_levels=64)
 
         # Only populate asks, empty bids
@@ -268,7 +273,7 @@ class TestNumpyIngestion:
             ob.get_mid_price()
 
     def test_single_level_numpy(self):
-        """Test numpy ingestion with single level per side."""
+        """Given single level per side via numpy, When consumed, Then book has 1 level each side."""
         ob = _mk_book(num_levels=64)
 
         bid_prices = np.array([100.0], dtype=np.float64)

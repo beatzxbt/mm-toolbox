@@ -1,4 +1,9 @@
-"""End-to-end integration tests for the Python wrapper."""
+"""End-to-end integration tests for the Python wrapper.
+
+Layer 3 tests: realistic sequences through the Python wrapper covering
+snapshot-delta-BBO workflows, numpy vs struct equivalence, clear/repopulate,
+large capacity, crossed books, and BBO return types.
+"""
 
 from __future__ import annotations
 
@@ -18,9 +23,10 @@ from tests.orderbook.advanced.conftest import (
 
 
 class TestEndToEnd:
-    """Realistic sequences through the Python wrapper."""
+    """Layer 3: Realistic sequences through the Python wrapper."""
 
     def test_snapshot_delta_bbo_sequence(self):
+        """Given snapshot, delta, and BBO updates, When applied in sequence, Then mid price is valid."""
         book = _mk_book(num_levels=64)
 
         # Snapshot
@@ -61,6 +67,7 @@ class TestEndToEnd:
         assert book.get_mid_price() > 0
 
     def test_numpy_vs_struct_equivalence(self):
+        """Given same data via numpy and struct APIs, When consumed, Then produce identical mid prices."""
         ob_numpy = _mk_book(num_levels=64)
         ob_struct = _mk_book(num_levels=64)
 
@@ -88,6 +95,7 @@ class TestEndToEnd:
         assert ob_numpy.get_mid_price() == ob_struct.get_mid_price()
 
     def test_clear_and_repopulate(self, standard_book):
+        """Given a populated book, When cleared and repopulated, Then works correctly."""
         standard_book.clear()
 
         with pytest.raises(RuntimeError):
@@ -103,6 +111,7 @@ class TestEndToEnd:
         assert standard_book.get_mid_price() == pytest.approx(200.0)
 
     def test_large_capacity_book(self):
+        """Given 1000-level book at capacity, When populated, Then mid price valid."""
         book = _mk_book(num_levels=1000)
 
         ask_prices = [100.0 + i * 0.01 for i in range(100)]
@@ -121,6 +130,7 @@ class TestEndToEnd:
         assert book.get_mid_price() > 0
 
     def test_crossed_book_handling(self):
+        """Given crossed snapshot (bid > ask), When consumed, Then negative spread reported."""
         book = _mk_book(num_levels=64)
 
         # Crossed snapshot: bid > ask
@@ -137,6 +147,7 @@ class TestEndToEnd:
         assert spread < 0
 
     def test_get_bbo_returns_py_orderbook_levels(self):
+        """Given populated book, When get_bbo called, Then returns PyOrderbookLevel instances."""
         book = _mk_book(num_levels=64)
 
         bids, _ = _make_levels(

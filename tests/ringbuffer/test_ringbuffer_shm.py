@@ -1,6 +1,7 @@
 """Shared-memory ring buffer tests.
 
-Exercises single- and multi-process behavior, batch semantics, and header validation.
+Layer 3 tests: exercises single- and multi-process behavior, batch semantics,
+and header validation for ShmSpscProducer/ShmSpscConsumer.
 """
 
 from __future__ import annotations
@@ -60,14 +61,10 @@ def _consumer_proc(path: str, n: int, q: mp.Queue) -> None:
 
 
 class TestSharedBytesRingBuffer:
-    """Tests for SharedBytesRingBuffer (shm) implementation."""
+    """Layer 3: Tests for SharedBytesRingBuffer (shm) implementation."""
 
     def test_basic_send_receive(self, shm_path: str) -> None:
-        """Send one payload and confirm it round-trips correctly.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given one payload, When sent and received, Then round-trips correctly."""
         prod = ShmSpscProducer(shm_path, 1 << 16, create=True, unlink_on_close=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -81,11 +78,7 @@ class TestSharedBytesRingBuffer:
             assert not os.path.exists(shm_path)
 
     def test_batch_and_drain(self, shm_path: str) -> None:
-        """Insert a batch and drain in order.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given batch insert, When drained, Then order preserved."""
         prod = ShmSpscProducer(shm_path, 1 << 15, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -98,11 +91,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_insert_overwrites_oldest(self, shm_path: str) -> None:
-        """Ensure overwrites drop oldest items when capacity is exceeded.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given capacity exceeded, When inserted, Then overwrites oldest."""
         capacity = 1 << 12
         prod = ShmSpscProducer(shm_path, capacity, create=True)
         cons = ShmSpscConsumer(shm_path)
@@ -119,11 +108,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_oversize_rejected(self, shm_path: str) -> None:
-        """Reject inserts that exceed capacity.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given oversized message, When inserted, Then rejected."""
         capacity = 1 << 12
         prod = ShmSpscProducer(shm_path, capacity, create=True)
         cons = ShmSpscConsumer(shm_path)
@@ -135,11 +120,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_batch_then_single_insert_keeps_order(self, shm_path: str) -> None:
-        """Keep consistent ordering when a batch is followed by a single insert.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given batch then single insert, When consumed, Then order preserved."""
         prod = ShmSpscProducer(shm_path, 1 << 14, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -153,11 +134,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_empty_payload_insert(self, shm_path: str) -> None:
-        """Empty payload should insert and consume correctly.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given empty payload, When inserted, Then round-trips correctly."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -169,11 +146,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_exact_capacity_message(self, shm_path: str) -> None:
-        """Insert a message of exactly capacity - 8 bytes (the max).
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given message of exactly capacity - 8 bytes, When inserted, Then accepted."""
         capacity = 1 << 12
         prod = ShmSpscProducer(shm_path, capacity, create=True)
         cons = ShmSpscConsumer(shm_path)
@@ -187,11 +160,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_peekleft_empty_returns_none(self, shm_path: str) -> None:
-        """peekleft on empty buffer returns None.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given empty buffer, When peekleft called, Then returns None."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -201,11 +170,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_peekright_empty_returns_none(self, shm_path: str) -> None:
-        """peekright on empty buffer returns None.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given empty buffer, When peekright called, Then returns None."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -215,11 +180,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_insert_batch_empty_list(self, shm_path: str) -> None:
-        """insert_batch with empty list returns True.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given empty list, When insert_batch called, Then returns True."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         try:
             assert prod.insert_batch([])
@@ -227,22 +188,14 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_idempotent_close(self, shm_path: str) -> None:
-        """Calling close twice should not crash.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given closed producer, When close called again, Then no crash."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True, unlink_on_close=True)
         prod.close()
         prod.close()
         assert not os.path.exists(shm_path)
 
     def test_consume_with_yield(self, shm_path: str) -> None:
-        """Consume still works after replacing sleep with sched_yield.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given payload, When consume called, Then works correctly."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -255,11 +208,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_attach_rejects_invalid_header(self, shm_path: str) -> None:
-        """Reject attaching to a ringbuffer with a corrupted header.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given corrupted header, When consumer attaches, Then raises RuntimeError."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True, unlink_on_close=False)
         prod.close()
         try:
@@ -273,11 +222,7 @@ class TestSharedBytesRingBuffer:
                 os.unlink(shm_path)
 
     def test_multiprocess_roundtrip(self, shm_path: str) -> None:
-        """Send messages from producer and consume in a separate process.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given producer in main process and consumer in separate process, Then all messages roundtrip."""
         n = 2000
         prod = ShmSpscProducer(shm_path, 1 << 18, create=True)
         try:
@@ -304,11 +249,7 @@ class TestSharedBytesRingBuffer:
     # --- P0 Critical ---
 
     def test_insert_char_roundtrip(self, shm_path: str) -> None:
-        """insert_char(b'hello', 5) should round-trip through consume().
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given insert_char data, When consumed, Then roundtrips correctly."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -320,11 +261,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_create_false_attach(self, shm_path: str) -> None:
-        """Create with create=True, then attach a second producer with create=False.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given existing buffer, When attaching with create=False, Then works."""
         prod1 = ShmSpscProducer(shm_path, 1 << 12, create=True)
         try:
             prod2 = ShmSpscProducer(shm_path, 1 << 12, create=False)
@@ -341,11 +278,7 @@ class TestSharedBytesRingBuffer:
             prod1.close()
 
     def test_context_manager_producer(self, shm_path: str) -> None:
-        """Use producer as a context manager and verify auto-close.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given producer as context manager, When exited, Then auto-closed."""
         with ShmSpscProducer(
             shm_path, 1 << 12, create=True, unlink_on_close=True
         ) as prod:
@@ -353,11 +286,7 @@ class TestSharedBytesRingBuffer:
         assert not os.path.exists(shm_path)
 
     def test_context_manager_consumer(self, shm_path: str) -> None:
-        """Use consumer as a context manager and verify auto-close.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given consumer as context manager, When exited, Then auto-closed."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         try:
             prod.insert(b"ctx")
@@ -367,11 +296,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_len_property(self, shm_path: str) -> None:
-        """Verify len(producer) behavior across inserts, consumes, and overwrites.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given various operations, When len checked, Then reflects state."""
         capacity = 1 << 12
         prod = ShmSpscProducer(shm_path, capacity, create=True)
         cons = ShmSpscConsumer(shm_path)
@@ -395,11 +320,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_peekleft_nonempty(self, shm_path: str) -> None:
-        """peekleft returns first item without consuming it.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given populated buffer, When peekleft called, Then returns first item without consuming."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -413,11 +334,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_peekright_nonempty(self, shm_path: str) -> None:
-        """peekright returns last item without consuming it.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given populated buffer, When peekright called, Then returns last item without consuming."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -431,22 +348,22 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_config_validation_empty_path(self) -> None:
-        """ShmSpscConfig with empty path raises ValueError."""
+        """Given empty path, When creating ShmSpscConfig, Then raises ValueError."""
         with pytest.raises(ValueError):
             ShmSpscConfig(path="", capacity_bytes=1024)
 
     def test_config_validation_zero_capacity(self) -> None:
-        """ShmSpscConfig with zero capacity raises ValueError."""
+        """Given zero capacity, When creating ShmSpscConfig, Then raises ValueError."""
         with pytest.raises(ValueError):
             ShmSpscConfig(path="/tmp/x", capacity_bytes=0)
 
     def test_config_validation_zero_spin_wait(self) -> None:
-        """ShmSpscConfig with spin_wait=0 raises ValueError."""
+        """Given spin_wait=0, When creating ShmSpscConfig, Then raises ValueError."""
         with pytest.raises(ValueError):
             ShmSpscConfig(path="/tmp/x", capacity_bytes=1024, spin_wait=0)
 
     def test_config_validation_unlink_without_create(self) -> None:
-        """ShmSpscConfig with unlink_on_close=True and create=False raises ValueError."""
+        """Given unlink_on_close=True and create=False, When creating ShmSpscConfig, Then raises ValueError."""
         with pytest.raises(ValueError):
             ShmSpscConfig(
                 path="/tmp/x",
@@ -456,7 +373,7 @@ class TestSharedBytesRingBuffer:
             )
 
     def test_config_default(self) -> None:
-        """ShmSpscConfig.default() returns valid config with expected defaults."""
+        """Given ShmSpscConfig.default(), When called, Then returns valid config."""
         cfg = ShmSpscConfig.default()
         assert cfg.path == "/tmp/shm_ring.bin"
         assert cfg.capacity_bytes == 1 << 16
@@ -465,7 +382,7 @@ class TestSharedBytesRingBuffer:
         assert cfg.spin_wait == 1024
 
     def test_config_kwargs(self) -> None:
-        """producer_kwargs and consumer_kwargs return correct dicts."""
+        """Given config, When producer_kwargs/consumer_kwargs called, Then correct dicts."""
         cfg = ShmSpscConfig(path="/tmp/x", capacity_bytes=2048, spin_wait=512)
         pkw = cfg.producer_kwargs()
         assert pkw["path"] == "/tmp/x"
@@ -477,11 +394,7 @@ class TestSharedBytesRingBuffer:
         assert "capacity_bytes" not in ckw
 
     def test_truncated_file_rejected(self, shm_path: str) -> None:
-        """File smaller than 64 bytes is rejected on consumer attach.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given file smaller than 64 bytes, When consumer attaches, Then rejected."""
         with open(shm_path, "wb") as f:
             f.write(b"\x00" * 32)
         with pytest.raises(RuntimeError):
@@ -490,11 +403,7 @@ class TestSharedBytesRingBuffer:
     # --- P1 Important ---
 
     def test_spin_wait_small(self, shm_path: str) -> None:
-        """Producer and consumer with spin_wait=1 work correctly.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given spin_wait=1, When producer/consumer used, Then works correctly."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True, spin_wait=1)
         cons = ShmSpscConsumer(shm_path, spin_wait=1)
         try:
@@ -505,11 +414,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_spin_wait_large(self, shm_path: str) -> None:
-        """Producer and consumer with spin_wait=65536 work correctly.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given spin_wait=65536, When producer/consumer used, Then works correctly."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True, spin_wait=65536)
         cons = ShmSpscConsumer(shm_path, spin_wait=65536)
         try:
@@ -520,11 +425,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_mismatched_spin_wait(self, shm_path: str) -> None:
-        """Producer and consumer with different spin_wait values interoperate.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given mismatched spin_wait, When producer/consumer used, Then interoperate."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True, spin_wait=100)
         cons = ShmSpscConsumer(shm_path, spin_wait=10000)
         try:
@@ -535,11 +436,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_insert_batch_exceeds_capacity(self, shm_path: str) -> None:
-        """Batch whose total size exceeds capacity returns False.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given batch exceeding capacity, When inserted, Then returns False."""
         capacity = 1 << 8
         prod = ShmSpscProducer(shm_path, capacity, create=True)
         try:
@@ -549,22 +446,14 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_unlink_on_close_false(self, shm_path: str) -> None:
-        """Close producer with unlink_on_close=False; file still exists.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given unlink_on_close=False, When closed, Then file persists."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True, unlink_on_close=False)
         prod.close()
         assert os.path.exists(shm_path)
         os.unlink(shm_path)
 
     def test_timestamp_properties(self, shm_path: str) -> None:
-        """Timestamps are non-zero and monotonically increase.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given various operations, When timestamps checked, Then monotonic."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -589,11 +478,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_thread_safety(self, shm_path: str) -> None:
-        """One thread producing, one thread consuming 1000 messages each.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given one thread producing and one consuming 1000 messages, Then all received."""
         n = 1000
         prod = ShmSpscProducer(shm_path, 1 << 18, create=True)
         cons = ShmSpscConsumer(shm_path)
@@ -615,11 +500,7 @@ class TestSharedBytesRingBuffer:
         prod.close()
 
     def test_consume_all_empty(self, shm_path: str) -> None:
-        """consume_all on empty buffer returns empty list.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given empty buffer, When consume_all called, Then returns empty list."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -631,16 +512,12 @@ class TestSharedBytesRingBuffer:
     # --- P2 Nice-to-have ---
 
     def test_invalid_path_oserror(self) -> None:
-        """Invalid path raises OSError."""
+        """Given invalid path, When creating producer, Then raises OSError."""
         with pytest.raises(OSError):
             ShmSpscProducer("/nonexistent/dir/file", 1 << 12, create=True)
 
     def test_capacity_bytes_zero_handled(self, shm_path: str) -> None:
-        """capacity_bytes=0 uses pow2_at_least(1) and does not crash.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given capacity_bytes=0, When creating producer, Then uses pow2_at_least(1)."""
         prod = ShmSpscProducer(shm_path, 0, create=True, unlink_on_close=False)
         try:
             prod.close()
@@ -651,11 +528,7 @@ class TestSharedBytesRingBuffer:
                 os.unlink(shm_path)
 
     def test_consume_iterable(self, shm_path: str) -> None:
-        """consume_iterable yields items in FIFO order.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given populated buffer, When consume_iterable called, Then yields FIFO."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -672,11 +545,7 @@ class TestSharedBytesRingBuffer:
 
     @pytest.mark.asyncio
     async def test_aconsume(self, shm_path: str) -> None:
-        """aconsume returns items asynchronously.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given async consumer, When data available, Then returns asynchronously."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -689,11 +558,7 @@ class TestSharedBytesRingBuffer:
 
     @pytest.mark.asyncio
     async def test_aconsume_iterable(self, shm_path: str) -> None:
-        """aconsume_iterable yields items asynchronously.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given async iterable consumer, When data available, Then yields asynchronously."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -710,11 +575,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_unwrapped_matches_consume_all(self, shm_path: str) -> None:
-        """unwrapped() returns same as consume_all() without consuming.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given populated buffer, When unwrapped and consume_all called, Then same results."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -729,11 +590,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_unwrapped_empty(self, shm_path: str) -> None:
-        """unwrapped() on empty buffer returns empty list.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given empty buffer, When unwrapped called, Then returns empty list."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -743,11 +600,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_contains(self, shm_path: str) -> None:
-        """contains() and __contains__() work correctly.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given populated buffer, When contains checked, Then correct results."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -761,11 +614,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_consumer_is_empty(self, shm_path: str) -> None:
-        """Consumer is_empty() reflects buffer state.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given various states, When is_empty checked, Then reflects buffer state."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -779,11 +628,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_consumer_is_full(self, shm_path: str) -> None:
-        """Consumer is_full() reflects when no space remains.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given full buffer, When is_full checked, Then returns True."""
         capacity = 1 << 8
         prod = ShmSpscProducer(shm_path, capacity, create=True)
         cons = ShmSpscConsumer(shm_path)
@@ -799,11 +644,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_consumer_clear(self, shm_path: str) -> None:
-        """clear() drains the buffer.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given populated buffer, When clear called, Then emptied."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -816,11 +657,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_producer_is_empty(self, shm_path: str) -> None:
-        """Producer is_empty() reflects buffer state.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given various states, When producer is_empty checked, Then reflects buffer state."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
@@ -834,11 +671,7 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_producer_is_full(self, shm_path: str) -> None:
-        """Producer is_full() reflects when no space remains.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
+        """Given full buffer, When producer is_full checked, Then returns True."""
         capacity = 1 << 8
         prod = ShmSpscProducer(shm_path, capacity, create=True)
         try:

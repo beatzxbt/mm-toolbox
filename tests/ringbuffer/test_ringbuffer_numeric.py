@@ -1,4 +1,9 @@
-"""Tests for NumericRingBuffer implementation."""
+"""Tests for NumericRingBuffer implementation.
+
+Layer 2 tests: validate NumericRingBuffer including dtype resolution,
+creation with different dtypes, basic operations, overflow behavior,
+async functionality, and timestamp tracking.
+"""
 
 import asyncio
 
@@ -9,10 +14,10 @@ from mm_toolbox.ringbuffer.numeric import NumericRingBuffer, resolve_numeric_dty
 
 
 class TestDtypeResolutionFunction:
-    """Test the dtype resolution function in isolation."""
+    """Layer 1: Test the dtype resolution function in isolation."""
 
     def test_numpy_type_objects(self):
-        """Test dtype resolution with numpy type objects."""
+        """Given numpy type objects, When resolved, Then correct kind returned."""
         # Test all supported numpy types
         assert resolve_numeric_dtype(np.int8).kind == "i"
         assert resolve_numeric_dtype(np.int16).kind == "i"
@@ -28,7 +33,7 @@ class TestDtypeResolutionFunction:
         assert resolve_numeric_dtype(np.float64).kind == "f"
 
     def test_string_specifications(self):
-        """Test dtype resolution with string specifications."""
+        """Given string dtype specs, When resolved, Then correct kind returned."""
         # Test integer strings
         assert resolve_numeric_dtype("int8").kind == "i"
         assert resolve_numeric_dtype("int16").kind == "i"
@@ -46,13 +51,13 @@ class TestDtypeResolutionFunction:
         assert resolve_numeric_dtype("float64").kind == "f"
 
     def test_numpy_dtype_objects(self):
-        """Test dtype resolution with numpy dtype objects."""
+        """Given numpy dtype objects, When resolved, Then correct kind returned."""
         assert resolve_numeric_dtype(np.dtype(np.int32)).kind == "i"
         assert resolve_numeric_dtype(np.dtype(np.float64)).kind == "f"
         assert resolve_numeric_dtype(np.dtype("int64")).kind == "i"
 
     def test_python_builtin_types(self):
-        """Test auto-casting of Python builtin types."""
+        """Given Python builtin types, When resolved, Then auto-cast correctly."""
         # Python int should map to a suitable integer type
         resolved_int = resolve_numeric_dtype(int)
         assert resolved_int.kind == "i"
@@ -63,7 +68,7 @@ class TestDtypeResolutionFunction:
         assert resolved_float.itemsize == 8  # float64
 
     def test_invalid_dtypes(self):
-        """Test that invalid dtypes raise appropriate errors."""
+        """Given invalid dtypes, When resolved, Then raises ValueError."""
         invalid_dtypes = [np.complex64, np.complex128, "complex64", str, bool]
 
         for invalid_dtype in invalid_dtypes:
@@ -72,10 +77,10 @@ class TestDtypeResolutionFunction:
 
 
 class TestNumericRingBufferBasics:
-    """Test basic NumericRingBuffer functionality."""
+    """Layer 2: Test basic NumericRingBuffer functionality."""
 
     def test_creation_with_different_dtypes(self):
-        """Test creating NumericRingBuffer with different dtype specifications."""
+        """Given different dtype specs, When creating NumericRingBuffer, Then dtype set correctly."""
         # Test with numpy type
         rb1 = NumericRingBuffer(5, dtype=np.float64)
         assert rb1.unwrapped().dtype == np.float64
@@ -93,7 +98,7 @@ class TestNumericRingBufferBasics:
         assert rb4.unwrapped().dtype == np.float64
 
     def test_basic_operations_float64(self):
-        """Test basic operations with float64."""
+        """Given float64 buffer, When operations performed, Then works correctly."""
         rb = NumericRingBuffer(5, dtype=np.float64)
         assert rb.is_empty()
         assert rb.unwrapped().dtype == np.float64
@@ -107,7 +112,7 @@ class TestNumericRingBufferBasics:
         np.testing.assert_array_equal(rb.unwrapped(), data)
 
     def test_basic_operations_int32(self):
-        """Test basic operations with int32."""
+        """Given int32 buffer, When operations performed, Then works correctly."""
         rb = NumericRingBuffer(5, dtype=np.int32)
 
         # Test batch insertion
@@ -118,7 +123,7 @@ class TestNumericRingBufferBasics:
         np.testing.assert_array_equal(rb.unwrapped(), data)
 
     def test_capacity_power_of_2_rounding(self):
-        """Test that capacity gets rounded to power of 2."""
+        """Given non-power-of-2 capacity, When created, Then rounded up."""
         test_cases = [(3, 4), (5, 8), (10, 16), (16, 16), (17, 32)]
 
         for requested, expected in test_cases:
@@ -131,7 +136,7 @@ class TestNumericRingBufferBasics:
             assert len(rb.unwrapped()) == expected
 
     def test_overflow_behavior(self):
-        """Test behavior when capacity is exceeded."""
+        """Given data exceeding capacity, When inserted, Then oldest overwritten."""
         rb = NumericRingBuffer(3, dtype="int32")  # Will round to capacity 4
 
         # Insert more than capacity
@@ -146,7 +151,7 @@ class TestNumericRingBufferBasics:
         np.testing.assert_array_equal(unwrapped, expected)
 
     def test_clear_operations(self):
-        """Test clear operations."""
+        """Given populated buffer, When clear called, Then emptied."""
         rb = NumericRingBuffer(5, dtype="float64")
 
         # Add data
@@ -160,7 +165,7 @@ class TestNumericRingBufferBasics:
         assert len(rb) == 0
 
     def test_basic_properties(self):
-        """Test basic properties and state."""
+        """Given populated buffer, When properties accessed, Then correct values."""
         rb = NumericRingBuffer(5, dtype="int64")
         data = np.array([10, 20, 30], dtype=np.int64)
         rb.insert_batch(data)
@@ -174,7 +179,7 @@ class TestNumericRingBufferBasics:
         np.testing.assert_array_equal(unwrapped, data)
 
     def test_consume_operations(self):
-        """Test consume and consume_all."""
+        """Given populated buffer, When consume called, Then FIFO order respected."""
         rb = NumericRingBuffer(4, dtype=np.int32)
         data = np.array([5, 6, 7], dtype=np.int32)
         rb.insert_batch(data)
@@ -192,10 +197,10 @@ class TestNumericRingBufferBasics:
 
 
 class TestNumericRingBufferEdgeCases:
-    """Test edge cases and error conditions."""
+    """Layer 2: Test edge cases and error conditions."""
 
     def test_empty_buffer_errors(self):
-        """Test that operations on empty buffer raise appropriate errors."""
+        """Given empty buffer, When consume called, Then raises error."""
         rb = NumericRingBuffer(5, dtype="float64")
 
         # These should raise errors on empty buffer
@@ -203,7 +208,7 @@ class TestNumericRingBufferEdgeCases:
             rb.consume()
 
     def test_single_element_buffer(self):
-        """Test buffer with capacity of 1."""
+        """Given capacity=1, When operations performed, Then works correctly."""
         rb = NumericRingBuffer(1, dtype="float64")
 
         data = np.array([42.0], dtype=np.float64)
@@ -215,14 +220,14 @@ class TestNumericRingBufferEdgeCases:
         np.testing.assert_array_equal(unwrapped, data)
 
     def test_capacity_validation(self):
-        """Test capacity validation."""
+        """Given invalid capacity, When creating NumericRingBuffer, Then raises ValueError."""
         with pytest.raises(ValueError):
             NumericRingBuffer(0, dtype="float64")
         with pytest.raises(ValueError):
             NumericRingBuffer(-1, dtype="float64")
 
     def test_dtype_validation(self):
-        """Test dtype validation."""
+        """Given invalid dtype, When creating NumericRingBuffer, Then raises ValueError."""
         # Valid dtypes should work
         NumericRingBuffer(5, dtype="int32")
         NumericRingBuffer(5, dtype="uint64")
@@ -233,7 +238,7 @@ class TestNumericRingBufferEdgeCases:
             NumericRingBuffer(5, dtype="complex64")
 
     def test_insert_returns_bool(self):
-        """Test that insert returns True."""
+        """Given item, When inserted, Then returns True."""
         rb = NumericRingBuffer(4, dtype="int64")
         assert rb.insert(1) is True
         assert rb.insert_batch(np.array([2, 3], dtype=np.int64)) is True
@@ -241,11 +246,11 @@ class TestNumericRingBufferEdgeCases:
 
 
 class TestNumericRingBufferAsyncFunctionality:
-    """Test async functionality for NumericRingBuffer."""
+    """Layer 3: Test async functionality for NumericRingBuffer."""
 
     @pytest.mark.asyncio
     async def test_async_consume_basic(self):
-        """Test basic async consume functionality."""
+        """Given async consumer waiting, When data inserted, Then consumer wakes."""
         rb = NumericRingBuffer(5, dtype="float64", disable_async=False)
 
         async def waiter():
@@ -262,7 +267,7 @@ class TestNumericRingBufferAsyncFunctionality:
 
     @pytest.mark.asyncio
     async def test_async_consume_iterable_fifo(self):
-        """Test async consume iterable follows FIFO order."""
+        """Given async iterable consumer, When producer feeds data, Then FIFO order."""
         rb = NumericRingBuffer(8, dtype="int64", disable_async=False)
 
         rb.insert_batch(np.array([10, 20, 30], dtype=np.int64))
@@ -278,7 +283,7 @@ class TestNumericRingBufferAsyncFunctionality:
 
     @pytest.mark.asyncio
     async def test_async_disabled_mode(self):
-        """Test that async functions are disabled when disable_async=True."""
+        """Given async disabled, When async methods called, Then raise RuntimeError."""
         rb = NumericRingBuffer(5, dtype="float64", disable_async=True)
 
         with pytest.raises(RuntimeError, match="Async operations are disabled"):
@@ -286,7 +291,7 @@ class TestNumericRingBufferAsyncFunctionality:
 
     @pytest.mark.asyncio
     async def test_async_consume_with_existing_data(self):
-        """Test async consume when data already exists."""
+        """Given existing data, When aconsume called, Then returns immediately."""
         rb = NumericRingBuffer(5, dtype="int64", disable_async=False)
 
         # Pre-populate with data
@@ -298,13 +303,15 @@ class TestNumericRingBufferAsyncFunctionality:
 
 
 class TestNumericRingBufferTimestamps:
-    """Test timestamp tracking on numeric ringbuffers."""
+    """Layer 2: Test timestamp tracking on numeric ringbuffers."""
 
     def test_latest_insert_time_ns_initial(self):
+        """Given fresh buffer, When checking timestamp, Then returns 0."""
         rb = NumericRingBuffer(4, dtype="float64")
         assert rb.latest_insert_time_ns == 0
 
     def test_latest_insert_time_ns_updated_on_insert(self):
+        """Given insert, When checking timestamp, Then updated and monotonic."""
         rb = NumericRingBuffer(4, dtype="float64")
         rb.insert(1.0)
         t1 = rb.latest_insert_time_ns
@@ -317,15 +324,18 @@ class TestNumericRingBufferTimestamps:
         assert t2 > t1
 
     def test_latest_insert_time_ns_updated_on_insert_batch(self):
+        """Given insert_batch, When checking timestamp, Then updated."""
         rb = NumericRingBuffer(4, dtype="float64")
         rb.insert_batch(np.array([1.0, 2.0], dtype=np.float64))
         assert rb.latest_insert_time_ns > 0
 
     def test_latest_consume_time_ns_initial(self):
+        """Given fresh buffer, When checking consume timestamp, Then returns 0."""
         rb = NumericRingBuffer(4, dtype="float64")
         assert rb.latest_consume_time_ns == 0
 
     def test_latest_consume_time_ns_updated_on_consume(self):
+        """Given consume, When checking timestamp, Then updated and monotonic."""
         rb = NumericRingBuffer(4, dtype="float64")
         rb.insert_batch(np.array([1.0, 2.0], dtype=np.float64))
         t1 = rb.latest_insert_time_ns

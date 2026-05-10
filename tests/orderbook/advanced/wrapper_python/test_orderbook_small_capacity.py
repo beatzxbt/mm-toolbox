@@ -1,5 +1,4 @@
-"""
-Tests for small orderbook capacity edge cases and BBO cross-removal behavior.
+"""Tests for small orderbook capacity edge cases and BBO cross-removal behavior.
 
 Verifies correct behavior at minimum capacity (16 levels), BBO updates that
 would otherwise empty the book, and stress tests for small orderbooks.
@@ -27,11 +26,11 @@ from tests.orderbook.advanced.conftest import (
 
 @pytest.mark.boundary
 class TestMinimumCapacityEnforcement:
-    """Test that minimum orderbook size of 4 levels is enforced."""
+    """Layer 2: Test that minimum orderbook size of 4 levels is enforced."""
 
     @pytest.mark.parametrize("invalid_size", [0, 1, 2, 3])
     def test_reject_sizes_below_minimum(self, invalid_size: int):
-        """Orderbook creation fails for sizes below 4."""
+        """Given size < 4, When creating AdvancedOrderbook, Then raises ValueError."""
         with pytest.raises(ValueError, match="expected >=4"):
             AdvancedOrderbook(
                 tick_size=TICK_SIZE,
@@ -42,7 +41,7 @@ class TestMinimumCapacityEnforcement:
             )
 
     def test_accept_minimum_size(self):
-        """Orderbook creation succeeds at minimum size of 4."""
+        """Given size=4, When creating AdvancedOrderbook, Then succeeds."""
         book = AdvancedOrderbook(
             tick_size=TICK_SIZE,
             lot_size=LOT_SIZE,
@@ -54,7 +53,7 @@ class TestMinimumCapacityEnforcement:
 
     @pytest.mark.parametrize("valid_size", [4, 5, 16, 32, 64, 128, 1024])
     def test_accept_valid_sizes(self, valid_size: int):
-        """Orderbook creation succeeds for sizes >= 4."""
+        """Given size >= 4, When creating AdvancedOrderbook, Then succeeds."""
         book = AdvancedOrderbook(
             tick_size=TICK_SIZE,
             lot_size=LOT_SIZE,
@@ -67,10 +66,10 @@ class TestMinimumCapacityEnforcement:
 
 @pytest.mark.boundary
 class TestBBOCrossRemovalRestoration:
-    """Test BBO updates that would empty a side are properly handled."""
+    """Layer 2: Test BBO updates that would empty a side are properly handled."""
 
     def test_bbo_wipes_ask_side_restores_from_incoming(self):
-        """When BBO bid wipes all asks, incoming ask becomes new top."""
+        """Given BBO bid wiping all asks, When consumed, Then incoming ask becomes new top."""
         book = _mk_book(num_levels=64)
 
         # Initialize with asks at 100.0-100.15 and bids at 99.0-98.85
@@ -110,7 +109,7 @@ class TestBBOCrossRemovalRestoration:
         assert final_bids["price"][0] == pytest.approx(101.0)
 
     def test_bbo_wipes_bid_side_restores_from_incoming(self):
-        """When BBO ask wipes all bids, incoming bid becomes new top."""
+        """Given BBO ask wiping all bids, When consumed, Then incoming bid becomes new top."""
         book = _mk_book(num_levels=64)
 
         # Initialize with asks at 101.0-101.15 and bids at 100.0-99.85
@@ -141,7 +140,7 @@ class TestBBOCrossRemovalRestoration:
         assert len(final_bids) >= 1
 
     def test_bbo_cross_removal_preserves_book_integrity(self):
-        """Cross removal via BBO never leaves book completely empty."""
+        """Given series of BBO updates causing crosses, When applied, Then book never completely empty."""
         book = _mk_book(num_levels=64)
 
         # Initialize with minimal spread
@@ -173,10 +172,10 @@ class TestBBOCrossRemovalRestoration:
 
 @pytest.mark.boundary
 class TestSmallOrderbookStress:
-    """Stress tests for minimum-sized orderbooks."""
+    """Layer 3: Stress tests for minimum-sized orderbooks."""
 
     def test_1000_bbo_updates_minimum_capacity(self):
-        """1000 BBO updates on 16-level orderbook should not crash."""
+        """Given 16-level book, When 1000 BBO updates applied, Then does not crash."""
         book = _mk_book(num_levels=64)
 
         # Initialize
@@ -206,7 +205,7 @@ class TestSmallOrderbookStress:
         assert len(bids_arr) >= 1
 
     def test_10000_bbo_updates_minimum_capacity(self):
-        """10000 BBO updates on 16-level orderbook should not crash."""
+        """Given 16-level book, When 10000 BBO updates applied, Then does not crash."""
         book = _mk_book(num_levels=64)
 
         # Initialize
@@ -236,7 +235,7 @@ class TestSmallOrderbookStress:
         assert len(bids_arr) >= 1
 
     def test_mixed_operations_minimum_capacity(self):
-        """Mix of snapshot, delta, and BBO operations on minimum capacity."""
+        """Given 16-level book, When mixed snapshot/delta/BBO operations applied, Then does not crash."""
         book = _mk_book(num_levels=64)
 
         for i in range(500):
@@ -286,10 +285,10 @@ class TestSmallOrderbookStress:
 
 @pytest.mark.boundary
 class TestBBOCrossRemovalEdgeCases:
-    """Edge cases for BBO cross-removal logic."""
+    """Layer 2: Edge cases for BBO cross-removal logic."""
 
     def test_bbo_exactly_at_cross_price(self):
-        """BBO bid equals best ask price triggers cross removal."""
+        """Given BBO bid exactly at best ask price, When consumed, Then cross removal triggered."""
         book = _mk_book(num_levels=64)
 
         # Initialize
@@ -317,7 +316,7 @@ class TestBBOCrossRemovalEdgeCases:
         assert len(bids_arr) >= 1
 
     def test_bbo_with_zero_size_ask(self):
-        """BBO with zero-size ask should not cause issues."""
+        """Given BBO with zero-size ask, When consumed, Then does not cause issues."""
         book = _mk_book(num_levels=64)
 
         asks, _ = _make_levels(
@@ -343,7 +342,7 @@ class TestBBOCrossRemovalEdgeCases:
         assert len(bids_arr) >= 1
 
     def test_bbo_with_zero_size_bid(self):
-        """BBO with zero-size bid should not cause issues."""
+        """Given BBO with zero-size bid, When consumed, Then does not cause issues."""
         book = _mk_book(num_levels=64)
 
         asks, _ = _make_levels(
@@ -368,7 +367,7 @@ class TestBBOCrossRemovalEdgeCases:
         assert len(asks_arr) >= 1
 
     def test_repeated_cross_and_restore(self):
-        """Repeated BBO updates that cross and restore."""
+        """Given alternating crossing and non-crossing BBO updates, When applied, Then book integrity maintained."""
         book = _mk_book(num_levels=64)
 
         asks, _ = _make_levels(
@@ -406,7 +405,7 @@ class TestBBOCrossRemovalEdgeCases:
             assert len(bids_arr) >= 1, f"Empty bids at iteration {i}"
 
     def test_progressive_cross_removal(self):
-        """BBO updates that progressively remove levels."""
+        """Given progressively higher bid prices, When BBO updates applied, Then book integrity maintained."""
         book = _mk_book(num_levels=64)
 
         asks, _ = _make_levels(
@@ -437,10 +436,10 @@ class TestBBOCrossRemovalEdgeCases:
 
 @pytest.mark.boundary
 class TestMinimumCapacityBehavior:
-    """Test 4-level orderbook behaves correctly under stress."""
+    """Layer 3: Test 4-level orderbook behaves correctly under stress."""
 
     def test_4_level_snapshot(self):
-        """Snapshot with 4 levels per side works."""
+        """Given 4-level book, When snapshot consumed, Then all 4 levels stored."""
         book = AdvancedOrderbook(
             tick_size=TICK_SIZE,
             lot_size=LOT_SIZE,
@@ -466,7 +465,7 @@ class TestMinimumCapacityBehavior:
         assert book.get_bbo_spread() == pytest.approx(0.01)
 
     def test_4_level_delta_adds_beyond_capacity(self):
-        """Deltas beyond 4 levels truncate."""
+        """Given full 4-level book, When delta beyond capacity, Then truncated."""
         book = AdvancedOrderbook(
             tick_size=TICK_SIZE,
             lot_size=LOT_SIZE,
@@ -498,7 +497,7 @@ class TestMinimumCapacityBehavior:
         assert ask_arr["price"][-1] == pytest.approx(100.03)
 
     def test_4_level_bbo_updates(self):
-        """BBO updates work on minimum capacity."""
+        """Given 4-level book, When BBO updates applied, Then works correctly."""
         book = AdvancedOrderbook(
             tick_size=TICK_SIZE,
             lot_size=LOT_SIZE,
@@ -532,7 +531,7 @@ class TestMinimumCapacityBehavior:
         assert book.get_bbo_spread() == pytest.approx(0.01)
 
     def test_4_level_calculations(self):
-        """Price calculations work on minimum capacity."""
+        """Given 4-level book, When price calculations called, Then correct values returned."""
         book = AdvancedOrderbook(
             tick_size=TICK_SIZE,
             lot_size=LOT_SIZE,
@@ -565,7 +564,7 @@ class TestMinimumCapacityBehavior:
         assert impact == pytest.approx(0.01)
 
     def test_4_level_rapid_updates(self):
-        """100 rapid updates on 4-level book."""
+        """Given 4-level book, When 100 rapid updates applied, Then remains valid."""
         book = AdvancedOrderbook(
             tick_size=TICK_SIZE,
             lot_size=LOT_SIZE,

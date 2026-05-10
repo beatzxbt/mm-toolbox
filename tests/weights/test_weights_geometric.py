@@ -1,4 +1,9 @@
-"""Tests for geometric weight calculations."""
+"""Tests for geometric weight calculations.
+
+Layer 1 tests: validate geometric_weights function including return type,
+default ratio calculation, normalization, length, ordering, custom parameters,
+edge cases, and numerical properties.
+"""
 
 import numpy as np
 import pytest
@@ -8,22 +13,22 @@ from mm_toolbox.weights import geometric_weights
 
 
 class TestGeometricWeightsBasic:
-    """Test basic geometric weights functionality."""
+    """Layer 1: Test basic geometric weights functionality."""
 
     def test_function_return_type(self):
-        """Test that geometric_weights returns proper numpy array type."""
+        """Given num, When geometric_weights called, Then returns numpy float64 array."""
         result = geometric_weights(5)
         assert isinstance(result, np.ndarray)
         assert result.dtype == np.float64
 
     def test_default_ratio_calculation(self):
-        """Test geometric weights with default ratio."""
+        """Given default ratio, When geometric_weights called, Then correct values returned."""
         result = geometric_weights(5)
         expected = np.array([0.32778489, 0.24583867, 0.184379, 0.13828425, 0.10371319])
         np.testing.assert_allclose(result, expected, rtol=1e-6)
 
     def test_weights_normalization(self):
-        """Test that weights sum to 1.0."""
+        """Given num, When geometric_weights called, Then sums to 1.0."""
         result = geometric_weights(5)
         assert pytest.approx(result.sum(), abs=1e-12) == 1.0
 
@@ -31,27 +36,27 @@ class TestGeometricWeightsBasic:
         assert pytest.approx(result_large.sum(), abs=1e-12) == 1.0
 
     def test_weights_length(self):
-        """Test that weights array has correct length."""
+        """Given various num values, When geometric_weights called, Then correct length."""
         for num in [3, 5, 10, 20]:
             result = geometric_weights(num)
             assert len(result) == num
 
     def test_weights_ordering(self):
-        """Test that weights are in descending order."""
+        """Given num, When geometric_weights called, Then descending order."""
         result = geometric_weights(5)
         # Geometric weights should be in descending order
         for i in range(len(result) - 1):
             assert result[i] >= result[i + 1]
 
     def test_non_normalized_series(self):
-        """Test that normalized=False returns the raw geometric series."""
+        """Given normalized=False, When geometric_weights called, Then raw series returned."""
         result = geometric_weights(5, r=0.5, normalized=False)
         expected = np.array([1.0, 0.5, 0.25, 0.125, 0.0625], dtype=np.float64)
         np.testing.assert_allclose(result, expected, rtol=0.0, atol=0.0)
         assert result.dtype == np.float64
 
     def test_vectorized_construction_uses_numpy(self, monkeypatch):
-        """Test that geometric weight generation uses NumPy vectorized ops."""
+        """Given monkeypatched numpy, When geometric_weights called, Then uses vectorized ops."""
         calls: dict[str, int] = {"arange": 0, "power": 0}
         original_arange = geometric_module.np.arange
         original_power = geometric_module.np.power
@@ -76,10 +81,10 @@ class TestGeometricWeightsBasic:
 
 
 class TestGeometricWeightsCustomParameters:
-    """Test geometric weights with custom parameters."""
+    """Layer 1: Test geometric weights with custom parameters."""
 
     def test_custom_ratio_half(self):
-        """Test with r=0.5."""
+        """Given r=0.5, When geometric_weights called, Then correct values returned."""
         result = geometric_weights(5, r=0.5)
         expected = np.array(
             [0.51612903, 0.25806452, 0.12903226, 0.06451613, 0.03225806]
@@ -87,7 +92,7 @@ class TestGeometricWeightsCustomParameters:
         np.testing.assert_allclose(result, expected, rtol=1e-6)
 
     def test_custom_ratio_different_values(self):
-        """Test with different ratio values."""
+        """Given different ratio values, When geometric_weights called, Then normalization maintained."""
         # Test r=0.3 (faster decay)
         result_03 = geometric_weights(5, r=0.3)
         assert pytest.approx(result_03.sum(), abs=1e-12) == 1.0
@@ -102,7 +107,7 @@ class TestGeometricWeightsCustomParameters:
         assert variance_08 < variance_03  # More uniform = lower variance
 
     def test_larger_num_with_ratio(self):
-        """Test with larger number of weights."""
+        """Given larger num, When geometric_weights called, Then correct length and sum."""
         result = geometric_weights(100, r=0.95)
         assert len(result) == 100
         assert pytest.approx(result.sum(), abs=1e-10) == 1.0
@@ -112,7 +117,7 @@ class TestGeometricWeightsCustomParameters:
             assert result[i] >= result[i + 1]
 
     def test_ratio_effects_on_distribution(self):
-        """Test how ratio affects weight distribution."""
+        """Given different ratios, When geometric_weights called, Then distribution differs."""
         num = 10
 
         # Small ratio = steep decline
@@ -129,10 +134,10 @@ class TestGeometricWeightsCustomParameters:
 
 
 class TestGeometricWeightsEdgeCases:
-    """Test edge cases and error handling."""
+    """Layer 1: Test edge cases and error handling."""
 
     def test_invalid_num_values(self):
-        """Test validation of num parameter."""
+        """Given invalid num values, When geometric_weights called, Then raises ValueError."""
         # num <= 1 should raise ValueError
         with pytest.raises(ValueError):
             geometric_weights(1)
@@ -144,14 +149,14 @@ class TestGeometricWeightsEdgeCases:
             geometric_weights(-1)
 
     def test_minimum_valid_num(self):
-        """Test minimum valid num size."""
+        """Given minimum valid num, When geometric_weights called, Then returns 2-element array."""
         result = geometric_weights(2)
         assert len(result) == 2
         assert pytest.approx(result.sum(), abs=1e-12) == 1.0
         assert result[0] >= result[1]  # Should be decreasing
 
     def test_extreme_ratio_values(self):
-        """Test with extreme ratio values."""
+        """Given extreme ratio values, When geometric_weights called, Then handles correctly."""
         # Very small ratio (steep decline)
         result_small = geometric_weights(5, r=0.01)
         assert pytest.approx(result_small.sum(), abs=1e-12) == 1.0
@@ -164,7 +169,7 @@ class TestGeometricWeightsEdgeCases:
         assert np.std(result_large) < 0.1
 
     def test_ratio_boundary_values(self):
-        """Test ratio at boundary values."""
+        """Given boundary ratio values, When geometric_weights called, Then handles correctly."""
         # Ratio = 0 should give all weight to first element
         result_zero = geometric_weights(5, r=0.0)
         assert pytest.approx(result_zero.sum(), abs=1e-12) == 1.0
@@ -179,10 +184,10 @@ class TestGeometricWeightsEdgeCases:
 
 
 class TestGeometricWeightsNumerical:
-    """Test numerical properties and stability."""
+    """Layer 1: Test numerical properties and stability."""
 
     def test_numerical_precision(self):
-        """Test numerical precision with different parameters."""
+        """Given various parameters, When geometric_weights called, Then sum close to 1.0."""
         for num in [5, 10, 50]:
             for ratio in [0.1, 0.5, 0.9]:
                 result = geometric_weights(num, r=ratio)
@@ -192,7 +197,7 @@ class TestGeometricWeightsNumerical:
                 assert np.all(result >= 0)
 
     def test_consistency_across_calls(self):
-        """Test that repeated calls give consistent results."""
+        """Given same parameters, When geometric_weights called multiple times, Then identical results."""
         num, ratio = 10, 0.7
         result1 = geometric_weights(num, r=ratio)
         result2 = geometric_weights(num, r=ratio)
@@ -202,7 +207,7 @@ class TestGeometricWeightsNumerical:
         np.testing.assert_array_equal(result2, result3)
 
     def test_mathematical_properties(self):
-        """Test mathematical properties of geometric weights."""
+        """Given ratio, When geometric_weights called, Then ratio property holds."""
         num, ratio = 6, 0.6
         result = geometric_weights(num, r=ratio)
 
@@ -215,7 +220,7 @@ class TestGeometricWeightsNumerical:
                 assert computed_ratio == pytest.approx(ratio, rel=1e-10)
 
     def test_weight_relationships(self):
-        """Test relationships between weights with known ratios."""
+        """Given ratio=0.5, When geometric_weights called, Then each weight half the previous."""
         # Test with ratio = 0.5 (each weight is half the previous)
         result = geometric_weights(5, r=0.5)
 
@@ -224,7 +229,7 @@ class TestGeometricWeightsNumerical:
             assert ratio == pytest.approx(0.5, rel=1e-10)
 
     def test_scaling_behavior(self):
-        """Test how weights scale with different num values."""
+        """Given different num values, When geometric_weights called, Then proportional relationships preserved."""
         ratio = 0.8
 
         # Compare weights for different numbers

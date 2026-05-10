@@ -1,4 +1,9 @@
-"""Tests for logarithmic weight calculations."""
+"""Tests for logarithmic weight calculations.
+
+Layer 1 tests: validate logarithmic_weights function including return type,
+default calculation, normalization, length, ordering, scaling behavior,
+edge cases, and numerical properties.
+"""
 
 import numpy as np
 import pytest
@@ -7,22 +12,22 @@ from mm_toolbox.weights import logarithmic_weights
 
 
 class TestLogarithmicWeightsBasic:
-    """Test basic logarithmic weights functionality."""
+    """Layer 1: Test basic logarithmic weights functionality."""
 
     def test_function_return_type(self):
-        """Test that logarithmic_weights returns proper numpy array type."""
+        """Given num, When logarithmic_weights called, Then returns numpy float64 array."""
         result = logarithmic_weights(5)
         assert isinstance(result, np.ndarray)
         assert result.dtype == np.float64
 
     def test_default_calculation(self):
-        """Test logarithmic weights with default parameters."""
+        """Given default parameters, When logarithmic_weights called, Then correct values returned."""
         result = logarithmic_weights(5)
         expected = np.array([0.0, 0.14478295, 0.22947555, 0.2895659, 0.3361756])
         np.testing.assert_allclose(result, expected, rtol=1e-6)
 
     def test_weights_normalization(self):
-        """Test that weights sum to 1.0."""
+        """Given num, When logarithmic_weights called, Then sums to 1.0."""
         result = logarithmic_weights(5)
         assert pytest.approx(result.sum(), abs=1e-12) == 1.0
 
@@ -30,30 +35,30 @@ class TestLogarithmicWeightsBasic:
         assert pytest.approx(result_large.sum(), abs=1e-12) == 1.0
 
     def test_weights_length(self):
-        """Test that weights array has correct length."""
+        """Given various num values, When logarithmic_weights called, Then correct length."""
         for num in [3, 5, 10, 20]:
             result = logarithmic_weights(num)
             assert len(result) == num
 
     def test_weights_ordering(self):
-        """Test that weights are in ascending order."""
+        """Given num, When logarithmic_weights called, Then ascending order."""
         result = logarithmic_weights(5)
         # Logarithmic weights should be in ascending order (more recent = higher weight)
         for i in range(len(result) - 1):
             assert result[i] <= result[i + 1]
 
     def test_first_weight_is_zero(self):
-        """Test that first weight is always zero."""
+        """Given any valid num, When logarithmic_weights called, Then first weight is zero."""
         for num in [3, 5, 10, 20]:
             result = logarithmic_weights(num)
             assert result[0] == pytest.approx(0.0, abs=1e-12)
 
 
 class TestLogarithmicWeightsScaling:
-    """Test logarithmic weights with different sizes."""
+    """Layer 1: Test logarithmic weights with different sizes."""
 
     def test_larger_num_values(self):
-        """Test with larger number of weights."""
+        """Given larger num, When logarithmic_weights called, Then correct length and sum."""
         result = logarithmic_weights(100)
         assert len(result) == 100
         assert pytest.approx(result.sum(), abs=1e-10) == 1.0
@@ -66,7 +71,7 @@ class TestLogarithmicWeightsScaling:
         assert result[0] == pytest.approx(0.0, abs=1e-12)
 
     def test_different_num_sizes(self):
-        """Test logarithmic weights with various sizes."""
+        """Given various num sizes, When logarithmic_weights called, Then properties hold."""
         sizes = [3, 5, 10, 25, 50]
 
         for num in sizes:
@@ -82,7 +87,7 @@ class TestLogarithmicWeightsScaling:
                 assert result[i] <= result[i + 1]
 
     def test_scaling_behavior(self):
-        """Test how weights scale with size."""
+        """Given different num values, When logarithmic_weights called, Then max weights differ."""
         result_5 = logarithmic_weights(5)
         result_10 = logarithmic_weights(10)
         result_20 = logarithmic_weights(20)
@@ -101,10 +106,10 @@ class TestLogarithmicWeightsScaling:
 
 
 class TestLogarithmicWeightsEdgeCases:
-    """Test edge cases and error handling."""
+    """Layer 1: Test edge cases and error handling."""
 
     def test_invalid_num_values(self):
-        """Test validation of num parameter."""
+        """Given invalid num values, When logarithmic_weights called, Then raises ValueError."""
         # num <= 1 should raise ValueError
         with pytest.raises(ValueError):
             logarithmic_weights(1)
@@ -116,7 +121,7 @@ class TestLogarithmicWeightsEdgeCases:
             logarithmic_weights(-1)
 
     def test_minimum_valid_num(self):
-        """Test minimum valid num size."""
+        """Given minimum valid num, When logarithmic_weights called, Then returns 2-element array."""
         result = logarithmic_weights(2)
         assert len(result) == 2
         assert pytest.approx(result.sum(), abs=1e-12) == 1.0
@@ -124,7 +129,7 @@ class TestLogarithmicWeightsEdgeCases:
         assert result[1] == pytest.approx(1.0, abs=1e-12)
 
     def test_small_num_values(self):
-        """Test with small but valid num values."""
+        """Given small but valid num values, When logarithmic_weights called, Then properties hold."""
         # Test num = 3
         result_3 = logarithmic_weights(3)
         assert len(result_3) == 3
@@ -140,10 +145,10 @@ class TestLogarithmicWeightsEdgeCases:
 
 
 class TestLogarithmicWeightsNumerical:
-    """Test numerical properties and stability."""
+    """Layer 1: Test numerical properties and stability."""
 
     def test_numerical_precision(self):
-        """Test numerical precision with different sizes."""
+        """Given various sizes, When logarithmic_weights called, Then sum close to 1.0."""
         for num in [5, 10, 50, 100]:
             result = logarithmic_weights(num)
             # Sum should be very close to 1.0
@@ -154,7 +159,7 @@ class TestLogarithmicWeightsNumerical:
             assert result[0] == pytest.approx(0.0, abs=1e-15)
 
     def test_consistency_across_calls(self):
-        """Test that repeated calls give consistent results."""
+        """Given same parameters, When logarithmic_weights called multiple times, Then identical results."""
         num = 10
         result1 = logarithmic_weights(num)
         result2 = logarithmic_weights(num)
@@ -164,7 +169,7 @@ class TestLogarithmicWeightsNumerical:
         np.testing.assert_array_equal(result2, result3)
 
     def test_mathematical_properties(self):
-        """Test mathematical properties of logarithmic weights."""
+        """Given num, When logarithmic_weights called, Then mathematical properties hold."""
         num = 8
         result = logarithmic_weights(num)
 
@@ -179,7 +184,7 @@ class TestLogarithmicWeightsNumerical:
             assert result[i] <= result[i + 1]
 
     def test_logarithmic_curve_properties(self):
-        """Test that weights follow logarithmic curve properties."""
+        """Given num, When logarithmic_weights called, Then differences decrease (log curve flattens)."""
         num = 10
         result = logarithmic_weights(num)
 
@@ -197,7 +202,7 @@ class TestLogarithmicWeightsNumerical:
         assert decreasing_count >= len(diffs) // 2
 
     def test_weight_distribution_characteristics(self):
-        """Test characteristics of weight distribution."""
+        """Given num, When logarithmic_weights called, Then weight concentrated in later positions."""
         result = logarithmic_weights(10)
 
         # Most weight should be concentrated in later positions
@@ -213,10 +218,10 @@ class TestLogarithmicWeightsNumerical:
 
 
 class TestLogarithmicWeightsComparison:
-    """Test comparisons between different logarithmic weight configurations."""
+    """Layer 1: Test comparisons between different logarithmic weight configurations."""
 
     def test_relative_weight_distribution(self):
-        """Test relative distribution of weights."""
+        """Given different sizes, When logarithmic_weights called, Then both sum to 1."""
         small = logarithmic_weights(5)
         large = logarithmic_weights(10)
 
@@ -233,7 +238,7 @@ class TestLogarithmicWeightsComparison:
         assert np.all(np.diff(large) >= 0)
 
     def test_convergence_properties(self):
-        """Test convergence properties with increasing size."""
+        """Given increasing sizes, When logarithmic_weights called, Then max weight decreases."""
         sizes = [5, 10, 20, 50]
         max_weights = []
 

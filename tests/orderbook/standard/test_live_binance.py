@@ -1,5 +1,9 @@
 """Live Binance orderbook validation for the standard orderbook implementation.
 
+Layer 3 integration tests: captures live Binance market data and replays it
+through the standard orderbook, validating zero-fault state consistency.
+Covers depth replay, interleaved depth+bookTicker replay, and sequence gap detection.
+
 Run with:
     uv run pytest tests/orderbook/standard/test_live_binance.py --run-live --live-timeout 30 -v -s
 """
@@ -54,10 +58,12 @@ class ReplayStats:
 
 
 def _ticks(price: float, inv_tick_size: float) -> int:
+    """Convert price to tick integer."""
     return int(price * inv_tick_size)
 
 
 def _lots(size: float, inv_lot_size: float) -> int:
+    """Convert size to lot integer."""
     return int(size * inv_lot_size)
 
 
@@ -65,6 +71,15 @@ async def _fetch_exchange_filters(
     session: aiohttp.ClientSession,
     symbol: str,
 ) -> tuple[float, float]:
+    """Fetch tick_size and lot_size from Binance exchange info.
+
+    Args:
+        session: aiohttp client session.
+        symbol: Trading pair symbol (e.g., "BTCUSDT").
+
+    Returns:
+        Tuple of (tick_size, lot_size).
+    """
     url = "https://api.binance.com/api/v3/exchangeInfo"
     async with session.get(url, params={"symbol": symbol}, timeout=15) as resp:
         resp.raise_for_status()
@@ -95,6 +110,16 @@ async def _fetch_snapshot(
     symbol: str,
     limit: int,
 ) -> dict[str, Any]:
+    """Fetch orderbook snapshot from Binance.
+
+    Args:
+        session: aiohttp client session.
+        symbol: Trading pair symbol.
+        limit: Number of levels to fetch.
+
+    Returns:
+        Snapshot dictionary with lastUpdateId, bids, and asks.
+    """
     url = "https://api.binance.com/api/v3/depth"
     async with session.get(
         url,
@@ -122,6 +147,16 @@ async def _capture_events(
     list[BookTickerEvent],
     list[DepthEvent | BookTickerEvent],
 ]:
+    """Capture live Binance depth and bookTicker events.
+
+    Args:
+        symbol: Trading pair symbol.
+        duration_s: Capture duration in seconds.
+        snapshot_limit: Number of levels for initial snapshot.
+
+    Returns:
+        Tuple of (snapshot, tick_size, lot_size, depth_events, ticker_events, ordered_events).
+    """
     stream_url = (
         "wss://stream.binance.com:9443/stream?streams="
         f"{symbol.lower()}@depth@100ms/{symbol.lower()}@bookTicker"
@@ -207,6 +242,17 @@ async def _capture_events_with_retries(
     list[BookTickerEvent],
     list[DepthEvent | BookTickerEvent],
 ]:
+    """Capture live events with retry logic.
+
+    Args:
+        symbol: Trading pair symbol.
+        duration_s: Capture duration in seconds.
+        snapshot_limit: Number of levels for initial snapshot.
+        max_attempts: Maximum retry attempts.
+
+    Returns:
+        Same tuple as _capture_events.
+    """
     last_exc: Exception | None = None
     for attempt in range(max_attempts):
         try:
@@ -230,6 +276,14 @@ async def _capture_events_with_retries(
 def _snapshot_levels(
     snapshot: dict[str, Any],
 ) -> tuple[list[OrderbookLevel], list[OrderbookLevel]]:
+    """Convert snapshot to OrderbookLevel lists.
+
+    Args:
+        snapshot: Binance depth snapshot.
+
+    Returns:
+        Tuple of (asks, bids) as OrderbookLevel lists.
+    """
     bids = [
         OrderbookLevel(price=float(price), size=float(size), norders=0)
         for price, size in snapshot["bids"]
@@ -246,6 +300,16 @@ def _snapshot_reference(
     inv_tick_size: float,
     inv_lot_size: float,
 ) -> tuple[dict[int, int], dict[int, int]]:
+    """Build reference bid/ask dictionaries from snapshot.
+
+    Args:
+        snapshot: Binance depth snapshot.
+        inv_tick_size: Inverse tick size.
+        inv_lot_size: Inverse lot size.
+
+    Returns:
+        Tuple of (bids_dict, asks_dict) mapping ticks to lots.
+    """
     bids: dict[int, int] = {}
     asks: dict[int, int] = {}
 
@@ -271,6 +335,15 @@ def _apply_depth_to_reference(
     inv_tick_size: float,
     inv_lot_size: float,
 ) -> None:
+    """Apply depth event to reference dictionaries.
+
+    Args:
+        event: DepthEvent to apply.
+        bids: Reference bids dictionary (modified in-place).
+        asks: Reference asks dictionary (modified in-place).
+        inv_tick_size: Inverse tick size.
+        inv_lot_size: Inverse lot size.
+    """
     for price, size in event.bids:
         t = _ticks(float(price), inv_tick_size)
         lots = _lots(float(size), inv_lot_size)
@@ -289,6 +362,12 @@ def _apply_depth_to_reference(
 
 
 def _apply_depth_to_orderbook(ob: Orderbook, event: DepthEvent) -> None:
+    """Apply depth event to Orderbook instance.
+
+    Args:
+        ob: Orderbook to modify.
+        event: DepthEvent to apply.
+    """
     bids = [
         OrderbookLevel(price=float(price), size=float(size), norders=0)
         for price, size in event.bids
@@ -306,6 +385,17 @@ def _replay_depth_with_reference(
     tick_size: float,
     lot_size: float,
 ) -> tuple[ReplayStats, list[str]]:
+    """Replay depth events and validate against reference state.
+
+    Args:
+        snapshot: Initial snapshot.
+        depth_events: List of depth events to replay.
+        tick_size: Tick size.
+        lot_size: Lot size.
+
+    Returns:
+        Tuple of (stats, errors).
+    """
     inv_tick_size = 1.0 / tick_size
     inv_lot_size = 1.0 / lot_size
 
@@ -318,11 +408,13 @@ def _replay_depth_with_reference(
     errors: list[str] = []
 
     def record_error(msg: str) -> None:
+        """Record an error if under limit."""
         stats.state_mismatches += 1
         if len(errors) < 20:
             errors.append(msg)
 
     def validate_state(context: str) -> None:
+        """Validate orderbook state against reference."""
         bid_keys = sorted(ref_bids)
         ask_keys = sorted(ref_asks)
 
@@ -421,6 +513,17 @@ def _replay_interleaved_with_book_ticker(
     tick_size: float,
     lot_size: float,
 ) -> tuple[dict[str, int], list[str]]:
+    """Replay interleaved depth and bookTicker events.
+
+    Args:
+        snapshot: Initial snapshot.
+        ordered_events: Interleaved depth and bookTicker events.
+        tick_size: Tick size.
+        lot_size: Lot size.
+
+    Returns:
+        Tuple of (stats, errors).
+    """
     inv_tick_size = 1.0 / tick_size
     inv_lot_size = 1.0 / lot_size
     ob = Orderbook(tick_size=tick_size, lot_size=lot_size, size=1)
@@ -500,7 +603,11 @@ def _replay_interleaved_with_book_ticker(
 async def test_live_binance_btcusdt_depth_and_bookticker_zero_faults(
     request: pytest.FixtureRequest,
 ) -> None:
-    """Validate live Binance BTCUSDT updates with strict zero-fault replay checks."""
+    """Validate live Binance BTCUSDT updates with strict zero-fault replay checks.
+
+    Captures live market data, replays depth events against a reference implementation,
+    and validates interleaved depth+bookTicker handling with zero tolerance for mismatches.
+    """
     symbol = "BTCUSDT"
     live_timeout = float(request.config.getoption("--live-timeout"))
     capture_duration_s = max(10.0, min(live_timeout, 45.0))

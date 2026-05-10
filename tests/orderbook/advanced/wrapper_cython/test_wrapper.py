@@ -1,4 +1,9 @@
-"""Wrapper to expose Cython wrapper tests to pytest."""
+"""Wrapper to expose Cython wrapper tests to pytest.
+
+Layer 3: Delegates to native cython_test_wrapper module to verify
+Cython-level wrapper functionality including init, snapshot/delta/bbo
+delegation, calculations, and clear operations.
+"""
 
 from __future__ import annotations
 
@@ -18,24 +23,30 @@ except ImportError as e:
 
 
 def test_wrapper_init():
+    """Given fresh wrapper, When initialized, Then succeeds."""
     _native.test_wrapper_init()
 
 
 def test_wrapper_consume_snapshot_delegation():
+    """Given snapshot data, When consume_snapshot is delegated, Then core receives it."""
     _native.test_wrapper_consume_snapshot_delegation()
 
 
 def test_wrapper_consume_deltas_delegation():
+    """Given delta data, When consume_deltas is delegated, Then core receives it."""
     _native.test_wrapper_consume_deltas_delegation()
 
 
 def test_wrapper_consume_bbo_delegation():
+    """Given BBO data, When consume_bbo is delegated, Then core receives it."""
     _native.test_wrapper_consume_bbo_delegation()
 
 
 def test_wrapper_calculation_delegation():
+    """Given populated book, When calculations are delegated, Then correct values returned."""
     _native.test_wrapper_calculation_delegation()
 
 
 def test_wrapper_clear_delegation():
+    """Given populated book, When clear is delegated, Then book is emptied."""
     _native.test_wrapper_clear_delegation()

@@ -1,4 +1,9 @@
-"""Tests for GenericRingBuffer implementation."""
+"""Tests for GenericRingBuffer implementation.
+
+Layer 2 tests: validate GenericRingBuffer functionality including initialization,
+batch operations, consume/peek, object references, async operations, various
+data types, performance options, and timestamp tracking.
+"""
 
 import asyncio
 
@@ -8,24 +13,24 @@ from mm_toolbox.ringbuffer.generic import GenericRingBuffer
 
 
 class TestGenericRingBufferBasics:
-    """Test basic GenericRingBuffer functionality."""
+    """Layer 1: Test basic GenericRingBuffer functionality."""
 
     def test_initialization(self):
-        """Test GenericRingBuffer initialization."""
+        """Given valid capacity, When creating GenericRingBuffer, Then empty buffer initialized."""
         rb = GenericRingBuffer(5)
         assert rb.is_empty()
         assert not rb.is_full()
         assert len(rb) == 0
 
     def test_capacity_validation(self):
-        """Test capacity validation."""
+        """Given invalid capacity, When creating GenericRingBuffer, Then raises ValueError."""
         with pytest.raises(ValueError):
             GenericRingBuffer(0)
         with pytest.raises(ValueError):
             GenericRingBuffer(-1)
 
     def test_power_of_2_capacity_rounding(self):
-        """Test that capacity gets rounded to power of 2."""
+        """Given non-power-of-2 capacity, When creating GenericRingBuffer, Then rounded up."""
         test_cases = [(3, 4), (5, 8), (10, 16), (16, 16), (17, 32)]
 
         for requested, expected in test_cases:
@@ -36,7 +41,7 @@ class TestGenericRingBufferBasics:
             assert len(rb.unwrapped()) == expected
 
     def test_insert_and_peek_operations(self):
-        """Test insert and peek operations with various data types."""
+        """Given various data types, When inserted, Then stored correctly."""
         rb = GenericRingBuffer(5)
 
         # Test with different data types
@@ -57,7 +62,7 @@ class TestGenericRingBufferBasics:
         assert retrieved is dict_obj  # Same object reference
 
     def test_batch_operations(self):
-        """Test batch insert and related operations."""
+        """Given batch data, When insert_batch called, Then stores correctly."""
         rb = GenericRingBuffer(4)
 
         # Test batch insert
@@ -74,7 +79,7 @@ class TestGenericRingBufferBasics:
         assert list(rb.unwrapped()) == expected
 
     def test_consume_operations(self):
-        """Test consume and consume_all operations."""
+        """Given populated buffer, When consume called, Then FIFO order respected."""
         rb = GenericRingBuffer(4)
         rb.insert_batch(["a", "b", "c"])
 
@@ -90,7 +95,7 @@ class TestGenericRingBufferBasics:
         assert rb.is_empty()
 
     def test_contains_operations(self):
-        """Test membership testing."""
+        """Given populated buffer, When membership tested, Then correct results."""
         rb = GenericRingBuffer(4)
         rb.insert_batch([1, "hello", [1, 2], {"key": "value"}])
 
@@ -102,7 +107,7 @@ class TestGenericRingBufferBasics:
         assert 999 not in rb
 
     def test_clear_operations(self):
-        """Test clear functionality."""
+        """Given populated buffer, When clear called, Then emptied."""
         rb = GenericRingBuffer(3)
         rb.insert_batch(["a", "b", "c"])
         assert len(rb) == 3
@@ -118,10 +123,10 @@ class TestGenericRingBufferBasics:
 
 
 class TestGenericRingBufferEdgeCases:
-    """Test edge cases and error conditions."""
+    """Layer 2: Test edge cases and error conditions."""
 
     def test_empty_buffer_operations(self):
-        """Test operations on empty buffer."""
+        """Given empty buffer, When consume called, Then raises error."""
         rb = GenericRingBuffer(5)
 
         # These should raise errors on empty buffer
@@ -137,7 +142,7 @@ class TestGenericRingBufferEdgeCases:
             pass  # This is also acceptable behavior
 
     def test_single_element_buffer(self):
-        """Test buffer with capacity of 1."""
+        """Given capacity=1, When operations performed, Then works correctly."""
         rb = GenericRingBuffer(1)
 
         rb.insert("single")
@@ -152,7 +157,7 @@ class TestGenericRingBufferEdgeCases:
         assert rb.peekleft() == "new"
 
     def test_object_reference_handling(self):
-        """Test that objects are stored by reference."""
+        """Given mutable objects, When modified externally, Then changes reflected in buffer."""
         rb = GenericRingBuffer(3)
 
         # Test mutable objects
@@ -176,7 +181,7 @@ class TestGenericRingBufferEdgeCases:
         assert retrieved_dict is mutable_dict
 
     def test_none_and_falsy_values(self):
-        """Test handling of None and falsy values."""
+        """Given None and falsy values, When inserted, Then stored correctly."""
         rb = GenericRingBuffer(5)
 
         falsy_values = [None, False, 0, "", [], {}]
@@ -193,11 +198,11 @@ class TestGenericRingBufferEdgeCases:
 
 
 class TestGenericRingBufferAsyncFunctionality:
-    """Test async functionality comprehensively."""
+    """Layer 3: Test async functionality comprehensively."""
 
     @pytest.mark.asyncio
     async def test_async_consume_basic(self):
-        """Test basic async consume functionality."""
+        """Given async consumer waiting, When data inserted, Then consumer wakes."""
         rb = GenericRingBuffer(5, disable_async=False)
 
         async def waiter():
@@ -214,7 +219,7 @@ class TestGenericRingBufferAsyncFunctionality:
 
     @pytest.mark.asyncio
     async def test_async_consume_sequential(self):
-        """Test sequential async consume operations."""
+        """Given pre-populated buffer, When sequential aconsume called, Then FIFO order."""
         rb = GenericRingBuffer(10, disable_async=False)
 
         # Pre-populate with data
@@ -234,7 +239,7 @@ class TestGenericRingBufferAsyncFunctionality:
 
     @pytest.mark.asyncio
     async def test_async_consume_iterable(self):
-        """Test async consume iterable functionality."""
+        """Given async iterable consumer, When producer feeds data, Then all consumed."""
         rb = GenericRingBuffer(5, disable_async=False)
 
         collected = []
@@ -263,7 +268,7 @@ class TestGenericRingBufferAsyncFunctionality:
 
     @pytest.mark.asyncio
     async def test_async_disabled_mode(self):
-        """Test that async functions are disabled when disable_async=True."""
+        """Given async disabled, When async methods called, Then raise RuntimeError."""
         rb = GenericRingBuffer(5, disable_async=True)
 
         # Async methods should raise errors when disabled
@@ -276,7 +281,7 @@ class TestGenericRingBufferAsyncFunctionality:
 
     @pytest.mark.asyncio
     async def test_async_timeout_behavior(self):
-        """Test async timeout behavior."""
+        """Given empty buffer, When aconsume called with timeout, Then raises TimeoutError."""
         rb = GenericRingBuffer(5, disable_async=False)
 
         # Test that aconsume times out when no items are available
@@ -285,7 +290,7 @@ class TestGenericRingBufferAsyncFunctionality:
 
     @pytest.mark.asyncio
     async def test_async_consume_with_existing_data(self):
-        """Test async consume when data already exists."""
+        """Given existing data, When aconsume called, Then returns immediately."""
         rb = GenericRingBuffer(5, disable_async=False)
 
         # Pre-populate with data
@@ -301,10 +306,10 @@ class TestGenericRingBufferAsyncFunctionality:
 
 
 class TestGenericRingBufferDataTypes:
-    """Test GenericRingBuffer with various data types."""
+    """Layer 2: Test GenericRingBuffer with various data types."""
 
     def test_primitive_types(self):
-        """Test with primitive data types."""
+        """Given primitive data types, When inserted, Then stored correctly."""
         rb = GenericRingBuffer(5)
 
         primitives = [1, 3.14, "string", True, None]
@@ -314,7 +319,7 @@ class TestGenericRingBufferDataTypes:
         assert unwrapped == primitives
 
     def test_complex_objects(self):
-        """Test with complex objects."""
+        """Given complex objects, When inserted, Then stored correctly."""
         rb = GenericRingBuffer(5)
 
         class CustomClass:
@@ -343,7 +348,7 @@ class TestGenericRingBufferDataTypes:
         assert callable(unwrapped[4]["function"])
 
     def test_large_objects(self):
-        """Test with large objects."""
+        """Given large objects, When inserted, Then stored correctly."""
         rb = GenericRingBuffer(3)
 
         # Create large objects
@@ -361,10 +366,10 @@ class TestGenericRingBufferDataTypes:
 
 
 class TestGenericRingBufferPerformance:
-    """Test performance-related functionality."""
+    """Layer 2: Test performance-related functionality."""
 
     def test_disable_async_option(self):
-        """Test async disable option."""
+        """Given disable_async flag, When creating buffer, Then async behavior controlled."""
         rb_async = GenericRingBuffer(5, disable_async=False)
         # Just test that it was created successfully
         assert rb_async is not None
@@ -374,7 +379,7 @@ class TestGenericRingBufferPerformance:
         assert rb_no_async is not None
 
     def test_insert_returns_bool(self):
-        """Test that insert returns True."""
+        """Given item, When inserted, Then returns True."""
         rb = GenericRingBuffer(4)
         assert rb.insert(1) is True
         assert rb.insert_batch([2, 3]) is True
@@ -382,13 +387,15 @@ class TestGenericRingBufferPerformance:
 
 
 class TestGenericRingBufferTimestamps:
-    """Test timestamp tracking on monolithic ringbuffers."""
+    """Layer 2: Test timestamp tracking on monolithic ringbuffers."""
 
     def test_latest_insert_time_ns_initial(self):
+        """Given fresh buffer, When checking timestamp, Then returns 0."""
         rb = GenericRingBuffer(4)
         assert rb.latest_insert_time_ns == 0
 
     def test_latest_insert_time_ns_updated_on_insert(self):
+        """Given insert, When checking timestamp, Then updated and monotonic."""
         rb = GenericRingBuffer(4)
         rb.insert("a")
         t1 = rb.latest_insert_time_ns
@@ -401,15 +408,18 @@ class TestGenericRingBufferTimestamps:
         assert t2 > t1
 
     def test_latest_insert_time_ns_updated_on_insert_batch(self):
+        """Given insert_batch, When checking timestamp, Then updated."""
         rb = GenericRingBuffer(4)
         rb.insert_batch(["a", "b"])
         assert rb.latest_insert_time_ns > 0
 
     def test_latest_consume_time_ns_initial(self):
+        """Given fresh buffer, When checking consume timestamp, Then returns 0."""
         rb = GenericRingBuffer(4)
         assert rb.latest_consume_time_ns == 0
 
     def test_latest_consume_time_ns_updated_on_consume(self):
+        """Given consume, When checking timestamp, Then updated and monotonic."""
         rb = GenericRingBuffer(4)
         rb.insert_batch(["a", "b"])
         t1 = rb.latest_insert_time_ns
