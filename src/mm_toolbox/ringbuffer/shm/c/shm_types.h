@@ -1,5 +1,6 @@
 /**
- * shm_types.h - Type definitions for SHM ring buffer.
+ * @file shm_types.h
+ * @brief Type definitions for SHM ring buffer.
  *
  * Defines the shared memory header structure and message layout constants
  * for lock-free SPSC (Single Producer, Single Consumer) communication.
@@ -11,14 +12,18 @@
 
 #include <stdint.h>
 
-/* Message format: 8-byte little-endian length + payload */
+/**
+ * @brief Message format: 8-byte little-endian length + payload.
+ */
 #define SHM_MSG_HEADER_SIZE 8
 
-/* Magic value for header validation: 'SHBR' */
+/**
+ * @brief Magic value for header validation: 'SHBR'.
+ */
 #define SHM_MAGIC 0x53484252ULL
 
 /**
- * ShmHeader - 64-byte aligned shared memory header for ring buffer.
+ * @brief 64-byte aligned shared memory header for ring buffer.
  *
  * All fields are 64-bit unsigned integers for atomic operations and cache
  * alignment. This struct matches the Cython definition in header.pxd exactly.
@@ -42,13 +47,15 @@ typedef struct {
     uint64_t msg_count;
     uint64_t latest_insert_time_ns;
     uint64_t latest_consume_time_ns;
-} ShmHeader;  /* 64 bytes total - cache line aligned */
+} ShmHeader;
 
-/* MPSC magic value: 'SHMP' (Shared Memory Multi-Producer) */
+/**
+ * @brief MPSC magic value: 'SHMP' (Shared Memory Multi-Producer).
+ */
 #define SHM_MPSC_MAGIC 0x53484D50ULL
 
 /**
- * ShmMpscGlobalHeader - Global header for MPSC sharded ring buffer.
+ * @brief Global header for MPSC sharded ring buffer.
  *
  * Located at offset 0 of the shared memory region. Manages the number of
  * sub-rings and provides an atomic counter for producer ring selection.
@@ -66,26 +73,36 @@ typedef struct {
     uint64_t ring_capacity;
     uint64_t next_producer_ring;
     uint64_t reserved[4];
-} ShmMpscGlobalHeader;  /* 64 bytes total - cache line aligned */
+} ShmMpscGlobalHeader;
 
 /**
- * ShmSubRingHeader - Per-sub-ring header for MPSC architecture.
+ * @brief Per-sub-ring header for MPSC architecture.
  *
- * Each sub-ring uses this header instead of ShmHeader.  The first three
+ * Each sub-ring uses this header instead of ShmHeader. The first three
  * slots are reserved padding so that the offsets of write_pos, read_pos,
- * msg_count, and the timestamp fields match ShmHeader exactly.  This allows
+ * msg_count, and the timestamp fields match ShmHeader exactly. This allows
  * the existing shm_producer_insert / shm_consumer_consume C functions to
  * operate on a ShmSubRingHeader* safely when it is cast to ShmHeader*.
+ *
+ * Fields:
+ *   _pad0                    - offset 0  - reserved (was magic).
+ *   _pad1                    - offset 8  - reserved (was capacity).
+ *   _pad2                    - offset 16 - reserved (was mask).
+ *   write_pos                - offset 24 - Current write position.
+ *   read_pos                 - offset 32 - Current read position.
+ *   msg_count                - offset 40 - Number of messages in this sub-ring.
+ *   latest_insert_time_ns    - offset 48 - Timestamp of most recent insert.
+ *   latest_consume_time_ns   - offset 56 - Timestamp of most recent consume.
  */
 typedef struct {
-    uint64_t _pad0;              /* offset 0  - reserved (was magic) */
-    uint64_t _pad1;              /* offset 8  - reserved (was capacity) */
-    uint64_t _pad2;              /* offset 16 - reserved (was mask) */
-    uint64_t write_pos;          /* offset 24 */
-    uint64_t read_pos;           /* offset 32 */
-    uint64_t msg_count;          /* offset 40 */
-    uint64_t latest_insert_time_ns;  /* offset 48 */
-    uint64_t latest_consume_time_ns; /* offset 56 */
-} ShmSubRingHeader;  /* 64 bytes total - compatible with ShmHeader offsets */
+    uint64_t _pad0;
+    uint64_t _pad1;
+    uint64_t _pad2;
+    uint64_t write_pos;
+    uint64_t read_pos;
+    uint64_t msg_count;
+    uint64_t latest_insert_time_ns;
+    uint64_t latest_consume_time_ns;
+} ShmSubRingHeader;
 
 #endif /* SHM_TYPES_H */

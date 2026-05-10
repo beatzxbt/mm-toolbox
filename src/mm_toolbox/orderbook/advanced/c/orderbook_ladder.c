@@ -1,5 +1,6 @@
 /**
- * orderbook_ladder.c - Implementation of ladder operations.
+ * @file orderbook_ladder.c
+ * @brief Implementation of ladder operations for orderbook level arrays.
  *
  * Provides efficient memory shifting and level insertion for managing
  * ordered price levels in the orderbook, with optimized fast paths for
@@ -9,6 +10,16 @@
 #include "orderbook_ladder.h"
 #include <string.h>
 
+/**
+ * @brief Shift levels right starting from start_index to make room for insertion.
+ *
+ * When at max capacity, the last element is dropped. This only shifts data;
+ * the caller must update num_levels separately.
+ *
+ * @param data        Pointer to the ladder data containing levels and metadata.
+ * @param start_index Index from which to start shifting right.
+ * @note Fast paths for start_index == 0 with small move counts (most common case).
+ */
 void c_ladder_roll_right(OrderbookLadderData* data, uint64_t start_index) {
     uint64_t count = data->num_levels;
     uint64_t max_levels = data->max_levels;
@@ -59,6 +70,15 @@ void c_ladder_roll_right(OrderbookLadderData* data, uint64_t start_index) {
     );
 }
 
+/**
+ * @brief Shift levels left starting from start_index to remove a level.
+ *
+ * This only shifts data; the caller must update num_levels separately.
+ *
+ * @param data        Pointer to the ladder data containing levels and metadata.
+ * @param start_index Index from which to start shifting left.
+ * @note Fast paths for start_index == 0 with small move counts (most common case).
+ */
 void c_ladder_roll_left(OrderbookLadderData* data, uint64_t start_index) {
     uint64_t count = data->num_levels;
     OrderbookLevel* levels = data->levels;
@@ -103,7 +123,12 @@ void c_ladder_roll_left(OrderbookLadderData* data, uint64_t start_index) {
     );
 }
 
+/**
+ * @brief Insert a level directly at the specified index.
+ * @param levels Pointer to the levels array.
+ * @param index  Index at which to insert the level.
+ * @param level  Pointer to the OrderbookLevel to insert.
+ */
 void c_ladder_insert_level(OrderbookLevel* levels, uint64_t index, const OrderbookLevel* level) {
     levels[index] = *level;
 }
-

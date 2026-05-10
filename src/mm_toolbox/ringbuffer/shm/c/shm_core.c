@@ -1,5 +1,6 @@
 /**
- * shm_core.c - Implementation of core SHM operations.
+ * @file shm_core.c
+ * @brief Implementation of core SHM ring buffer operations.
  *
  * High-performance producer/consumer operations with atomic synchronization
  * and integrated monotonic timestamping. Uses GCC atomic builtins for
@@ -16,6 +17,20 @@
 #define ATOMIC_ACQ_REL 4
 #define ATOMIC_RELAXED 0
 
+/**
+ * @brief Insert a message into the ring buffer (producer-side).
+ *
+ * This function combines reserve, write, and commit operations with
+ * monotonic timestamping, all in C for maximum performance. If the buffer
+ * is full, oldest messages are dropped to make room.
+ *
+ * @param ctx          Producer context.
+ * @param payload      Payload data pointer.
+ * @param payload_len  Payload length in bytes.
+ * @param dropped_out  Output: number of dropped messages (if any).
+ * @return             1 on success, 0 on failure (message too large or corruption detected).
+ * @note Uses acquire/release semantics for safe lock-free synchronization.
+ */
 int shm_producer_insert(ShmProducerContext* ctx, const unsigned char* payload,
                         size_t payload_len, uint64_t* dropped_out) {
     uint64_t capacity = ctx->capacity;
@@ -87,6 +102,16 @@ int shm_producer_insert(ShmProducerContext* ctx, const unsigned char* payload,
     return 1;
 }
 
+/**
+ * @brief Check if a complete message is available (peek without consuming).
+ *
+ * Uses atomic acquire semantics to read producer's write position.
+ *
+ * @param ctx          Consumer context.
+ * @param msg_len_out  Output: message length if available.
+ * @param read_pos_out Output: read position if available.
+ * @return             1 if message available, 0 otherwise.
+ */
 int shm_consumer_peek_available(ShmConsumerContext* ctx, uint64_t* msg_len_out,
                                 uint64_t* read_pos_out) {
     uint64_t read_pos = __atomic_load_n(&ctx->hdr->read_pos, ATOMIC_ACQUIRE);
@@ -112,6 +137,18 @@ int shm_consumer_peek_available(ShmConsumerContext* ctx, uint64_t* msg_len_out,
     return 1;
 }
 
+/**
+ * @brief Consume a message from the ring buffer (consumer-side).
+ *
+ * Copies message data to destination buffer and commits the read position
+ * with monotonic timestamping.
+ *
+ * @param ctx       Consumer context.
+ * @param dst       Destination buffer (must be at least msg_len bytes).
+ * @param msg_len   Message length (from peek_available).
+ * @param read_pos  Read position (from peek_available).
+ * @return          1 on success, 0 on failure.
+ */
 int shm_consumer_consume(ShmConsumerContext* ctx, unsigned char* dst,
                          uint64_t msg_len, uint64_t read_pos) {
     uint64_t now_ns;
