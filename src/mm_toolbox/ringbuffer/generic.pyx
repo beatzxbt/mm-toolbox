@@ -65,15 +65,6 @@ cdef class GenericRingBuffer:
             return buf[tail:tail + size]
         return buf[tail:] + buf[:(tail + size) & mask]
     
-    cpdef void overwrite_latest(self, object item, bint increment_count=False):
-        """Overwrite the latest element in the buffer. Optionally increment count."""
-        cdef u64 idx
-        if increment_count:
-            self.insert(item)
-        else:
-            idx = (self._head - 1) & self._mask
-            self._buffer[idx] = item
-
     cpdef bint insert(self, object item):
         """Add a new element to the end of the buffer."""
         cdef:

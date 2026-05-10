@@ -73,23 +73,6 @@ class TestGenericRingBufferBasics:
         expected = ["z", "w", "v", "u"]
         assert list(rb.unwrapped()) == expected
 
-    def test_overwrite_operations(self):
-        """Test overwrite_latest functionality."""
-        rb = GenericRingBuffer(3)
-        rb.insert_batch([1, 2, 3])
-
-        # Test overwrite without incrementing count
-        rb.overwrite_latest(99, increment_count=False)
-        assert len(rb) == 3  # Count unchanged
-        assert list(rb.unwrapped()) == [1, 2, 99]
-
-        # Test overwrite with incrementing count
-        rb.overwrite_latest(100, increment_count=True)
-        # The capacity is 4 (rounded from 3), so we can have 4 elements
-        unwrapped = rb.unwrapped()
-        assert len(unwrapped) == 4
-        assert unwrapped == [1, 2, 99, 100]
-
     def test_consume_operations(self):
         """Test consume and consume_all operations."""
         rb = GenericRingBuffer(4)
@@ -389,24 +372,6 @@ class TestGenericRingBufferPerformance:
         rb_no_async = GenericRingBuffer(5, disable_async=True)
         # Test that async methods raise errors (tested elsewhere)
         assert rb_no_async is not None
-
-    def test_memory_efficiency_with_overwrites(self):
-        """Test memory efficiency with many overwrites."""
-        rb = GenericRingBuffer(100)
-
-        # Fill with data
-        initial_data = [f"item_{i}" for i in range(50)]
-        rb.insert_batch(initial_data)
-        assert len(rb) == 50
-
-        # Perform many overwrites
-        for i in range(10):
-            rb.overwrite_latest(f"overwrite_{i}", increment_count=False)
-
-        # Should still have same count with last overwrite
-        assert len(rb) == 50
-        unwrapped = rb.unwrapped()
-        assert unwrapped[-1] == "overwrite_9"
 
     def test_insert_returns_bool(self):
         """Test that insert returns True."""

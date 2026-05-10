@@ -15,7 +15,6 @@ cdef class GenericRingBuffer:
 
     # def void      __cinit__(self, int max_capacity, bint disable_async=False)
     cpdef list      unwrapped(self)
-    cpdef void      overwrite_latest(self, object item, bint increment_count=*)
     cpdef bint      insert(self, object item)
     cpdef bint      insert_batch(self, list items)
     cpdef bint      contains(self, object item)

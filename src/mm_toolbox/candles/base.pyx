@@ -148,10 +148,6 @@ cdef class BaseCandles:
         self.__cum_volume = 0.0
         self.__total_size = 0.0
 
-        # This ensures the newest candle is always the latest one incase the 
-        # ringbuffer is accessed whilst there is an open candle.
-        self._ringbuffer.overwrite_latest(self.latest_candle, increment_count=False)
-
     cpdef void initialize(self, list[object] trades):
         """Initialize candle data from a batch of existing trades."""
         if not trades:
@@ -178,8 +174,13 @@ cdef class BaseCandles:
         return len(self._ringbuffer)
 
     def __getitem__(self, index: int) -> Candle:
-        """Access a specific candle by index."""
-        return self._ringbuffer[index]
+        """Access a specific closed candle by index."""
+        candles = self._ringbuffer.unwrapped()
+        if index < 0:
+            index += len(candles)
+        if index < 0 or index >= len(candles):
+            raise IndexError(f"Index out of range; expected within (0 <> {len(candles)}) but got {index}")
+        return candles[index]
 
     def __aiter__(self) -> AsyncIterator[Candle]:
         """Async iterator over the candles."""

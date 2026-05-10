@@ -73,29 +73,6 @@ cdef class NumericRingBuffer:
             return buf[tail:tail + size].copy()
         return np.concatenate((buf[tail:], buf[:(tail + size) & mask]))
 
-    cpdef void overwrite_latest(self, numeric_t item, bint increment_count=False):
-        """Overwrite the latest element in the buffer. Optionally increment count."""
-        cdef:
-            u64 idx
-            u64 head = self._head
-            u64 tail = self._tail
-            u64 mask = self._mask
-            bint is_full = self._size == self._max_capacity
-            numeric_t[::1] buf = self._buffer
-        
-        if increment_count:
-            buf[head] = item
-            if is_full:
-                self._tail = (tail + 1) & mask
-            else:
-                self._size += 1
-            self._head = (head + 1) & mask
-            if not self._disable_async and self._size == 1:
-                self._buffer_not_empty_event.set()
-        else:
-            idx = (head - 1) & mask
-            buf[idx] = item
-
     def insert(self, object item) -> bool:
         """Add a new element to the end of the buffer."""
         cdef:

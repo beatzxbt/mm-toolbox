@@ -38,7 +38,6 @@ cdef class NumericRingBuffer:
 
     # def __cinit__(self, int max_capacity, object dtype, bint disable_async=False)
     cpdef cnp.ndarray unwrapped(self)
-    cpdef void overwrite_latest(self, numeric_t item, bint increment_count=*)
     cpdef bint contains(self, numeric_t item)
     cpdef object consume(self)
     cpdef cnp.ndarray consume_all(self)

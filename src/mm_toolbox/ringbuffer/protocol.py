@@ -29,6 +29,10 @@ class RingBufferProtocol(Protocol[T]):
         """Remove and return the oldest item from the ringbuffer."""
         ...
 
+    def consume_all(self) -> list[T]:
+        """Remove and return all currently available items."""
+        ...
+
     def consume_iterable(self) -> Iterator[T]:
         """Yield items from the ringbuffer in FIFO order."""
         ...
