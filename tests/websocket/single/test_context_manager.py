@@ -1,4 +1,9 @@
-"""Async context manager tests for WsSingle."""
+"""Async context manager tests for WsSingle.
+
+Layer-2 tests validating WsSingle async context manager semantics,
+interface behaviors without a connection, and edge cases like close
+failures and reentrant usage.
+"""
 
 from __future__ import annotations
 
@@ -16,12 +21,9 @@ async def wait_for_single_state(
     """Wait for a WsSingle instance to reach the expected state.
 
     Args:
-        ws (WsSingle): WsSingle instance.
-        expected (ConnectionState): Expected connection state.
-        timeout_s (float): Timeout in seconds.
-
-    Returns:
-        None: This helper does not return a value.
+        ws: WsSingle instance.
+        expected: Expected connection state.
+        timeout_s: Timeout in seconds.
 
     Raises:
         AssertionError: If state is not reached in time.
@@ -35,55 +37,34 @@ async def wait_for_single_state(
 
 
 class TestWsSingleInterface:
-    """Validate WsSingle interface behaviors that do not require a connection."""
+    """Layer-2 tests for WsSingle interface behaviors that do not require a connection."""
 
     @pytest.fixture
     def config(self):
         """Build a config for WsSingle tests.
 
         Returns:
-            WsConnectionConfig: Config instance for WsSingle.
+            Config instance for WsSingle.
         """
         from mm_toolbox.websocket.connection import WsConnectionConfig
 
         return WsConnectionConfig.default("wss://test.com")
 
     def test_initialization(self, config) -> None:
-        """Validate initial state and config access.
-
-        Args:
-            config: WsConnectionConfig fixture.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a fresh WsSingle, Then config and state accessors return the expected defaults."""
         ws = WsSingle(config)
         assert ws.get_config() is config
         assert ws.get_state() == ConnectionState.DISCONNECTED
 
     def test_configuration_updates(self, config) -> None:
-        """Validate set_on_connect updates configuration.
-
-        Args:
-            config: WsConnectionConfig fixture.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a WsSingle, When set_on_connect is called, Then the config is updated."""
         ws = WsSingle(config)
         new_messages = [b'{"subscribe": "BTCUSDT"}']
         ws.set_on_connect(new_messages)
         assert ws.get_config().on_connect == new_messages
 
     def test_operations_when_disconnected(self, config) -> None:
-        """Ensure operations are safe when no connection exists.
-
-        Args:
-            config: WsConnectionConfig fixture.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a disconnected WsSingle, When send_data or close is called, Then no exception is raised and state remains DISCONNECTED."""
         ws = WsSingle(config)
         ws.send_data(b'{"test": "message"}')
         ws.close()
@@ -92,22 +73,14 @@ class TestWsSingleInterface:
 
 @pytest.mark.asyncio
 class TestWsSingleAsyncContextManager:
-    """Validate WsSingle async context manager behavior."""
+    """Layer-2 tests for WsSingle async context manager behavior."""
 
     async def test_async_with_normal_exit(
         self,
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure async with opens and closes the connection cleanly.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a local server, When WsSingle is used with async with, Then it connects, sends, and exits to DISCONNECTED cleanly."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             async with WsSingle(config) as ws:
@@ -122,15 +95,7 @@ class TestWsSingleAsyncContextManager:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure exceptions inside context still clean up resources.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given an exception inside the context body, When raised, Then the pool still cleans up and ends in DISCONNECTED."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             with pytest.raises(ValueError):
@@ -146,15 +111,10 @@ class TestWsSingleAsyncContextManager:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure context exit does not crash if close raises.
+        """Given a connection whose close() raises, When the context exits, Then the exception is swallowed and state ends DISCONNECTED.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Close failures must not propagate into user code; otherwise a
+network blip during teardown would crash the application."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             ws = WsSingle(config)
@@ -170,30 +130,15 @@ class TestWsSingleAsyncContextManager:
                     """Proxy connection that raises on close."""
 
                     def __init__(self, conn) -> None:
-                        """Initialize the proxy wrapper.
-
-                        Args:
-                            conn: The underlying connection instance.
-
-                        Returns:
-                            None: This initializer does not return a value.
-                        """
+                        """Initialize the proxy wrapper."""
                         self._conn = conn
 
                     def close(self) -> None:
-                        """Raise an error to simulate close failures.
-
-                        Returns:
-                            None: This helper does not return a value.
-                        """
+                        """Raise an error to simulate close failures."""
                         raise RuntimeError("boom")
 
                     def get_state(self):
-                        """Return the underlying connection state.
-
-                        Returns:
-                            ConnectionState: Current state snapshot.
-                        """
+                        """Return the underlying connection state."""
                         return self._conn.get_state()
 
                 ws._ws_conn = _CloseFailConn(original_conn)
@@ -206,15 +151,7 @@ class TestWsSingleAsyncContextManager:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure multiple WsSingle contexts operate concurrently.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given two WsSingle instances, When nested in async with blocks, Then both connect and send concurrently without interference."""
         async with basic_server:
             config1 = connection_config_factory(basic_server)
             config2 = connection_config_factory(basic_server)
@@ -237,15 +174,7 @@ class TestWsSingleAsyncContextManager:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure auto_reconnect configurations still close cleanly.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given auto_reconnect=True, When WsSingle is used with async with, Then it connects and exits cleanly despite reconnection configuration."""
         async with basic_server:
             config = connection_config_factory(basic_server, auto_reconnect=True)
             async with WsSingle(config) as ws:
@@ -260,16 +189,10 @@ class TestWsSingleAsyncContextManager:
         connection_config_factory,
         monkeypatch,
     ) -> None:
-        """Ensure __aenter__ creates a single connection when reconnect fails.
+        """Given auto_reconnect=True and a failing reconnect, When __aenter__ runs, Then it raises RuntimeError rather than hanging.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-            monkeypatch: Pytest monkeypatch fixture.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This prevents indefinite hangs when the server is unreachable and
+the reconnect iterator would loop forever."""
         async with basic_server:
             config = connection_config_factory(basic_server, auto_reconnect=True)
 

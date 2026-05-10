@@ -1,7 +1,15 @@
 """State machine and snapshot tests for WsConnection.
 
-Exercises ConnectionState enum values, WsConnection properties,
-and state transitions during connection lifecycle.
+Layer-1 and Layer-2 tests exercising ConnectionState enum semantics,
+WsConnection property access, and live state transitions.
+
+Key coverage:
+- Enum value correctness and ordering (DISCONNECTED < CONNECTING < CONNECTED).
+- Property defaults on a fresh, unconnected instance.
+- CONNECTED -> DISCONNECTED lifecycle with a real server.
+- State consistency while frames are being processed concurrently.
+- Transient CONNECTING state (acknowledged as unobservable with picows).
+- Transport field inaccessibility from Python (cdef).
 """
 
 from __future__ import annotations
@@ -19,42 +27,30 @@ from mm_toolbox.websocket.connection import (
 
 
 class TestConnectionStateEnum:
-    """Validate ConnectionState enum values and ordering."""
+    """Layer-1 tests for ConnectionState enum values and ordering."""
 
     def test_enum_values(self) -> None:
-        """Ensure ConnectionState values match expected integers.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given the ConnectionState enum, Then its integer values match the expected constants."""
         assert ConnectionState.DISCONNECTED == 0
         assert ConnectionState.CONNECTING == 1
         assert ConnectionState.CONNECTED == 2
 
     def test_enum_ordering(self) -> None:
-        """Ensure ConnectionState ordering is consistent.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given the ConnectionState enum, Then DISCONNECTED < CONNECTING < CONNECTED."""
         assert ConnectionState.DISCONNECTED < ConnectionState.CONNECTING
         assert ConnectionState.CONNECTING < ConnectionState.CONNECTED
 
     def test_enum_equality(self) -> None:
-        """Ensure ConnectionState comparisons to integers work.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given integer comparisons, Then enum members compare correctly to their underlying values."""
         assert ConnectionState.CONNECTED == 2
         assert ConnectionState.DISCONNECTED != 1
 
 
 class TestWsConnectionProperties:
-    """Validate WsConnection direct property access."""
+    """Layer-1 tests for WsConnection direct property access."""
 
     def test_initial_properties(self) -> None:
-        """Verify initial property values on a fresh connection."""
+        """Given a freshly constructed WsConnection, Then seq_id=0, latency_ms=1000.0, is_connected=False, and the ringbuffer is the one supplied."""
         ringbuffer = BytesRingBuffer(max_capacity=64, only_insert_unique=False)
         config = WsConnectionConfig.default("wss://test.example.com")
         conn = WsConnection(ringbuffer, config)
@@ -64,28 +60,20 @@ class TestWsConnectionProperties:
         assert conn.get_ringbuffer() is ringbuffer
 
     def test_property_updates_after_simulated_connect(self) -> None:
-        """Verify properties reflect state after connection."""
+        """Given a connected state, Then properties would reflect updates (skipped because cdef fields are immutable from Python)."""
         pytest.skip("cdef fields cannot be mutated from Python")
 
 
 @pytest.mark.asyncio
 class TestWsConnectionStateMachine:
-    """Validate live connection state transitions."""
+    """Layer-2 tests for live connection state transitions."""
 
     async def test_state_transitions(
         self,
         basic_server,
         connection_factory,
     ) -> None:
-        """Ensure connection transitions to CONNECTED then DISCONNECTED.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a live server, When a connection is established and then closed, Then state moves from CONNECTED to DISCONNECTED."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             assert conn.get_state() == ConnectionState.CONNECTED
@@ -98,15 +86,7 @@ class TestWsConnectionStateMachine:
         basic_server,
         connection_factory,
     ) -> None:
-        """Ensure get_state returns a ConnectionState enum directly.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a live connection, When get_state is called, Then a ConnectionState enum instance is returned."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             state = conn.get_state()
@@ -128,15 +108,10 @@ class TestWsConnectionStateMachine:
         basic_server,
         connection_factory,
     ) -> None:
-        """Ensure state reads remain valid during message handling.
+        """Given concurrent message handling, When state is read mid-frame, Then it remains valid (CONNECTED or DISCONNECTED, never an invalid value).
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Race conditions between frame callbacks and explicit close() can
+        produce torn reads if state is not atomically maintained."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             ringbuffer = conn.get_ringbuffer()
@@ -158,15 +133,10 @@ class TestWsConnectionStateMachine:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """CONNECTING state may not be observable due to picows speed.
+        """Given picows' fast handshake, Then CONNECTING is transient and may not be observable.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This is an acknowledged limitation rather than a bug; the test
+        documents the behavior so future maintainers do not chase it."""
         pytest.skip(
             "CONNECTING state is transient and not reliably observable with picows"
         )
@@ -176,13 +146,5 @@ class TestWsConnectionStateMachine:
         basic_server,
         connection_factory,
     ) -> None:
-        """Ensure _transport is None after disconnect.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a closed connection, Then _transport is None (skipped because it is a cdef field inaccessible from Python)."""
         pytest.skip("_transport is a cdef field inaccessible from Python")

@@ -1,4 +1,12 @@
-"""Reconnect behavior tests for WsConnection."""
+"""Reconnect behavior tests for WsConnection.
+
+Layer-2 tests for the WsConnection.new_with_reconnect async generator.
+Covers backoff timing, eventual success after transient failures, maximum
+backoff clamping, and graceful handling of connection rejection.
+
+Edge cases include verifying that the generator enforces a minimum delay
+between attempts and does not allow unbounded backoff growth.
+"""
 
 from __future__ import annotations
 
@@ -13,22 +21,17 @@ from mm_toolbox.websocket.connection import ConnectionState, WsConnection
 
 @pytest.mark.asyncio
 class TestWsConnectionReconnection:
-    """Validate reconnect generator behavior."""
+    """Layer-2 tests for WsConnection reconnect generator behavior."""
 
     async def test_reconnect_backoff_delays(
         self,
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure reconnect generator enforces a delay between attempts.
+        """Given a closed connection, When the reconnect generator yields the next one, Then at least the configured backoff has elapsed.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This prevents aggressive reconnection storms that could overwhelm
+        the server or exhaust local file descriptors."""
         async with basic_server:
             ringbuffer = BytesRingBuffer(max_capacity=8, only_insert_unique=False)
             config = connection_config_factory(basic_server)
@@ -50,15 +53,7 @@ class TestWsConnectionReconnection:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure reconnection yields a usable connection after a close.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a closed connection, When the reconnect generator runs, Then it eventually yields a new CONNECTED connection."""
         async with basic_server:
             ringbuffer = BytesRingBuffer(max_capacity=8, only_insert_unique=False)
             config = connection_config_factory(basic_server)
@@ -77,15 +72,10 @@ class TestWsConnectionReconnection:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure reconnect delay does not grow without bound.
+        """Given repeated reconnections, When delays accumulate, Then they are clamped below the maximum backoff cap.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Without a cap, backoff could grow to minutes or hours, making the
+        client unresponsive after a long outage."""
         async with basic_server:
             ringbuffer = BytesRingBuffer(max_capacity=8, only_insert_unique=False)
             config = connection_config_factory(basic_server)
@@ -106,15 +96,10 @@ class TestWsConnectionReconnection:
         server_reject_connections,
         connection_config_factory,
     ) -> None:
-        """Ensure generator handles immediate connection closure.
+        """Given a server that rejects handshakes, When the reconnect generator runs, Then it yields a DISCONNECTED connection without crashing.
 
-        Args:
-            server_reject_connections: Fixture providing rejecting server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This validates that the generator tolerates hard failures and
+        surfaces them as state rather than unhandled exceptions."""
         async with server_reject_connections:
             ringbuffer = BytesRingBuffer(max_capacity=8, only_insert_unique=False)
             config = connection_config_factory(server_reject_connections)

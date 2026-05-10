@@ -1,4 +1,9 @@
-"""Async context manager tests for WsPool."""
+"""Async context manager tests for WsPool.
+
+Layer-2 tests validating that WsPool can be used correctly inside
+`async with` blocks, including normal startup, exception cleanup,
+reentrant usage, and fallback when all connections are rejected.
+"""
 
 from __future__ import annotations
 
@@ -11,35 +16,20 @@ from mm_toolbox.websocket.pool import WsPool, WsPoolConfig
 
 
 def noop_message_handler(msg: bytes) -> None:
-    """No-op message handler for pool tests.
-
-    Args:
-        msg (bytes): Incoming message payload.
-
-    Returns:
-        None: This handler does not return a value.
-    """
+    """No-op message handler for pool tests."""
     return None
 
 
 @pytest.mark.asyncio
 class TestWsPoolContextManager:
-    """Validate WsPool async context manager behavior."""
+    """Layer-2 tests for WsPool async context manager behavior."""
 
     async def test_context_manager_starts_pool(
         self,
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure async with starts and stops the pool cleanly.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a pool, When entered via async with, Then it starts all connections and exits to DISCONNECTED."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
@@ -57,15 +47,9 @@ class TestWsPoolContextManager:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure exceptions inside context still cleanup pool resources.
+        """Given an exception inside the context body, When raised, Then the pool still cleans up and ends in DISCONNECTED.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This prevents background tasks from leaking when user code fails."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
@@ -83,15 +67,7 @@ class TestWsPoolContextManager:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure pool can be started and stopped multiple times.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a pool, When started and stopped twice, Then each cycle is independent and ends in DISCONNECTED."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
@@ -109,15 +85,10 @@ class TestWsPoolContextManager:
         server_reject_connections,
         connection_config_factory,
     ) -> None:
-        """Ensure RuntimeError when all pool connections are rejected.
+        """Given a rejecting server, When the pool is entered, Then it starts but reports zero healthy connections.
 
-        Args:
-            server_reject_connections: Fixture providing rejecting server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This documents the behavior where handshake succeeds but the
+server immediately closes, leaving the pool empty but not crashed."""
         async with server_reject_connections:
             config = connection_config_factory(server_reject_connections)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
