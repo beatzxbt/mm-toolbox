@@ -1,4 +1,10 @@
-"""Comprehensive test suite for the standard orderbook implementation."""
+"""Comprehensive test suite for the standard orderbook implementation.
+
+Layer 2-3 tests covering utility functions, OrderbookLevel, initialization,
+snapshots, incremental updates, BBO updates, accessors, calculations,
+and integration scenarios. Validates integer arithmetic for precision,
+error handling for edge cases, and state consistency across operations.
+"""
 
 import pytest
 
@@ -13,10 +19,10 @@ from mm_toolbox.orderbook.standard import (
 
 
 class TestUtilityFunctions:
-    """Test the utility conversion functions in isolation."""
+    """Layer 1: Test the utility conversion functions in isolation."""
 
     def test_price_to_ticks_conversion(self):
-        """Test price to ticks conversion with various tick sizes."""
+        """Given various prices, When converted to ticks, Then exact integer ticks returned."""
         # Standard tick size
         assert _price_to_ticks(100.01, 0.01) == 10001
         assert _price_to_ticks(100.00, 0.01) == 10000
@@ -30,29 +36,29 @@ class TestUtilityFunctions:
         assert _price_to_ticks(100.0001, 0.0001) == 1000001
 
     def test_size_to_lots_conversion(self):
-        """Test size to lots conversion with various lot sizes."""
+        """Given various sizes, When converted to lots, Then exact integer lots returned."""
         assert _size_to_lots(1.0, 0.001) == 1000
         assert _size_to_lots(0.5, 0.001) == 500
         assert _size_to_lots(0.0001, 0.0001) == 1
 
     def test_price_from_ticks_conversion(self):
-        """Test ticks to price conversion."""
+        """Given various ticks, When converted back to price, Then original price recovered."""
         assert _price_from_ticks(10001, 0.01) == 100.01
         assert _price_from_ticks(10000, 0.01) == 100.00
         assert abs(_price_from_ticks(801, 0.125) - 100.125) < 1e-10
 
     def test_size_from_lots_conversion(self):
-        """Test lots to size conversion."""
+        """Given various lots, When converted back to size, Then original size recovered."""
         assert _size_from_lots(1000, 0.001) == 1.0
         assert _size_from_lots(500, 0.001) == 0.5
         assert abs(_size_from_lots(1, 0.0001) - 0.0001) < 1e-10
 
 
 class TestOrderbookLevel:
-    """Test OrderbookLevel functionality in isolation."""
+    """Layer 1: Test OrderbookLevel functionality in isolation."""
 
     def test_basic_creation(self):
-        """Test basic OrderbookLevel creation and validation."""
+        """Given valid parameters, When creating OrderbookLevel, Then fields set correctly."""
         level = OrderbookLevel(price=100.0, size=1.5, norders=2)
         assert level.price == 100.0
         assert level.size == 1.5
@@ -61,7 +67,7 @@ class TestOrderbookLevel:
         assert level.lots == -1
 
     def test_validation_errors(self):
-        """Test that invalid values raise appropriate errors."""
+        """Given invalid values, When creating OrderbookLevel, Then appropriate errors raised."""
         with pytest.raises(ValueError, match="Invalid price"):
             OrderbookLevel(price=-1.0, size=1.0, norders=1)
 
@@ -72,12 +78,12 @@ class TestOrderbookLevel:
             OrderbookLevel(price=100.0, size=1.0, norders=-1)
 
     def test_value_property(self):
-        """Test the value property calculation."""
+        """Given price and size, When value computed, Then equals price * size."""
         level = OrderbookLevel(price=100.0, size=1.5, norders=2)
         assert level.value == 150.0
 
     def test_precision_info_addition(self):
-        """Test adding precision information to a level."""
+        """Given level without precision, When add_precision_info called, Then ticks/lots computed."""
         level = OrderbookLevel(price=100.01, size=1.5, norders=2)
         level.add_precision_info(inv_tick_size=100.0, inv_lot_size=1000.0)
 
@@ -85,7 +91,7 @@ class TestOrderbookLevel:
         assert level.lots == 1500
 
     def test_precision_info_validation(self):
-        """Test validation of inverse precision values."""
+        """Given invalid inverse precision, When add_precision_info called, Then raises error."""
         level = OrderbookLevel(price=100.0, size=1.0, norders=1)
 
         with pytest.raises(ValueError, match="Invalid inv_tick_size"):
@@ -95,7 +101,7 @@ class TestOrderbookLevel:
             level.add_precision_info(inv_tick_size=100.0, inv_lot_size=-1000.0)
 
     def test_from_values_class_method(self):
-        """Test the from_values class method."""
+        """Given price/size/tick/lot, When from_values called, Then level with precision created."""
         level = OrderbookLevel.from_values(
             price=100.01, size=1.5, norders=2, tick_size=0.01, lot_size=0.001
         )
@@ -107,7 +113,7 @@ class TestOrderbookLevel:
         assert level.lots == 1500
 
     def test_reset_functionality(self):
-        """Test the reset method."""
+        """Given populated level, When reset called, Then all fields zeroed."""
         level = OrderbookLevel.from_values(
             price=100.01, size=1.5, norders=2, tick_size=0.01, lot_size=0.001
         )
@@ -121,10 +127,10 @@ class TestOrderbookLevel:
 
 
 class TestOrderbookInitialization:
-    """Test orderbook initialization and basic setup."""
+    """Layer 2: Test orderbook initialization and basic setup."""
 
     def test_basic_initialization(self):
-        """Test basic orderbook initialization."""
+        """Given valid params, When creating Orderbook, Then empty book initialized."""
         ob = Orderbook(tick_size=0.01, lot_size=0.001, size=100)
 
         assert ob._tick_size == 0.01
@@ -140,7 +146,7 @@ class TestOrderbookInitialization:
         assert not ob._trust_input_precision
 
     def test_initialization_validation(self):
-        """Test that invalid initialization parameters raise errors."""
+        """Given invalid params, When creating Orderbook, Then raises ValueError."""
         with pytest.raises(ValueError, match="Invalid tick_size"):
             Orderbook(tick_size=-0.01, lot_size=0.001)
 
@@ -151,7 +157,7 @@ class TestOrderbookInitialization:
             Orderbook(tick_size=0.01, lot_size=0.001, size=0)
 
     def test_initialization_with_initial_data(self):
-        """Test initialization with initial bids and asks."""
+        """Given initial bids/asks, When creating Orderbook, Then pre-populated."""
         bids = [
             OrderbookLevel.from_values(100.0, 1.0, 1, 0.01, 0.001),
             OrderbookLevel.from_values(99.99, 2.0, 2, 0.01, 0.001),
@@ -173,10 +179,10 @@ class TestOrderbookInitialization:
 
 
 class TestOrderbookSnapshots:
-    """Test orderbook snapshot functionality."""
+    """Layer 2: Test orderbook snapshot functionality."""
 
     def test_basic_snapshot_update(self):
-        """Test basic snapshot update functionality."""
+        """Given snapshot data, When consumed, Then book populated with sorted levels."""
         ob = Orderbook(tick_size=0.01, lot_size=0.001, size=3)
 
         bids = [
@@ -201,7 +207,7 @@ class TestOrderbookSnapshots:
         assert ob._sorted_ask_ticks == [10001, 10002, 10003]  # Ascending
 
     def test_snapshot_without_precision_info(self):
-        """Test snapshot update without pre-computed precision info."""
+        """Given levels without pre-computed precision, When snapshot consumed, Then auto-computes."""
         ob = Orderbook(tick_size=0.01, lot_size=0.001, size=2)
 
         bids = [
@@ -224,7 +230,7 @@ class TestOrderbookSnapshots:
             assert ask.lots is not None
 
     def test_snapshot_recomputes_existing_precision_by_default(self):
-        """Default mode should recompute precision info for integrity."""
+        """Given levels with wrong ticks/lots, When snapshot consumed with default mode, Then recomputes."""
         ob = Orderbook(tick_size=0.01, lot_size=0.001, size=2)
 
         bids = [
@@ -244,7 +250,7 @@ class TestOrderbookSnapshots:
         assert asks[0].ticks == 10001
 
     def test_snapshot_trusts_existing_precision_when_enabled(self):
-        """Trusted mode should reuse existing precision info."""
+        """Given levels with custom ticks/lots, When trust_input_precision=True, Then preserves them."""
         ob = Orderbook(
             tick_size=0.01,
             lot_size=0.001,
@@ -269,7 +275,7 @@ class TestOrderbookSnapshots:
         assert 10001 not in ob._asks
 
     def test_snapshot_validation(self):
-        """Test snapshot validation for minimum size requirements."""
+        """Given insufficient levels, When snapshot consumed, Then raises ValueError."""
         ob = Orderbook(tick_size=0.01, lot_size=0.001, size=5)
 
         bids = [OrderbookLevel.from_values(100.00, 1.0, 1, 0.01, 0.001)]  # Only 1 level
@@ -291,7 +297,7 @@ class TestOrderbookSnapshots:
             ob.consume_snapshot(asks=asks, bids=bids)
 
     def test_snapshot_deduplicates_duplicate_ticks(self):
-        """Duplicate snapshot ticks should not create duplicate tick-list entries."""
+        """Given duplicate ticks in snapshot, When consumed, Then deduplicates (last wins)."""
         ob = Orderbook(tick_size=0.01, lot_size=0.001, size=3)
 
         bids = [
@@ -317,7 +323,7 @@ class TestOrderbookSnapshots:
         assert ob._asks[10001].size == 2.5
 
     def test_deleting_deduplicated_snapshot_tick_keeps_state_consistent(self):
-        """Deleting a duplicate snapshot tick should not leave stale tick entries."""
+        """Given deduplicated snapshot, When deleting duplicate tick, Then no stale entries."""
         ob = Orderbook(tick_size=0.01, lot_size=0.001, size=3)
 
         bids = [
@@ -346,7 +352,7 @@ class TestOrderbookSnapshots:
 
 
 class TestOrderbookIncrementalUpdates:
-    """Test incremental update functionality."""
+    """Layer 2: Test incremental update functionality."""
 
     def setup_method(self):
         """Set up a basic orderbook for testing."""
@@ -366,7 +372,7 @@ class TestOrderbookIncrementalUpdates:
         self.ob.consume_snapshot(asks=asks, bids=bids)
 
     def test_level_addition(self):
-        """Test adding new levels."""
+        """Given new level, When delta consumed, Then level added."""
         # Add new ask level
         new_asks = [OrderbookLevel.from_values(100.04, 1.0, 1, 0.01, 0.001)]
         self.ob.consume_deltas(asks=new_asks, bids=[])
@@ -376,7 +382,7 @@ class TestOrderbookIncrementalUpdates:
         assert self.ob._sorted_ask_ticks == [10001, 10002, 10003, 10004]
 
     def test_level_modification(self):
-        """Test modifying existing levels."""
+        """Given existing level update, When delta consumed, Then level modified."""
         # Modify existing bid
         modified_bids = [OrderbookLevel.from_values(100.00, 5.0, 5, 0.01, 0.001)]
         self.ob.consume_deltas(asks=[], bids=modified_bids)
@@ -386,7 +392,7 @@ class TestOrderbookIncrementalUpdates:
         assert best_bid.norders == 5
 
     def test_level_deletion(self):
-        """Test deleting levels using zero size."""
+        """Given size=0 delta, When consumed, Then level deleted."""
         # Delete best bid
         deleted_bids = [OrderbookLevel.from_values(100.00, 0.0, 0, 0.01, 0.001)]
         self.ob.consume_deltas(asks=[], bids=deleted_bids)
@@ -399,7 +405,7 @@ class TestOrderbookIncrementalUpdates:
         assert best_bid.price == 99.99
 
     def test_batched_deltas_last_update_wins(self):
-        """Repeated tick updates in one batch should use final update state."""
+        """Given multiple updates for same tick in one batch, When consumed, Then final state used."""
         asks = [
             OrderbookLevel.from_values(100.04, 1.0, 1, 0.01, 0.001),
             OrderbookLevel.from_values(100.04, 2.0, 2, 0.01, 0.001),
@@ -425,7 +431,7 @@ class TestOrderbookIncrementalUpdates:
 
 
 class TestOrderbookBBOUpdates:
-    """Test BBO (Best Bid/Offer) update functionality."""
+    """Layer 2: Test BBO (Best Bid/Offer) update functionality."""
 
     def setup_method(self):
         """Set up a basic orderbook for testing."""
@@ -445,7 +451,7 @@ class TestOrderbookBBOUpdates:
         self.ob.consume_snapshot(asks=asks, bids=bids)
 
     def test_bbo_replacement(self):
-        """Test replacing BBO levels."""
+        """Given new BBO levels, When consume_bbo called, Then BBO replaced."""
         new_bid = OrderbookLevel.from_values(100.005, 2.0, 1, 0.01, 0.001)
         new_ask = OrderbookLevel.from_values(100.015, 1.8, 1, 0.01, 0.001)
 
@@ -456,7 +462,7 @@ class TestOrderbookBBOUpdates:
         assert best_ask.price == 100.015
 
     def test_bbo_deletion(self):
-        """Test deleting BBO levels using zero size."""
+        """Given zero-size BBO levels, When consume_bbo called, Then old BBO promoted."""
         zero_bid = OrderbookLevel.from_values(100.00, 0.0, 0, 0.01, 0.001)
         zero_ask = OrderbookLevel.from_values(100.01, 0.0, 0, 0.01, 0.001)
 
@@ -467,7 +473,7 @@ class TestOrderbookBBOUpdates:
         assert best_ask.price == 100.02
 
     def test_bbo_prunes_stale_better_levels_when_incoming_exists_deeper(self):
-        """Incoming authoritative BBO should prune stale top levels."""
+        """Given authoritative BBO deeper than existing, When consumed, Then prunes stale top levels."""
         self.ob.consume_bbo(
             ask=OrderbookLevel.from_values(100.02, 1.1, 1, 0.01, 0.001),
             bid=OrderbookLevel.from_values(99.99, 1.1, 1, 0.01, 0.001),
@@ -483,7 +489,7 @@ class TestOrderbookBBOUpdates:
 
 
 class TestOrderbookAccessors:
-    """Test orderbook accessor methods."""
+    """Layer 2: Test orderbook accessor methods."""
 
     def setup_method(self):
         """Set up a basic orderbook for testing."""
@@ -507,7 +513,7 @@ class TestOrderbookAccessors:
         self.ob.consume_snapshot(asks=asks, bids=bids)
 
     def test_get_bbo(self):
-        """Test getting best bid and offer."""
+        """Given populated book, When get_bbo called, Then returns best bid and ask."""
         best_bid, best_ask = self.ob.get_bbo()
         assert best_bid.price == 100.00
         assert best_ask.price == 100.01
@@ -517,7 +523,7 @@ class TestOrderbookAccessors:
         assert best_ask.price == 100.01
 
     def test_get_bids(self):
-        """Test getting bid levels."""
+        """Given populated book, When get_bids called, Then returns bid levels."""
         all_bids = self.ob.get_bids()
         assert len(all_bids) == 5
         assert [b.price for b in all_bids] == [100.00, 99.99, 99.98, 99.97, 99.96]
@@ -529,7 +535,7 @@ class TestOrderbookAccessors:
         assert [b.price for b in all_bids] == [100.00, 99.99, 99.98, 99.97, 99.96]
 
     def test_get_asks(self):
-        """Test getting ask levels."""
+        """Given populated book, When get_asks called, Then returns ask levels."""
         all_asks = self.ob.get_asks()
         assert len(all_asks) == 5
         assert [a.price for a in all_asks] == [100.01, 100.02, 100.03, 100.04, 100.05]
@@ -541,7 +547,7 @@ class TestOrderbookAccessors:
         assert [a.price for a in all_asks] == [100.01, 100.02, 100.03, 100.04, 100.05]
 
     def test_iter_bids(self):
-        """Test iterating over bid levels."""
+        """Given populated book, When iter_bids called, Then iterates bid levels."""
         bid_prices = [bid.price for bid in self.ob.iter_bids()]
         assert bid_prices == [100.00, 99.99, 99.98, 99.97, 99.96]
 
@@ -549,7 +555,7 @@ class TestOrderbookAccessors:
         assert top3_bid_prices == [100.00, 99.99, 99.98]
 
     def test_iter_asks(self):
-        """Test iterating over ask levels."""
+        """Given populated book, When iter_asks called, Then iterates ask levels."""
         ask_prices = [ask.price for ask in self.ob.iter_asks()]
         assert ask_prices == [100.01, 100.02, 100.03, 100.04, 100.05]
 
@@ -557,7 +563,7 @@ class TestOrderbookAccessors:
         assert top3_ask_prices == [100.01, 100.02, 100.03]
 
     def test_get_levels_with_depth(self):
-        """Test get_asks/get_bids depth argument behavior."""
+        """Given depth argument, When get_bids/get_asks called, Then respects depth limit."""
         expected_bid_prices = [100.00, 99.99, 99.98, 99.97, 99.96]
         expected_ask_prices = [100.01, 100.02, 100.03, 100.04, 100.05]
 
@@ -586,7 +592,7 @@ class TestOrderbookAccessors:
         ] == expected_ask_prices
 
     def test_iter_levels_with_depth(self):
-        """Test iter_asks/iter_bids depth argument behavior."""
+        """Given depth argument, When iter_bids/iter_asks called, Then respects depth limit."""
         expected_bid_prices = [100.00, 99.99, 99.98, 99.97, 99.96]
         expected_ask_prices = [100.01, 100.02, 100.03, 100.04, 100.05]
 
@@ -616,7 +622,7 @@ class TestOrderbookAccessors:
 
 
 class TestOrderbookCalculations:
-    """Test orderbook calculation methods."""
+    """Layer 2: Test orderbook calculation methods."""
 
     def setup_method(self):
         """Set up a basic orderbook for testing."""
@@ -636,7 +642,7 @@ class TestOrderbookCalculations:
         self.ob.consume_snapshot(asks=asks, bids=bids)
 
     def test_get_bbo_spread(self):
-        """Test BBO spread calculation using integer arithmetic."""
+        """Given populated book, When get_bbo_spread called, Then exact one tick."""
         spread = self.ob.get_bbo_spread()
         assert spread == 0.01  # Should be exactly one tick
 
@@ -644,14 +650,14 @@ class TestOrderbookCalculations:
         assert spread == self.ob._tick_size
 
     def test_get_mid_price(self):
-        """Test mid price calculation using integer arithmetic."""
+        """Given populated book, When get_mid_price called, Then integer mid computed."""
         mid_price = self.ob.get_mid_price()
         expected_mid_ticks = (10000 + 10001) // 2  # 10000.5 -> 10000
         expected_mid_price = expected_mid_ticks * 0.01
         assert mid_price == expected_mid_price
 
     def test_get_wmid_price(self):
-        """Test weighted mid price calculation."""
+        """Given populated book, When get_wmid_price called, Then weighted mid returned."""
         try:
             wmid_price = self.ob.get_wmid_price()
             assert isinstance(wmid_price, float)
@@ -659,7 +665,7 @@ class TestOrderbookCalculations:
             pytest.skip("wmid_price implementation has a bug")
 
     def test_get_volume_weighted_mid_price(self):
-        """Test volume weighted mid price calculation."""
+        """Given populated book, When get_volume_weighted_mid_price called, Then VWMP returned."""
         vwmid = self.ob.get_volume_weighted_mid_price(size=1.0, is_base_currency=True)
         assert isinstance(vwmid, float)
         assert vwmid > 0
@@ -669,7 +675,7 @@ class TestOrderbookCalculations:
         assert vwmid_zero == self.ob.get_mid_price()
 
     def test_get_price_impact(self):
-        """Test touch-anchored terminal price impact semantics."""
+        """Given various sizes, When get_price_impact called, Then terminal impact returned."""
         # Single-level fills stay at touch.
         buy_single = self.ob.get_price_impact(
             size=1.0, is_buy=True, is_base_currency=True
@@ -705,7 +711,7 @@ class TestOrderbookCalculations:
         assert self.ob.get_price_impact(size=100.0, is_buy=False) == float("inf")
 
     def test_get_size_for_price_impact_bps(self):
-        """Test cumulative depth size within a touch-anchored impact band."""
+        """Given impact band, When get_size_for_price_impact_bps called, Then cumulative size returned."""
         buy_base = self.ob.get_size_for_price_impact_bps(
             impact_bps=1.0, is_buy=True, is_base_currency=True
         )
@@ -732,7 +738,7 @@ class TestOrderbookCalculations:
         assert negative_bps == 0.0
 
     def test_does_bbo_price_change(self):
-        """Test BBO price change detection."""
+        """Given price pairs, When does_bbo_price_change called, Then correct boolean returned."""
         # Same prices should not indicate change
         assert not self.ob.does_bbo_price_change(100.00, 100.01)
 
@@ -741,7 +747,7 @@ class TestOrderbookCalculations:
         assert self.ob.does_bbo_price_change(100.00, 100.02)
 
     def test_does_bbo_cross(self):
-        """Test BBO crossing detection."""
+        """Given price pairs, When does_bbo_cross called, Then crossing detected."""
         # Normal prices should not be crossed
         assert not self.ob.does_bbo_cross(99.99, 100.02)
 
@@ -750,10 +756,10 @@ class TestOrderbookCalculations:
 
 
 class TestOrderbookIntegrationAndEdgeCases:
-    """Test complex integration scenarios and edge cases."""
+    """Layer 3: Test complex integration scenarios and edge cases."""
 
     def test_multiple_successive_updates(self):
-        """Test many successive updates maintaining correct state."""
+        """Given many successive updates, When applied, Then state remains consistent."""
         ob = Orderbook(tick_size=0.01, lot_size=0.001, size=3)
 
         # Initial snapshot
@@ -817,7 +823,7 @@ class TestOrderbookIntegrationAndEdgeCases:
         assert ask_prices == sorted(ask_prices)
 
     def test_mixed_bbo_and_regular_updates(self):
-        """Test mixing BBO updates with regular updates."""
+        """Given alternating BBO and regular updates, When applied, Then state consistent."""
         ob = Orderbook(tick_size=0.01, lot_size=0.001, size=5)
 
         # Start with initial book
@@ -865,7 +871,7 @@ class TestOrderbookIntegrationAndEdgeCases:
             assert ob._sorted_ask_ticks == sorted(ob._sorted_ask_ticks)
 
     def test_floating_point_precision(self):
-        """Test that integer arithmetic avoids floating point errors."""
+        """Given prices causing FP issues, When using integer arithmetic, Then exact results."""
         ob = Orderbook(tick_size=0.01, lot_size=0.001, size=3)
 
         # Use prices that would cause floating point precision issues - need
@@ -890,7 +896,7 @@ class TestOrderbookIntegrationAndEdgeCases:
         assert abs(spread - 0.01) < 1e-15  # No floating point drift
 
     def test_empty_orderbook_errors(self):
-        """Test that empty orderbook operations raise appropriate errors."""
+        """Given empty orderbook, When accessors called, Then appropriate errors raised."""
         ob = Orderbook(tick_size=0.01, lot_size=0.001)
 
         with pytest.raises(ValueError, match="Orderbook is not populated"):
@@ -906,7 +912,7 @@ class TestOrderbookIntegrationAndEdgeCases:
             ob.get_bbo_spread()
 
     def test_side_empty_state_raises_clear_domain_error(self):
-        """If one side is empty, BBO accessors should raise a clear error."""
+        """Given one-sided empty book, When BBO accessors called, Then clear error raised."""
         ob = Orderbook(tick_size=0.01, lot_size=0.001, size=1)
         ob.consume_snapshot(
             asks=[OrderbookLevel.from_values(100.01, 1.0, 1, 0.01, 0.001)],
@@ -931,7 +937,7 @@ class TestOrderbookIntegrationAndEdgeCases:
             ob.does_bbo_cross(100.00, 100.01)
 
     def test_side_repopulation_restores_two_sided_state(self):
-        """When a missing side is replenished, two-sided state should recover."""
+        """Given one-sided empty book, When missing side replenished, Then two-sided state restored."""
         ob = Orderbook(tick_size=0.01, lot_size=0.001, size=1)
         ob.consume_snapshot(
             asks=[OrderbookLevel.from_values(100.01, 1.0, 1, 0.01, 0.001)],
@@ -954,7 +960,7 @@ class TestOrderbookIntegrationAndEdgeCases:
         assert best_ask.price == 100.02
 
     def test_reset_functionality(self):
-        """Test orderbook reset functionality."""
+        """Given populated book, When reset called, Then emptied."""
         ob = Orderbook(tick_size=0.01, lot_size=0.001, size=3)
 
         bids = [
@@ -981,10 +987,10 @@ class TestOrderbookIntegrationAndEdgeCases:
 
 
 class TestPrecisionAndIntegerArithmetic:
-    """Test that the orderbook properly uses integer arithmetic for precision."""
+    """Layer 1-2: Test that the orderbook properly uses integer arithmetic for precision."""
 
     def test_tick_precision_consistency(self):
-        """Test that tick conversions are consistent and precise."""
+        """Given various prices, When roundtripped through ticks, Then exact recovery."""
         tick_size = 0.01
 
         # Test various price points
@@ -998,7 +1004,7 @@ class TestPrecisionAndIntegerArithmetic:
             assert abs(recovered_price - (ticks * tick_size)) < 1e-15
 
     def test_lot_precision_consistency(self):
-        """Test that lot conversions are consistent and precise."""
+        """Given various sizes, When roundtripped through lots, Then exact recovery."""
         lot_size = 0.001
 
         # Test various size points
@@ -1012,7 +1018,7 @@ class TestPrecisionAndIntegerArithmetic:
             assert abs(recovered_size - (lots * lot_size)) < 1e-15
 
     def test_spread_calculation_precision(self):
-        """Test that spread calculations avoid floating point errors."""
+        """Given prices with FP risk, When spread calculated, Then exact via integer arithmetic."""
         ob = Orderbook(tick_size=0.01, lot_size=0.001, size=3)
 
         # Test with prices that could cause floating point issues - need at

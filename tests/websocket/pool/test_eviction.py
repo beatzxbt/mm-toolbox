@@ -1,4 +1,16 @@
-"""Eviction logic tests for WsPool (isolated, no real servers)."""
+"""Eviction logic tests for WsPool (isolated, no real servers).
+
+Layer-2 tests for the WsPool timed-eviction and fast-connection selection
+logic using mocked connection stubs.
+
+Key coverage:
+- Slowest connection is evicted when the interval fires.
+- Fastest connection is selected based on latency.
+- Empty pool is safe (no errors during eviction or selection).
+- Replacement scheduling is safe without an event loop.
+- Partial replacement failures are tolerated.
+- Restart count scales with pool size (1 for small pools, N//2 for large).
+"""
 
 from __future__ import annotations
 
@@ -14,14 +26,7 @@ from mm_toolbox.websocket.pool import WsPool, WsPoolConfig
 
 
 def noop_message_handler(msg: bytes) -> None:
-    """No-op message handler for pool tests.
-
-    Args:
-        msg (bytes): Incoming message payload.
-
-    Returns:
-        None: This handler does not return a value.
-    """
+    """No-op message handler for pool tests."""
     return None
 
 
@@ -40,11 +45,8 @@ class DummyConn:
         """Initialize a dummy connection.
 
         Args:
-            conn_id (int): Connection identifier.
-            latency_ms (float): Mock latency in milliseconds.
-
-        Returns:
-            None: This initializer does not return a value.
+            conn_id: Connection identifier.
+            latency_ms: Mock latency in milliseconds.
         """
         self._state = DummyState(latency_ms=latency_ms, is_connected=True)
         self._config = SimpleNamespace(conn_id=conn_id)
@@ -62,7 +64,7 @@ class DummyConn:
         """Return the dummy state object.
 
         Returns:
-            DummyState: Current mock state.
+            Current mock state.
         """
         return self._state
 
@@ -70,32 +72,24 @@ class DummyConn:
         """Return the dummy config object.
 
         Returns:
-            SimpleNamespace: Mock config with conn_id.
+            Mock config with conn_id.
         """
         return self._config
 
     def close(self) -> None:
-        """Mark the connection as closed.
-
-        Returns:
-            None: This method does not return a value.
-        """
+        """Mark the connection as closed."""
         self.closed = True
 
 
 @pytest.mark.asyncio
 class TestWsPoolEvictionLogic:
-    """Validate eviction logic with mocked latency values."""
+    """Layer-2 tests for eviction logic with mocked latency values."""
 
     async def test_eviction_replaces_slowest_connection(self, monkeypatch) -> None:
-        """Ensure the slowest connection is closed and removed.
+        """Given three connections with varying latency, When eviction fires, Then the slowest is removed and the others remain.
 
-        Args:
-            monkeypatch: Pytest monkeypatch fixture.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Eviction must target the worst performer; removing a fast
+connection would degrade overall throughput."""
         config = WsPoolConfig(num_connections=3, evict_interval_s=1)
         pool = WsPool(
             config=SimpleNamespace(
@@ -114,11 +108,7 @@ class TestWsPoolEvictionLogic:
         times = iter([0.0, 10.0, 0.5, 0.5])
 
         def _next_time() -> float:
-            """Return the next mocked timestamp.
-
-            Returns:
-                float: Mocked time value.
-            """
+            """Return the next mocked timestamp."""
             return next(times)
 
         monkeypatch.setattr(pool_module, "time_s", _next_time)
@@ -132,11 +122,7 @@ class TestWsPoolEvictionLogic:
         assert pool._conns[3].closed is False
 
     async def test_fast_connection_selection(self) -> None:
-        """Ensure fastest connection is selected based on latency.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given three connections with different latencies, When the fastest is selected, Then it is the one with the lowest latency."""
         config = WsPoolConfig(num_connections=3, evict_interval_s=1)
         pool = WsPool(
             config=SimpleNamespace(
@@ -154,11 +140,7 @@ class TestWsPoolEvictionLogic:
         assert pool._fast_conn is pool._conns[2]
 
     async def test_eviction_with_no_connections(self) -> None:
-        """Ensure no errors when the pool is empty.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given an empty pool, When eviction or fast selection runs, Then no errors occur and fast_conn is None."""
         config = WsPoolConfig(num_connections=2, evict_interval_s=1)
         pool = WsPool(
             config=SimpleNamespace(
@@ -172,11 +154,7 @@ class TestWsPoolEvictionLogic:
         assert pool._fast_conn is None
 
     async def test_schedule_replacements_no_loop(self) -> None:
-        """Ensure replacement scheduling is safe without a loop.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a pool with no event loop set, When replacement scheduling is triggered, Then it remains safe and does not crash."""
         config = WsPoolConfig(num_connections=2, evict_interval_s=1)
         pool = WsPool(
             config=SimpleNamespace(
@@ -195,16 +173,10 @@ class TestWsPoolEvictionLogic:
         server_with_delay,
         connection_config_factory,
     ) -> None:
-        """Ensure eviction replaces the slowest connection after interval.
+        """Given real servers with different latencies, When eviction interval passes, Then the slowest is replaced.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            server_with_delay: Fixture providing delayed echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Skipped because real timed eviction requires long waits and is
+covered by unit tests above."""
         pytest.skip(
             "Real timed eviction requires long waits and is covered by unit tests"
         )
@@ -215,16 +187,10 @@ class TestWsPoolEvictionLogic:
         connection_config_factory,
         monkeypatch,
     ) -> None:
-        """Ensure pool survives when some replacements fail.
+        """Given a pool where some replacements fail, When eviction runs, Then the pool survives with fewer than the target connections.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-            monkeypatch: Pytest monkeypatch fixture.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Partial failure is common during network blips; the pool must
+gracefully degrade rather than crash."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=3, evict_interval_s=60)
@@ -254,11 +220,10 @@ class TestWsPoolEvictionLogic:
                 assert 0 < pool.get_connection_count() < pool_config.num_connections
 
     async def test_restart_count_logic(self) -> None:
-        """Ensure restart count scales with pool size.
+        """Given pool sizes of 3 and 5, When restart counts are computed, Then they are 1 and 2 respectively.
 
-        Returns:
-            None: This test does not return a value.
-        """
+        Restart count scales with pool size to balance recovery speed
+against connection storm risk."""
         config_3 = WsPoolConfig(num_connections=3, evict_interval_s=1)
         pool_3 = WsPool(
             config=SimpleNamespace(

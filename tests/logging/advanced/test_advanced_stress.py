@@ -1,7 +1,8 @@
-"""Stress tests for advanced logging handlers.
+"""Layer 3 — Stress tests for advanced logging handlers.
 
-These tests exercise the handler subsystem under high load to verify
-throughput, concurrency safety, and memory stability.
+Exercises the handler subsystem under high load to verify throughput,
+concurrency safety, and memory stability. All tests are marked ``slow``
+and should be run selectively.
 """
 
 from __future__ import annotations
@@ -20,16 +21,15 @@ pytestmark = pytest.mark.slow
 
 
 class CountingHandler(BaseLogHandler):
-    """A simple handler that counts received logs for stress testing."""
+    """Test-double handler that atomically counts received logs for stress testing."""
 
     def __init__(self):
-        """Initialize the counting handler."""
         super().__init__()
         self.count = 0
         self.lock = threading.Lock()
 
     def push(self, logs: list[PyLog]) -> None:
-        """Count the number of logs received.
+        """Atomically increment the counter by the batch size.
 
         Args:
             logs: Batch of log entries.
@@ -41,12 +41,12 @@ class CountingHandler(BaseLogHandler):
 def _worker_push_logs(
     handler: CountingHandler, num_logs: int, batch_size: int = 1000
 ) -> None:
-    """Push logs to a handler in batches from a worker thread.
+    """Push logs to *handler* in batches from a worker thread.
 
     Args:
         handler: Target handler.
         num_logs: Total number of logs to push.
-        batch_size: Number of logs per push call.
+        batch_size: Number of logs per ``push()`` call.
     """
     config = LoggerConfig(str_format="%(message)s")
     handler.add_primary_config(config)
@@ -59,10 +59,10 @@ def _worker_push_logs(
 
 
 class TestStressHandlers:
-    """Stress and load tests for logging handlers."""
+    """Layer 3 — Stress and load tests for logging handlers."""
 
     def test_high_throughput_single_worker(self):
-        """One worker pushing 50K logs; all must be received."""
+        """Given one worker pushing 50 000 logs, every single log is received."""
         handler = CountingHandler()
         num_logs = 50_000
 
@@ -75,7 +75,10 @@ class TestStressHandlers:
         handler.close()
 
     def test_high_throughput_multiple_workers(self):
-        """Ten workers each pushing 10K logs; all must be received."""
+        """Given ten workers each pushing 10 000 logs, the total received equals 100 000.
+
+        This catches race conditions in handler buffer or accounting logic.
+        """
         handler = CountingHandler()
         num_workers = 10
         logs_per_worker = 10_000
@@ -98,7 +101,7 @@ class TestStressHandlers:
         handler.close()
 
     def test_burst_load(self):
-        """One worker sends 1M logs as fast as possible."""
+        """Given a single 1 000 000-log batch, it is processed without error or timeout."""
         handler = CountingHandler()
         num_logs = 1_000_000
 
@@ -109,17 +112,19 @@ class TestStressHandlers:
         handler.close()
 
     def test_memory_stability(self):
-        """Push 10K logs ten times and verify modest memory growth."""
+        """Given 10 × 10 000-log batches, RSS growth stays below 5×.
+
+        A large growth would indicate a memory leak in the handler's internal
+        buffers or future-tracking lists.
+        """
         handler = CountingHandler()
         num_logs = 10_000
 
-        # Warmup batch
         logs = [PyLog(i, b"name", PyLogLevel.INFO, b"msg") for i in range(num_logs)]
         handler.push(logs)
         gc.collect()
         mem_after_warmup = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
-        # Main batches
         for _ in range(9):
             logs = [PyLog(i, b"name", PyLogLevel.INFO, b"msg") for i in range(num_logs)]
             handler.push(logs)

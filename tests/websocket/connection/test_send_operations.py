@@ -1,7 +1,14 @@
 """Send operations tests for WsConnection.
 
-Validates send_data, send_ping, and ping/pong response handling with
-real websocket transport.
+Layer-2 tests validating send_data, send_data_bytearray, send_ping,
+and send_pong against a real WebSocket transport.
+
+Key coverage:
+- Active-transport delivery for bytes and bytearray payloads.
+- No-op safety when disconnected.
+- Concurrent send_data from multiple coroutines does not corrupt frames.
+- PING/PONG exchange keeps the connection alive.
+- Payload size variation (0, 1, 128, 1024, 4096 bytes) for bytearray path.
 """
 
 from __future__ import annotations
@@ -15,22 +22,14 @@ from mm_toolbox.websocket.connection import ConnectionState
 
 @pytest.mark.asyncio
 class TestWsConnectionSendOperations:
-    """Validate WsConnection send behaviors."""
+    """Layer-2 tests for WsConnection send behaviors."""
 
     async def test_send_data_with_active_transport(
         self,
         basic_server,
         connection_factory,
     ) -> None:
-        """Ensure send_data delivers payloads to the server.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a connected transport, When send_data is called, Then the payload is echoed by the server."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             payload = b"test message"
@@ -44,7 +43,7 @@ class TestWsConnectionSendOperations:
         basic_server,
         connection_factory,
     ) -> None:
-        """Ensure send_data_bytearray delivers payloads to the server."""
+        """Given a connected transport, When send_data_bytearray is called, Then the payload is echoed by the server."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             payload = bytearray(b"bytearray message")
@@ -58,15 +57,10 @@ class TestWsConnectionSendOperations:
         basic_server,
         connection_factory,
     ) -> None:
-        """Ensure send_data is a no-op when disconnected.
+        """Given a disconnected connection, When send_data is called, Then it is a no-op and the server receives nothing.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This prevents crashes when application code sends during teardown
+        or after an unexpected disconnect."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             conn.close()
@@ -81,14 +75,7 @@ class TestWsConnectionSendOperations:
         basic_server,
         connection_factory,
     ) -> None:
-        """Ensure send_ping does not disrupt the connection.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a connected transport, When send_ping is called, Then the connection remains CONNECTED."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             conn.send_ping()
@@ -101,15 +88,7 @@ class TestWsConnectionSendOperations:
         basic_server,
         connection_factory,
     ) -> None:
-        """Ensure WsConnection responds to server pings with pongs.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a server PING, When the client auto-responds with PONG, Then the server receives it before timeout."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             await asyncio.sleep(0.1)
@@ -124,48 +103,24 @@ class TestWsConnectionSendOperations:
         connection_factory,
         chaos_runner,
     ) -> None:
-        """Ensure concurrent send_data calls do not interfere.
+        """Given multiple coroutines calling send_data concurrently, When they complete, Then all payloads are received by the server.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-            chaos_runner: Fixture providing chaotic concurrency helper.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Concurrent sends are common in high-throughput paths; this test
+        verifies that internal frame queuing does not drop or corrupt data."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             payloads = [f"msg-{idx}".encode("utf-8") for idx in range(5)]
 
             async def _send(payload: bytes) -> None:
-                """Send a payload through the connection.
-
-                Args:
-                    payload (bytes): Payload to send.
-
-                Returns:
-                    None: This helper does not return a value.
-                """
+                """Send a payload through the connection."""
                 conn.send_data(payload)
                 await asyncio.sleep(0)
 
             def _make_sender(payload: bytes):
-                """Create a sender coroutine for a payload.
-
-                Args:
-                    payload (bytes): Payload to send.
-
-                Returns:
-                    Callable[[], Awaitable[None]]: Sender coroutine factory.
-                """
+                """Create a sender coroutine for a payload."""
 
                 async def _sender() -> None:
-                    """Send the bound payload.
-
-                    Returns:
-                        None: This helper does not return a value.
-                    """
+                    """Send the bound payload."""
                     await _send(payload)
 
                 return _sender
@@ -181,15 +136,7 @@ class TestWsConnectionSendOperations:
         basic_server,
         connection_factory,
     ) -> None:
-        """Ensure send_pong does not crash with a custom payload.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a custom PONG payload, When send_pong is called, Then the connection stays CONNECTED without crashing."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             conn.send_pong(b"custom")
@@ -202,15 +149,10 @@ class TestWsConnectionSendOperations:
         basic_server,
         connection_factory,
     ) -> None:
-        """Ensure send_data_bytearray works with various sizes.
+        """Given bytearray payloads of varying sizes (0 to 4096 bytes), When sent, Then all are received by the server.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This exercises internal buffer allocation paths that may behave
+differently for empty, small, and medium-large payloads."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             for size in [0, 1, 128, 1024, 4096]:

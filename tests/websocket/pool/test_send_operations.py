@@ -1,4 +1,8 @@
-"""Send operations tests for WsPool."""
+"""Send operations tests for WsPool.
+
+Layer-2 tests validating pool-level send routing: fastest-only vs
+multicast, and safe failure when the pool is not connected.
+"""
 
 from __future__ import annotations
 
@@ -10,14 +14,7 @@ from mm_toolbox.websocket.pool import WsPool, WsPoolConfig
 
 
 def noop_message_handler(msg: bytes) -> None:
-    """No-op message handler for pool tests.
-
-    Args:
-        msg (bytes): Incoming message payload.
-
-    Returns:
-        None: This handler does not return a value.
-    """
+    """No-op message handler for pool tests."""
     return None
 
 
@@ -27,12 +24,9 @@ async def wait_for_pool_connections(
     """Wait for the pool to reach the expected connection count.
 
     Args:
-        pool (WsPool): Pool instance to monitor.
-        expected (int): Expected connection count.
-        timeout_s (float): Timeout in seconds.
-
-    Returns:
-        None: This helper does not return a value.
+        pool: Pool instance to monitor.
+        expected: Expected connection count.
+        timeout_s: Timeout in seconds.
 
     Raises:
         AssertionError: If the expected count is not reached.
@@ -47,22 +41,17 @@ async def wait_for_pool_connections(
 
 @pytest.mark.asyncio
 class TestWsPoolSendOperations:
-    """Validate pool send_data behaviors."""
+    """Layer-2 tests for pool send_data behaviors."""
 
     async def test_send_data_with_only_fastest(
         self,
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure only_fastest sends through a single connection.
+        """Given a pool with 3 connections, When only_fastest=True, Then exactly one server-side receive is recorded.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Fastest-only routing minimises outbound bandwidth for idempotent
+messages like heartbeats or subscriptions."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=3, evict_interval_s=60)
@@ -84,15 +73,10 @@ class TestWsPoolSendOperations:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure multicast sends to all connections when only_fastest is False.
+        """Given a pool with 3 connections, When only_fastest=False, Then the server receives one copy per connection.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Multicast is used for state-changing messages that must reach all
+endpoints (e.g., subscription updates)."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=3, evict_interval_s=60)
@@ -113,15 +97,10 @@ class TestWsPoolSendOperations:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure send_data raises when pool is not connected.
+        """Given a pool that has not been entered, When send_data is called, Then RuntimeError is raised.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This prevents accidental no-ops when the caller forgets to start
+the pool before sending."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)

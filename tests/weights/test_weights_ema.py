@@ -1,4 +1,9 @@
-"""Tests for EMA weight calculations."""
+"""Tests for EMA weight calculations.
+
+Layer 1 tests: validate ema_weights function including return type, default alpha
+calculation, normalization, length, ordering, custom parameters, edge cases,
+and numerical properties.
+"""
 
 import numpy as np
 import pytest
@@ -7,23 +12,23 @@ from mm_toolbox.weights import ema_weights
 
 
 class TestEmaWeightsBasic:
-    """Test basic EMA weights functionality."""
+    """Layer 1: Test basic EMA weights functionality."""
 
     def test_function_return_type(self):
-        """Test that ema_weights returns proper numpy array type."""
+        """Given window size, When ema_weights called, Then returns numpy float64 array."""
         result = ema_weights(5)
         assert isinstance(result, np.ndarray)
         assert result.dtype == np.float64
 
     def test_default_alpha_calculation(self):
-        """Test that default alpha uses 2/(window+1) formula."""
+        """Given window size, When ema_weights called with default alpha, Then uses 2/(window+1)."""
         window = 5
         result = ema_weights(window)
         expected = ema_weights(window, alpha=2.0 / float(window + 1))
         np.testing.assert_allclose(result, expected, rtol=1e-12)
 
     def test_weights_normalization(self):
-        """Test that weights sum to 1.0 when normalized."""
+        """Given window size, When ema_weights called, Then sums to 1.0."""
         result = ema_weights(5)
         assert pytest.approx(result.sum(), abs=1e-12) == 1.0
 
@@ -31,13 +36,13 @@ class TestEmaWeightsBasic:
         assert pytest.approx(result_large.sum(), abs=1e-12) == 1.0
 
     def test_weights_length(self):
-        """Test that weights array has correct length."""
+        """Given window sizes, When ema_weights called, Then correct length returned."""
         for window in [3, 5, 10, 20]:
             result = ema_weights(window)
             assert len(result) == window
 
     def test_weights_ordering(self):
-        """Test that weights are in descending order (most recent first)."""
+        """Given window size, When ema_weights called, Then descending order (most recent first)."""
         result = ema_weights(5)
         # EMA weights should be in descending order (most recent = highest weight)
         for i in range(len(result) - 1):
@@ -45,10 +50,10 @@ class TestEmaWeightsBasic:
 
 
 class TestEmaWeightsCustomParameters:
-    """Test EMA weights with custom parameters."""
+    """Layer 1: Test EMA weights with custom parameters."""
 
     def test_custom_alpha_half(self):
-        """Test with alpha=0.5."""
+        """Given alpha=0.5, When ema_weights called, Then correct values returned."""
         result = ema_weights(5, alpha=0.5)
         # Corrected expected values based on actual implementation
         expected = np.array(
@@ -57,7 +62,7 @@ class TestEmaWeightsCustomParameters:
         np.testing.assert_allclose(result, expected, rtol=1e-6)
 
     def test_custom_alpha_different_values(self):
-        """Test with different alpha values."""
+        """Given different alpha values, When ema_weights called, Then normalization maintained."""
         # Test alpha=0.3
         result_03 = ema_weights(4, alpha=0.3)
         assert pytest.approx(result_03.sum(), abs=1e-12) == 1.0
@@ -70,7 +75,7 @@ class TestEmaWeightsCustomParameters:
         assert result_08[-1] > result_03[-1]
 
     def test_larger_window_size(self):
-        """Test with larger window size."""
+        """Given larger window, When ema_weights called, Then correct values returned."""
         result = ema_weights(10, alpha=0.5)
         # Corrected expected values based on actual implementation
         expected = np.array(
@@ -90,7 +95,7 @@ class TestEmaWeightsCustomParameters:
         np.testing.assert_allclose(result, expected, rtol=1e-5)  # Relaxed tolerance
 
     def test_non_normalized_weights(self):
-        """Test non-normalized weights."""
+        """Given normalized=False, When ema_weights called, Then raw weights returned."""
         result_norm = ema_weights(5, normalized=True)
         result_raw = ema_weights(5, normalized=False)
 
@@ -104,10 +109,10 @@ class TestEmaWeightsCustomParameters:
 
 
 class TestEmaWeightsEdgeCases:
-    """Test edge cases and error handling."""
+    """Layer 1: Test edge cases and error handling."""
 
     def test_invalid_window_sizes(self):
-        """Test validation of window size parameter."""
+        """Given invalid window sizes, When ema_weights called, Then raises ValueError."""
         # Window size <= 1 should raise ValueError
         with pytest.raises(ValueError, match="Invalid window size"):
             ema_weights(1)
@@ -119,14 +124,14 @@ class TestEmaWeightsEdgeCases:
             ema_weights(-1)
 
     def test_minimum_valid_window(self):
-        """Test minimum valid window size."""
+        """Given minimum valid window size, When ema_weights called, Then returns 2-element array."""
         result = ema_weights(2)
         assert len(result) == 2
         assert pytest.approx(result.sum(), abs=1e-12) == 1.0
         assert result[0] < result[1]  # More recent should have higher weight
 
     def test_extreme_alpha_values(self):
-        """Test with extreme alpha values."""
+        """Given extreme alpha values, When ema_weights called, Then normalization maintained."""
         # Very small alpha (almost uniform weights)
         result_small = ema_weights(5, alpha=0.01)
         assert pytest.approx(result_small.sum(), abs=1e-12) == 1.0
@@ -137,7 +142,7 @@ class TestEmaWeightsEdgeCases:
         assert result_large[-1] > 0.9  # Most recent should dominate
 
     def test_alpha_boundary_values(self):
-        """Test alpha at boundary values."""
+        """Given boundary alpha values, When ema_weights called, Then handles correctly."""
         # Alpha = 1 should give all weight to most recent
         result_one = ema_weights(5, alpha=1.0)
         assert pytest.approx(result_one.sum(), abs=1e-12) == 1.0
@@ -151,10 +156,10 @@ class TestEmaWeightsEdgeCases:
 
 
 class TestEmaWeightsNumerical:
-    """Test numerical properties and stability."""
+    """Layer 1: Test numerical properties and stability."""
 
     def test_numerical_precision(self):
-        """Test numerical precision with different window sizes."""
+        """Given various window sizes, When ema_weights called, Then sum close to 1.0."""
         for window in [5, 10, 50, 100]:
             result = ema_weights(window)
             # Sum should be very close to 1.0
@@ -163,7 +168,7 @@ class TestEmaWeightsNumerical:
             assert np.all(result > 0)
 
     def test_consistency_across_calls(self):
-        """Test that repeated calls give consistent results."""
+        """Given same parameters, When ema_weights called multiple times, Then identical results."""
         window, alpha = 10, 0.3
         result1 = ema_weights(window, alpha)
         result2 = ema_weights(window, alpha)
@@ -173,7 +178,7 @@ class TestEmaWeightsNumerical:
         np.testing.assert_array_equal(result2, result3)
 
     def test_mathematical_properties(self):
-        """Test mathematical properties of EMA weights."""
+        """Given alpha and window, When ema_weights called, Then geometric series property holds."""
         alpha = 0.4
         window = 8
         result = ema_weights(window, alpha, normalized=False)
@@ -184,7 +189,7 @@ class TestEmaWeightsNumerical:
             assert result[i] == pytest.approx(expected_weight, rel=1e-12)
 
     def test_weight_relationships(self):
-        """Test relationships between weights."""
+        """Given alpha=0.5, When ema_weights called, Then each weight double the previous."""
         result = ema_weights(6, alpha=0.5)
 
         # Each weight should be double the previous (for alpha=0.5)

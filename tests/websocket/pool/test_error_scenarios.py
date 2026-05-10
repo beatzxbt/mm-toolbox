@@ -1,4 +1,9 @@
-"""Error scenario tests for WsPool."""
+"""Error scenario tests for WsPool.
+
+Layer-2 tests validating that WsPool degrades gracefully under failures:
+connection rejection, mid-stream disconnects, protocol errors, closed-pool
+sends, zero-connection sends, and pending replacement tasks during close.
+"""
 
 from __future__ import annotations
 
@@ -11,35 +16,20 @@ from mm_toolbox.websocket.pool import WsPool, WsPoolConfig
 
 
 def noop_message_handler(msg: bytes) -> None:
-    """No-op message handler for pool tests.
-
-    Args:
-        msg (bytes): Incoming message payload.
-
-    Returns:
-        None: This handler does not return a value.
-    """
+    """No-op message handler for pool tests."""
     return None
 
 
 @pytest.mark.asyncio
 class TestWsPoolErrorScenarios:
-    """Validate error handling paths in WsPool."""
+    """Layer-2 tests for error handling paths in WsPool."""
 
     async def test_pool_connection_failures(
         self,
         server_reject_connections,
         connection_config_factory,
     ) -> None:
-        """Ensure pool tolerates connection failures without crashing.
-
-        Args:
-            server_reject_connections: Fixture providing rejecting server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a rejecting server, When a pool starts, Then it tolerates failures and reports zero connections without crashing."""
         async with server_reject_connections:
             config = connection_config_factory(server_reject_connections)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
@@ -56,15 +46,10 @@ class TestWsPoolErrorScenarios:
         server_send_close_frame,
         connection_config_factory,
     ) -> None:
-        """Ensure pool handles mid-stream disconnects gracefully.
+        """Given a pool connected to a close-frame server, When a message triggers disconnect, Then the pool remains CONNECTED because other connections stay alive.
 
-        Args:
-            server_send_close_frame: Fixture providing close-frame server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This validates that a single failed connection does not bring
+down the entire pool."""
         async with server_send_close_frame:
             config = connection_config_factory(server_send_close_frame)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
@@ -83,15 +68,10 @@ class TestWsPoolErrorScenarios:
         server_send_invalid_frames,
         connection_config_factory,
     ) -> None:
-        """Ensure pool survives protocol errors from the server.
+        """Given a server that sends malformed frames, When the pool receives them, Then it survives and stays CONNECTED.
 
-        Args:
-            server_send_invalid_frames: Fixture providing invalid frame server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Protocol errors must be isolated to the offending connection
+rather than tearing down the whole pool."""
         async with server_send_invalid_frames:
             config = connection_config_factory(server_send_invalid_frames)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
@@ -110,15 +90,7 @@ class TestWsPoolErrorScenarios:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure send_data raises once the pool is closed.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a closed pool, When send_data is called, Then RuntimeError is raised."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
@@ -135,15 +107,10 @@ class TestWsPoolErrorScenarios:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure send_data raises when all connections are manually closed.
+        """Given a pool where all connections were manually closed, When send_data is called, Then RuntimeError with 'No live connections' is raised.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This prevents silent no-ops when the caller expects a message to
+actually be transmitted."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
@@ -164,15 +131,10 @@ class TestWsPoolErrorScenarios:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure close() is safe when replacement tasks are pending.
+        """Given pending replacement tasks, When close() is called, Then it is safe and the pool ends in DISCONNECTED.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Closing while background coroutines are reconnecting is a common
+teardown race; this test ensures no unhandled exception propagates."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)

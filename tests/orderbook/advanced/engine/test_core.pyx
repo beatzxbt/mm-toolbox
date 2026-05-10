@@ -39,7 +39,14 @@ DEF DEFAULT_LEVELS = 64
 # Helper Functions
 # =============================================================================
 cdef OrderbookLevels _alloc_levels(u64 count):
-    """Allocate an OrderbookLevels struct with given capacity."""
+    """Allocate an OrderbookLevels struct with given capacity.
+
+    Args:
+        count: Number of OrderbookLevel slots to allocate.
+
+    Returns:
+        OrderbookLevels with allocated array and num_levels set.
+    """
     cdef OrderbookLevel* arr = <OrderbookLevel*>malloc(count * sizeof(OrderbookLevel))
     cdef OrderbookLevels levels
     levels.num_levels = count
@@ -48,7 +55,11 @@ cdef OrderbookLevels _alloc_levels(u64 count):
 
 
 cdef void _free_levels(OrderbookLevels* levels):
-    """Free OrderbookLevels memory."""
+    """Free OrderbookLevels memory.
+
+    Args:
+        levels: Pointer to OrderbookLevels to free.
+    """
     if levels != NULL and levels.levels != NULL:
         free(levels.levels)
         levels.levels = NULL
@@ -62,7 +73,18 @@ cdef OrderbookLevels _make_levels(
     double tick_size,
     double lot_size,
 ):
-    """Create OrderbookLevels from price/size arrays."""
+    """Create OrderbookLevels from price/size arrays.
+
+    Args:
+        prices: Array of price values.
+        sizes: Array of size values.
+        count: Number of levels.
+        tick_size: Tick size for conversion.
+        lot_size: Lot size for conversion.
+
+    Returns:
+        OrderbookLevels populated with converted tick/lot values.
+    """
     cdef OrderbookLevels levels = _alloc_levels(count)
     cdef u64 i
     for i in range(count):
@@ -73,7 +95,16 @@ cdef OrderbookLevels _make_levels(
 
 
 cdef bint _approx_eq(double a, double b, double tol=1e-9):
-    """Check if two doubles are approximately equal."""
+    """Check if two doubles are approximately equal.
+
+    Args:
+        a: First value.
+        b: Second value.
+        tol: Absolute tolerance (default 1e-9).
+
+    Returns:
+        True if |a - b| < tol.
+    """
     return fabs(a - b) < tol
 
 
@@ -89,7 +120,16 @@ cdef CoreAdvancedOrderbook _create_core(
     CyOrderbookSortedness delta_sortedness=CyOrderbookSortedness.UNKNOWN,
     CyOrderbookSortedness snapshot_sortedness=CyOrderbookSortedness.UNKNOWN,
 ):
-    """Create a CoreAdvancedOrderbook with standard settings."""
+    """Create a CoreAdvancedOrderbook with standard settings.
+
+    Args:
+        num_levels: Maximum number of levels per side.
+        delta_sortedness: Expected sortedness of delta updates.
+        snapshot_sortedness: Expected sortedness of snapshot data.
+
+    Returns:
+        Initialized CoreAdvancedOrderbook with TICK_SIZE and LOT_SIZE.
+    """
     return CoreAdvancedOrderbook(
         tick_size=TICK_SIZE,
         lot_size=LOT_SIZE,
@@ -100,7 +140,14 @@ cdef CoreAdvancedOrderbook _create_core(
 
 
 cdef void _populate_standard_book(CoreAdvancedOrderbook core):
-    """Populate core with standard 3-level book: bids [100, 99.99, 99.98], asks [100.01, 100.02, 100.03]."""
+    """Populate core with standard 3-level book for consistent test baseline.
+
+    Creates bids [100.00, 99.99, 99.98] and asks [100.01, 100.02, 100.03]
+    so tests have a predictable starting state.
+
+    Args:
+        core: CoreAdvancedOrderbook to populate.
+    """
     cdef double bid_prices[3]
     cdef double bid_sizes[3]
     cdef double ask_prices[3]

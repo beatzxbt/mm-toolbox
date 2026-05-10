@@ -1,4 +1,15 @@
-"""End-to-end workflow tests for websocket components."""
+"""End-to-end workflow tests for websocket components.
+
+Layer-3 tests exercising realistic connect/send/receive/error workflows
+through the WsSingle high-level wrapper and the WsConnection reconnect
+iterator.
+
+Key coverage:
+- Full connect->send->receive->close workflow via WsSingle.
+- Reconnection after explicit close using the async generator.
+- Recovery after protocol errors (invalid frames) by switching to a
+  healthy server mid-iteration.
+"""
 
 from __future__ import annotations
 
@@ -13,22 +24,14 @@ from mm_toolbox.websocket.single import WsSingle
 
 @pytest.mark.asyncio
 class TestWebSocketWorkflows:
-    """Exercise realistic connect/send/receive/error workflows."""
+    """Layer-3 tests for realistic connect/send/receive/error workflows."""
 
     async def test_connect_send_receive_disconnect(
         self,
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Validate a full connect->send->receive->close workflow.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a local echo server, When WsSingle is used to connect, send, and iterate, Then the expected message is received and the connection closes cleanly."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             collected: list[bytes] = []
@@ -37,11 +40,6 @@ class TestWebSocketWorkflows:
             async with WsSingle(config) as ws:
 
                 async def _collector() -> None:
-                    """Collect a single message from the workflow.
-
-                    Returns:
-                        None: This helper does not return a value.
-                    """
                     async for msg in ws:
                         if msg == target:
                             collected.append(msg)
@@ -60,15 +58,7 @@ class TestWebSocketWorkflows:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Validate reconnection workflow after explicit close.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a closed WsConnection, When the reconnect iterator is resumed, Then a new CONNECTED instance is yielded and messages flow again."""
         async with basic_server:
             ringbuffer = BytesRingBuffer(max_capacity=16, only_insert_unique=False)
             config = connection_config_factory(basic_server)
@@ -93,16 +83,10 @@ class TestWebSocketWorkflows:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Validate recovery after protocol errors using reconnect iterator.
+        """Given a server that sends invalid frames, When the reconnect iterator switches to a healthy server, Then recovery succeeds.
 
-        Args:
-            server_send_invalid_frames: Fixture providing invalid frame server.
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This simulates a real-world scenario where one endpoint is
+misbehaving and the client must transparently resume on a good one."""
         async with server_send_invalid_frames:
             ringbuffer = BytesRingBuffer(max_capacity=16, only_insert_unique=False)
             config = connection_config_factory(server_send_invalid_frames)

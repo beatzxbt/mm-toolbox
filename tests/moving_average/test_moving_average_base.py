@@ -1,4 +1,9 @@
-"""Tests for moving average base class behavior."""
+"""Layer 1 — Primitives tests for moving-average base class behaviour.
+
+Covers window-size validation (edge values: 0, 1, negative, minimum valid),
+fast-mode restrictions (history access forbidden), pre-warm error handling
+for SMA/WMA, and historical value storage/retrieval.
+"""
 
 import numpy as np
 import pytest
@@ -7,41 +12,41 @@ from mm_toolbox.moving_average import SimpleMovingAverage, WeightedMovingAverage
 
 
 class TestMovingAverageWindowValidation:
-    """Test window size validation across moving average types."""
+    """Layer 1 — Window size validation across moving average types."""
 
     def test_window_zero_raises(self):
-        """Test that window=0 raises ValueError."""
+        """Given window=0, construction raises ``ValueError``."""
         with pytest.raises(ValueError, match="window must be positive"):
             SimpleMovingAverage(window=0)
 
     def test_window_one_raises(self):
-        """Test that window=1 raises ValueError."""
+        """Given window=1, construction raises ``ValueError``."""
         with pytest.raises(ValueError, match="window must be positive"):
             SimpleMovingAverage(window=1)
 
     def test_window_negative_raises(self):
-        """Test that negative window raises ValueError."""
+        """Given a negative window, construction raises ``ValueError``."""
         with pytest.raises(ValueError, match="window must be positive"):
             WeightedMovingAverage(window=-1)
 
     def test_window_two_ok(self):
-        """Test that window=2 is accepted."""
+        """Given window=2, construction succeeds (minimum valid window)."""
         ma = SimpleMovingAverage(window=2)
         assert ma is not None
 
 
 class TestMovingAverageFastMode:
-    """Test fast mode behavior where historical storage is skipped."""
+    """Layer 1 — Fast mode behaviour where historical storage is skipped."""
 
     def test_fast_mode_get_values_raises(self):
-        """Test that get_values() raises ValueError when is_fast=True."""
+        """Given ``fast=True``, ``get_values()`` raises ``ValueError``."""
         ma = SimpleMovingAverage(window=3, fast=True)
         ma.initialize(np.array([1.0, 2.0, 3.0]))
         with pytest.raises(ValueError, match="fast mode"):
             ma.get_values()
 
     def test_fast_mode_len_raises(self):
-        """Test that __len__() raises ValueError when is_fast=True."""
+        """Given ``fast=True``, ``__len__`` raises ``ValueError``."""
         ma = WeightedMovingAverage(window=3, fast=True)
         ma.initialize(np.array([1.0, 2.0, 3.0]))
         with pytest.raises(ValueError, match="fast mode"):
@@ -49,38 +54,38 @@ class TestMovingAverageFastMode:
 
 
 class TestMovingAverageOperationsBeforeWarm:
-    """Test that operations before initialization raise errors for SMA/WMA."""
+    """Layer 1 — Pre-initialisation error handling for SMA/WMA."""
 
     def test_sma_next_before_warm_raises(self):
-        """Test SMA.next() before initialize() raises ValueError."""
+        """Given an uninitialised SMA, ``next()`` raises ``ValueError``."""
         ma = SimpleMovingAverage(window=3)
         with pytest.raises(ValueError, match="initialized"):
             ma.next(1.0)
 
     def test_sma_update_before_warm_raises(self):
-        """Test SMA.update() before initialize() raises ValueError."""
+        """Given an uninitialised SMA, ``update()`` raises ``ValueError``."""
         ma = SimpleMovingAverage(window=3)
         with pytest.raises(ValueError, match="initialized"):
             ma.update(1.0)
 
     def test_wma_next_before_warm_raises(self):
-        """Test WMA.next() before initialize() raises ValueError."""
+        """Given an uninitialised WMA, ``next()`` raises ``ValueError``."""
         ma = WeightedMovingAverage(window=3)
         with pytest.raises(ValueError, match="initialized"):
             ma.next(1.0)
 
     def test_wma_update_before_warm_raises(self):
-        """Test WMA.update() before initialize() raises ValueError."""
+        """Given an uninitialised WMA, ``update()`` raises ``ValueError``."""
         ma = WeightedMovingAverage(window=3)
         with pytest.raises(ValueError, match="initialized"):
             ma.update(1.0)
 
 
 class TestMovingAverageHistoricalValues:
-    """Test historical value storage and retrieval."""
+    """Layer 1 — Historical value storage and retrieval tests."""
 
     def test_get_values_returns_numpy_array(self):
-        """Test that get_values() returns a numpy array."""
+        """Given an initialised MA, ``get_values()`` returns a ``float64`` ndarray."""
         ma = SimpleMovingAverage(window=3)
         ma.initialize(np.array([1.0, 2.0, 3.0]))
         values = ma.get_values()
@@ -88,18 +93,17 @@ class TestMovingAverageHistoricalValues:
         assert values.dtype == np.float64
 
     def test_get_values_correct_after_updates(self):
-        """Test get_values() returns correct array after multiple updates."""
+        """Given two updates after initialisation, ``get_values()`` contains the rolling window."""
         ma = SimpleMovingAverage(window=3)
         ma.initialize(np.array([1.0, 2.0, 3.0]))
         ma.update(4.0)
         ma.update(5.0)
         values = ma.get_values()
-        # initialize() pushes one value; each update() pushes one more
         expected = np.array([2.0, 3.0, 4.0], dtype=np.float64)
         np.testing.assert_allclose(values, expected, rtol=1e-12)
 
     def test_len_tracks_stored_values(self):
-        """Test __len__() tracks number of stored values correctly."""
+        """Given successive updates, ``__len__`` tracks the number of stored values."""
         ma = WeightedMovingAverage(window=3)
         assert len(ma) == 0
         ma.initialize(np.array([1.0, 2.0, 3.0]))
@@ -112,7 +116,7 @@ class TestMovingAverageHistoricalValues:
         assert len(ma) == 4
 
     def test_get_value_returns_current(self):
-        """Test get_value() returns the current moving average value."""
+        """Given updates, ``get_value()`` matches the most recent computed value."""
         ma = SimpleMovingAverage(window=3)
         result = ma.initialize(np.array([1.0, 2.0, 3.0]))
         assert ma.get_value() == pytest.approx(result, abs=1e-12)

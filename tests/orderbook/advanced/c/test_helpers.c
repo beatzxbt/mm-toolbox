@@ -15,6 +15,14 @@
 #define TICK_SIZE 0.01
 #define LOT_SIZE 0.001
 
+/**
+ * @brief Check if two doubles are approximately equal.
+ *
+ * @param a First value.
+ * @param b Second value.
+ * @param tol Absolute tolerance.
+ * @return 1 if |a - b| < tol, else 0.
+ */
 static int approx_eq(double a, double b, double tol) {
     return fabs(a - b) < tol;
 }
@@ -23,18 +31,27 @@ static int approx_eq(double a, double b, double tol) {
  * Conversion function tests
  * ============================================================================ */
 
+/**
+ * @test Price to tick conversion: 100.01 with 0.01 tick size yields 10001 ticks.
+ */
 static MunitResult test_price_to_tick_basic(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     uint64_t ticks = price_to_tick(100.01, TICK_SIZE);
     munit_assert_uint64(ticks, ==, 10001);
     return MUNIT_OK;
 }
 
+/**
+ * @test Price to tick conversion with zero price yields 0 ticks.
+ */
 static MunitResult test_price_to_tick_zero(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     uint64_t ticks = price_to_tick(0.0, TICK_SIZE);
     munit_assert_uint64(ticks, ==, 0);
     return MUNIT_OK;
 }
 
+/**
+ * @test Price to tick rounding: 100.005 / 0.01 = 10000.5 floors to 10000.
+ */
 static MunitResult test_price_to_tick_rounding(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     // 100.005 / 0.01 = 10000.5, should floor to 10000
     uint64_t ticks = price_to_tick(100.005, TICK_SIZE);
@@ -42,18 +59,27 @@ static MunitResult test_price_to_tick_rounding(const MunitParameter params[] MUN
     return MUNIT_OK;
 }
 
+/**
+ * @test Tick to price conversion: 10001 ticks with 0.01 tick size yields 100.01.
+ */
 static MunitResult test_tick_to_price_basic(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     double price = tick_to_price(10001, TICK_SIZE);
     munit_assert_double_equal(price, 100.01, 10);
     return MUNIT_OK;
 }
 
+/**
+ * @test Tick to price conversion with zero ticks yields 0.0.
+ */
 static MunitResult test_tick_to_price_zero(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     double price = tick_to_price(0, TICK_SIZE);
     munit_assert_double_equal(price, 0.0, 10);
     return MUNIT_OK;
 }
 
+/**
+ * @test Roundtrip: price -> tick -> price recovers original value.
+ */
 static MunitResult test_tick_conversion_roundtrip(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     double original = 123.45;
     uint64_t ticks = price_to_tick(original, TICK_SIZE);
@@ -62,24 +88,36 @@ static MunitResult test_tick_conversion_roundtrip(const MunitParameter params[] 
     return MUNIT_OK;
 }
 
+/**
+ * @test Size to lot conversion: 1.5 with 0.001 lot size yields 1500 lots.
+ */
 static MunitResult test_size_to_lot_basic(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     uint64_t lots = size_to_lot(1.5, LOT_SIZE);
     munit_assert_uint64(lots, ==, 1500);
     return MUNIT_OK;
 }
 
+/**
+ * @test Size to lot conversion with zero size yields 0 lots.
+ */
 static MunitResult test_size_to_lot_zero(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     uint64_t lots = size_to_lot(0.0, LOT_SIZE);
     munit_assert_uint64(lots, ==, 0);
     return MUNIT_OK;
 }
 
+/**
+ * @test Lot to size conversion: 1500 lots with 0.001 lot size yields 1.5.
+ */
 static MunitResult test_lot_to_size_basic(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     double size = lot_to_size(1500, LOT_SIZE);
     munit_assert_double_equal(size, 1.5, 10);
     return MUNIT_OK;
 }
 
+/**
+ * @test Roundtrip: size -> lot -> size recovers original value.
+ */
 static MunitResult test_lot_conversion_roundtrip(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     double original = 99.999;
     uint64_t lots = size_to_lot(original, LOT_SIZE);
@@ -92,6 +130,9 @@ static MunitResult test_lot_conversion_roundtrip(const MunitParameter params[] M
  * Level manipulation function tests
  * ============================================================================ */
 
+/**
+ * @test Swapping two levels exchanges all fields between them.
+ */
 static MunitResult test_swap_levels(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel a = {.price = 100.0, .size = 1.0, .norders = 1, .ticks = 10000, .lots = 1000};
     OrderbookLevel b = {.price = 200.0, .size = 2.0, .norders = 2, .ticks = 20000, .lots = 2000};
@@ -107,6 +148,9 @@ static MunitResult test_swap_levels(const MunitParameter params[] MUNIT_UNUSED, 
     return MUNIT_OK;
 }
 
+/**
+ * @test Reversing empty level array is a no-op and does not crash.
+ */
 static MunitResult test_reverse_levels_empty(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[1];
     reverse_levels_inplace(0, levels);
@@ -114,6 +158,9 @@ static MunitResult test_reverse_levels_empty(const MunitParameter params[] MUNIT
     return MUNIT_OK;
 }
 
+/**
+ * @test Reversing single-element array is a no-op.
+ */
 static MunitResult test_reverse_levels_single(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[1] = {{.price = 100.0, .size = 1.0, .norders = 1, .ticks = 10000, .lots = 1000}};
     reverse_levels_inplace(1, levels);
@@ -121,6 +168,9 @@ static MunitResult test_reverse_levels_single(const MunitParameter params[] MUNI
     return MUNIT_OK;
 }
 
+/**
+ * @test Reversing 3-element array produces reversed order.
+ */
 static MunitResult test_reverse_levels_basic(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[3] = {
         {.price = 100.0, .size = 1.0, .norders = 1, .ticks = 10000, .lots = 1000},
@@ -136,6 +186,9 @@ static MunitResult test_reverse_levels_basic(const MunitParameter params[] MUNIT
     return MUNIT_OK;
 }
 
+/**
+ * @test Reversing even-length array produces reversed order.
+ */
 static MunitResult test_reverse_levels_even(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[4] = {
         {.price = 1.0, .ticks = 100, .size = 1.0, .lots = 1000},
@@ -153,6 +206,9 @@ static MunitResult test_reverse_levels_even(const MunitParameter params[] MUNIT_
     return MUNIT_OK;
 }
 
+/**
+ * @test Ascending sort check returns true for correctly sorted array.
+ */
 static MunitResult test_is_sorted_ascending_true(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[3] = {
         {.ticks = 10000},
@@ -163,6 +219,9 @@ static MunitResult test_is_sorted_ascending_true(const MunitParameter params[] M
     return MUNIT_OK;
 }
 
+/**
+ * @test Ascending sort check returns false for out-of-order array.
+ */
 static MunitResult test_is_sorted_ascending_false(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[3] = {
         {.ticks = 10300},
@@ -173,6 +232,9 @@ static MunitResult test_is_sorted_ascending_false(const MunitParameter params[] 
     return MUNIT_OK;
 }
 
+/**
+ * @test Descending sort check returns true for correctly sorted array.
+ */
 static MunitResult test_is_sorted_descending_true(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[3] = {
         {.ticks = 10300},
@@ -183,6 +245,9 @@ static MunitResult test_is_sorted_descending_true(const MunitParameter params[] 
     return MUNIT_OK;
 }
 
+/**
+ * @test Empty or single-element arrays are considered sorted.
+ */
 static MunitResult test_is_sorted_empty(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[1];
     munit_assert_true(is_sorted_by_tick(0, levels, true));
@@ -190,6 +255,9 @@ static MunitResult test_is_sorted_empty(const MunitParameter params[] MUNIT_UNUS
     return MUNIT_OK;
 }
 
+/**
+ * @test In-place ascending sort by tick produces ordered array.
+ */
 static MunitResult test_sort_levels_ascending(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[4] = {
         {.price = 103.0, .ticks = 10300},
@@ -207,6 +275,9 @@ static MunitResult test_sort_levels_ascending(const MunitParameter params[] MUNI
     return MUNIT_OK;
 }
 
+/**
+ * @test In-place descending sort by tick produces reverse-ordered array.
+ */
 static MunitResult test_sort_levels_descending(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[4] = {
         {.price = 101.0, .ticks = 10100},
@@ -224,6 +295,9 @@ static MunitResult test_sort_levels_descending(const MunitParameter params[] MUN
     return MUNIT_OK;
 }
 
+/**
+ * @test Sorting an already-sorted ascending array preserves order.
+ */
 static MunitResult test_sort_levels_already_sorted(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[3] = {
         {.price = 100.0, .ticks = 10000},

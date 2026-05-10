@@ -1,4 +1,16 @@
-"""Hash-history filtering tests for WsPool."""
+"""Hash-history filtering tests for WsPool.
+
+Layer-2 tests validating that WsPool deduplicates messages across its
+connections using a bounded hash-history ringbuffer.
+
+Key coverage:
+- One server broadcast to 3 connections yields a single downstream message.
+- Consuming a message does not allow immediate duplicates through.
+- Old hashes can be evicted when capacity is exceeded.
+- A fresh pool session starts with empty hash history.
+- Ringbuffer overflow evicts oldest hashes, allowing old payloads again.
+- Empty payload deduplication works correctly.
+"""
 
 from __future__ import annotations
 
@@ -10,14 +22,7 @@ from mm_toolbox.websocket.pool import WsPool, WsPoolConfig
 
 
 def noop_message_handler(msg: bytes) -> None:
-    """No-op message handler for pool tests.
-
-    Args:
-        msg (bytes): Incoming message payload.
-
-    Returns:
-        None: This handler does not return a value.
-    """
+    """No-op message handler for pool tests."""
     return None
 
 
@@ -27,12 +32,12 @@ async def wait_for_pool_connections(
     """Wait for pool to reach the expected active connection count.
 
     Args:
-        pool (WsPool): Pool instance to monitor.
-        expected (int): Expected active connection count.
-        timeout_s (float): Timeout in seconds.
+        pool: Pool instance to monitor.
+        expected: Expected active connection count.
+        timeout_s: Timeout in seconds.
 
-    Returns:
-        None: This helper does not return a value.
+    Raises:
+        AssertionError: If the expected count is not reached in time.
     """
     start = asyncio.get_running_loop().time()
     while (asyncio.get_running_loop().time() - start) < timeout_s:
@@ -44,22 +49,17 @@ async def wait_for_pool_connections(
 
 @pytest.mark.asyncio
 class TestWsPoolHashHistory:
-    """Validate hash-history filtering behavior in WsPool."""
+    """Layer-2 tests for hash-history filtering behavior in WsPool."""
 
     async def test_filters_duplicate_cross_connection_broadcast(
         self,
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure one server broadcast yields a single downstream message.
+        """Given 3 connections and one broadcast, When the pool iterates, Then only one copy is yielded.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Without deduplication downstream consumers would see N copies of
+every message, breaking aggregation logic."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool = await WsPool.new(
@@ -87,15 +87,10 @@ class TestWsPoolHashHistory:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure consuming one copy does not allow immediate duplicates through.
+        """Given a consumed message in hash history, When the same payload is broadcast again, Then it is still deduplicated.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Consumption must not clear the hash entry; otherwise duplicate
+floods would pass through after the first read."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool = await WsPool.new(
@@ -124,15 +119,10 @@ class TestWsPoolHashHistory:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure old hashes can be evicted from bounded hash history.
+        """Given a tiny hash capacity, When enough unique messages pass through, Then an old payload can reappear.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Bounded history is required for memory safety; this test verifies
+that eviction works and does not permanently blacklist payloads."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool = await WsPool.new(
@@ -163,15 +153,10 @@ class TestWsPoolHashHistory:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure a fresh pool session starts with empty hash history.
+        """Given two separate pool sessions, When the same payload is broadcast to each, Then both yield it because history does not leak across sessions.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Cross-session state leakage would cause the second pool to miss
+messages that were seen by the first."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_a = await WsPool.new(
@@ -214,15 +199,9 @@ class TestWsPoolHashHistory:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure old hashes are evicted when capacity is exceeded.
+        """Given a hash capacity of 4, When 5 unique payloads arrive, Then the oldest is evicted and can reappear.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This tests the LRU-like behavior of the bounded history buffer."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool = await WsPool.new(
@@ -251,15 +230,10 @@ class TestWsPoolHashHistory:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure empty payload is deduplicated across connections.
+        """Given an empty payload broadcast to 3 connections, When the pool iterates, Then only one empty bytes object is yielded.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Empty payloads are valid websocket frames; they must participate
+in deduplication like any other message."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool = await WsPool.new(

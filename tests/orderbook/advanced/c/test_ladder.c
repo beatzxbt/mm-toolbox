@@ -17,6 +17,14 @@
  * Helper functions
  * ============================================================================ */
 
+/**
+ * @brief Create an OrderbookLevel with precomputed ticks and lots.
+ *
+ * @param price Price value.
+ * @param size Size value.
+ * @param norders Number of orders.
+ * @return OrderbookLevel with ticks and lots derived from TICK_SIZE/LOT_SIZE.
+ */
 static OrderbookLevel make_level(double price, double size, uint64_t norders) {
     OrderbookLevel level = {
         .price = price,
@@ -32,6 +40,9 @@ static OrderbookLevel make_level(double price, double size, uint64_t norders) {
  * roll_right tests
  * ============================================================================ */
 
+/**
+ * @test Rolling right at index 0 shifts elements and makes room at front.
+ */
 static MunitResult test_roll_right_at_start(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     OrderbookLadderData ladder_data = {
@@ -58,6 +69,9 @@ static MunitResult test_roll_right_at_start(const MunitParameter params[] MUNIT_
     return MUNIT_OK;
 }
 
+/**
+ * @test Rolling right from middle index shifts tail elements rightward.
+ */
 static MunitResult test_roll_right_in_middle(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     OrderbookLadderData ladder_data = {
@@ -84,6 +98,9 @@ static MunitResult test_roll_right_in_middle(const MunitParameter params[] MUNIT
     return MUNIT_OK;
 }
 
+/**
+ * @test Rolling right at max capacity drops the last element.
+ */
 static MunitResult test_roll_right_at_max_capacity(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[3];
     OrderbookLadderData ladder_data = {
@@ -110,6 +127,9 @@ static MunitResult test_roll_right_at_max_capacity(const MunitParameter params[]
     return MUNIT_OK;
 }
 
+/**
+ * @test Rolling right beyond num_levels is a no-op.
+ */
 static MunitResult test_roll_right_beyond_count(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     OrderbookLadderData ladder_data = {
@@ -134,6 +154,9 @@ static MunitResult test_roll_right_beyond_count(const MunitParameter params[] MU
  * roll_left tests
  * ============================================================================ */
 
+/**
+ * @test Rolling left at index 0 removes the first element.
+ */
 static MunitResult test_roll_left_at_start(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     OrderbookLadderData ladder_data = {
@@ -156,6 +179,9 @@ static MunitResult test_roll_left_at_start(const MunitParameter params[] MUNIT_U
     return MUNIT_OK;
 }
 
+/**
+ * @test Rolling left from middle index removes that element.
+ */
 static MunitResult test_roll_left_in_middle(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     OrderbookLadderData ladder_data = {
@@ -178,6 +204,9 @@ static MunitResult test_roll_left_in_middle(const MunitParameter params[] MUNIT_
     return MUNIT_OK;
 }
 
+/**
+ * @test Rolling left at last index removes the final element.
+ */
 static MunitResult test_roll_left_at_end(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     OrderbookLadderData ladder_data = {
@@ -200,6 +229,9 @@ static MunitResult test_roll_left_at_end(const MunitParameter params[] MUNIT_UNU
     return MUNIT_OK;
 }
 
+/**
+ * @test Rolling left beyond num_levels is a no-op.
+ */
 static MunitResult test_roll_left_beyond_count(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     OrderbookLadderData ladder_data = {
@@ -224,6 +256,9 @@ static MunitResult test_roll_left_beyond_count(const MunitParameter params[] MUN
  * insert_level tests
  * ============================================================================ */
 
+/**
+ * @test Inserting a single level copies all fields to the target index.
+ */
 static MunitResult test_insert_level(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     OrderbookLevel new_level = make_level(100.5, 2.0, 3);
@@ -236,6 +271,9 @@ static MunitResult test_insert_level(const MunitParameter params[] MUNIT_UNUSED,
     return MUNIT_OK;
 }
 
+/**
+ * @test Inserting multiple levels sequentially fills array in order.
+ */
 static MunitResult test_insert_level_multiple(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     OrderbookLevel levels[5];
     

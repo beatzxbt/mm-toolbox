@@ -30,10 +30,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     """Add custom command line options for websocket tests.
 
     Args:
-        parser (pytest.Parser): Pytest option parser.
-
-    Returns:
-        None: This function does not return a value.
+        parser: Pytest option parser.
     """
     try:
         parser.addoption(
@@ -63,10 +60,7 @@ def pytest_configure(config: pytest.Config) -> None:
     """Configure pytest with custom markers.
 
     Args:
-        config (pytest.Config): Pytest configuration object.
-
-    Returns:
-        None: This function does not return a value.
+        config: Pytest configuration object.
     """
     config.addinivalue_line(
         "markers", "live: mark test as requiring live internet connection"
@@ -84,11 +78,8 @@ def pytest_collection_modifyitems(
     """Modify test collection based on command line options.
 
     Args:
-        config (pytest.Config): Pytest configuration object.
-        items (list[pytest.Item]): Collected test items.
-
-    Returns:
-        None: This function does not return a value.
+        config: Pytest configuration object.
+        items: Collected test items.
     """
     if config.getoption("--run-live"):
         return
@@ -103,10 +94,10 @@ def _message_to_bytes(message: str | bytes) -> bytes:
     """Convert a websocket message to bytes for storage.
 
     Args:
-        message (str | bytes): Incoming message.
+        message: Incoming message.
 
     Returns:
-        bytes: Normalized bytes payload.
+        Normalized bytes payload.
     """
     if isinstance(message, bytes):
         return message
@@ -117,11 +108,11 @@ def _split_message(message: str | bytes, parts: int = 2) -> list[str] | list[byt
     """Split a message into multiple fragments for fragmentation tests.
 
     Args:
-        message (str | bytes): Message to split.
-        parts (int): Number of fragments to produce.
+        message: Message to split.
+        parts: Number of fragments to produce.
 
     Returns:
-        list[str] | list[bytes]: Fragmented parts matching the input type.
+        Fragmented parts matching the input type.
     """
     if parts <= 1:
         return [message]
@@ -150,11 +141,7 @@ class LocalWebSocketServer:
     _received_messages: list[bytes] = field(default_factory=list)
 
     async def serve(self) -> None:
-        """Start the WebSocket server.
-
-        Returns:
-            None: This method does not return a value.
-        """
+        """Start the WebSocket server."""
         compression = "deflate" if self.compression else None
         self._server = await websockets.serve(
             self._handler,
@@ -167,11 +154,7 @@ class LocalWebSocketServer:
         self.uri = f"ws://{self.host}:{self.port}"
 
     async def close(self) -> None:
-        """Shutdown the server and close active connections.
-
-        Returns:
-            None: This method does not return a value.
-        """
+        """Shutdown the server and close active connections."""
         for client in list(self._clients):
             with contextlib.suppress(Exception):
                 await client.close()
@@ -187,11 +170,8 @@ class LocalWebSocketServer:
         """Broadcast a message to all connected clients.
 
         Args:
-            message (str | bytes): Message payload to send.
-            timeout_s (float): Time to wait for at least one client.
-
-        Returns:
-            None: This method does not return a value.
+            message: Message payload to send.
+            timeout_s: Time to wait for at least one client.
         """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout_s
@@ -209,7 +189,7 @@ class LocalWebSocketServer:
         """Return a copy of the received message buffer.
 
         Returns:
-            list[bytes]: Snapshot of received message bytes.
+            Snapshot of received message bytes.
         """
         return list(self._received_messages)
 
@@ -217,34 +197,17 @@ class LocalWebSocketServer:
         """Async context manager entry, starts the server.
 
         Returns:
-            LocalWebSocketServer: The started server instance.
+            The started server instance.
         """
         await self.serve()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Async context manager exit, closes the server.
-
-        Args:
-            exc_type (type | None): Exception type if raised.
-            exc_val (BaseException | None): Exception value if raised.
-            exc_tb (TracebackType | None): Traceback if raised.
-
-        Returns:
-            None: This method does not return a value.
-        """
+        """Async context manager exit, closes the server."""
         await self.close()
 
     async def _handler(self, websocket, path: str | None = None) -> None:
-        """Dispatch handler based on server behavior.
-
-        Args:
-            websocket: Websocket protocol instance.
-            path (str | None): Request path (unused).
-
-        Returns:
-            None: This method does not return a value.
-        """
+        """Dispatch handler based on server behavior."""
         if self.behavior == "reject":
             await self._handle_reject(websocket)
             return
@@ -257,15 +220,7 @@ class LocalWebSocketServer:
         await self._handle_echo(websocket)
 
     async def _send_message(self, websocket, message: str | bytes) -> None:
-        """Send a message as text frames, optionally fragmented.
-
-        Args:
-            websocket: Websocket protocol instance.
-            message (str | bytes): Payload to send.
-
-        Returns:
-            None: This method does not return a value.
-        """
+        """Send a message as text frames, optionally fragmented."""
         payload: str | bytes
         if isinstance(message, bytes):
             payload = message.decode("utf-8", errors="replace")
@@ -278,14 +233,7 @@ class LocalWebSocketServer:
         await websocket.send(payload)
 
     async def _handle_echo(self, websocket) -> None:
-        """Echo server behavior with optional delay and fragmentation.
-
-        Args:
-            websocket: Websocket protocol instance.
-
-        Returns:
-            None: This method does not return a value.
-        """
+        """Echo server behavior with optional delay and fragmentation."""
         self._clients.add(websocket)
         try:
             async for message in websocket:
@@ -297,25 +245,11 @@ class LocalWebSocketServer:
             self._clients.discard(websocket)
 
     async def _handle_reject(self, websocket) -> None:
-        """Reject connections immediately.
-
-        Args:
-            websocket: Websocket protocol instance.
-
-        Returns:
-            None: This method does not return a value.
-        """
+        """Reject connections immediately."""
         await websocket.close(code=1000, reason="Rejected")
 
     async def _handle_invalid_frames(self, websocket) -> None:
-        """Send malformed frames after the first client message.
-
-        Args:
-            websocket: Websocket protocol instance.
-
-        Returns:
-            None: This method does not return a value.
-        """
+        """Send malformed frames after the first client message."""
         self._clients.add(websocket)
         try:
             with contextlib.suppress(Exception):
@@ -330,14 +264,7 @@ class LocalWebSocketServer:
             self._clients.discard(websocket)
 
     async def _handle_close_frame(self, websocket) -> None:
-        """Close the connection after a single message.
-
-        Args:
-            websocket: Websocket protocol instance.
-
-        Returns:
-            None: This method does not return a value.
-        """
+        """Close the connection after a single message."""
         self._clients.add(websocket)
         try:
             async for message in websocket:
@@ -360,11 +287,11 @@ async def chaotic_tasks(
     """Run operations with random jitter to simulate chaotic concurrency.
 
     Args:
-        operations (Iterable[Callable[[], Awaitable[Any]]]): Async callables.
-        seed (int | None): Random seed for deterministic chaos.
+        operations: Async callables.
+        seed: Random seed for deterministic chaos.
 
     Returns:
-        list[Any]: Operation results in completion order.
+        Operation results in completion order.
     """
     rng = random.Random(seed)
 
@@ -380,10 +307,10 @@ def make_message_payload(size: int = 128) -> bytes:
     """Generate a deterministic bytes payload for test messages.
 
     Args:
-        size (int): Payload size in bytes.
+        size: Payload size in bytes.
 
     Returns:
-        bytes: Message payload of the requested size.
+        Message payload of the requested size.
     """
     return (b"x" * max(size, 0))[:size]
 
@@ -392,10 +319,10 @@ def make_oversized_payload(size: int = 1_048_577) -> bytes:
     """Generate an oversized payload to test buffer limits.
 
     Args:
-        size (int): Payload size in bytes.
+        size: Payload size in bytes.
 
     Returns:
-        bytes: Oversized payload.
+        Oversized payload.
     """
     return b"o" * size
 
@@ -410,13 +337,13 @@ def make_connection_config(
     """Create a WsConnectionConfig bound to the local server.
 
     Args:
-        server (LocalWebSocketServer): Target local server fixture.
-        conn_id (int | None): Optional connection id override.
-        on_connect (list[bytes] | None): Optional on_connect payloads.
-        auto_reconnect (bool | None): Optional reconnect toggle.
+        server: Target local server fixture.
+        conn_id: Optional connection id override.
+        on_connect: Optional on_connect payloads.
+        auto_reconnect: Optional reconnect toggle.
 
     Returns:
-        WsConnectionConfig: Config with ws:// URI patched in.
+        Config with ws:// URI patched in.
     """
     config = WsConnectionConfig.default(
         wss_url=f"wss://{server.host}",
@@ -437,12 +364,9 @@ async def wait_for_connection_state(
     """Wait for a WsConnection to reach a specific state.
 
     Args:
-        conn (WsConnection): Connection to monitor.
-        expected (ConnectionState): Expected state.
-        timeout_s (float): Timeout in seconds.
-
-    Returns:
-        None: This method does not return a value.
+        conn: Connection to monitor.
+        expected: Expected state.
+        timeout_s: Timeout in seconds.
 
     Raises:
         AssertionError: If the expected state is not reached in time.
@@ -463,11 +387,8 @@ async def wait_for_latency_update(
     """Wait until latency metrics change from default values.
 
     Args:
-        conn (WsConnection): Connection to monitor.
-        timeout_s (float): Timeout in seconds.
-
-    Returns:
-        None: This method does not return a value.
+        conn: Connection to monitor.
+        timeout_s: Timeout in seconds.
 
     Raises:
         AssertionError: If latency does not update in time.
@@ -491,12 +412,12 @@ async def connect_to_server(
     """Create and connect a WsConnection to the local server.
 
     Args:
-        server (LocalWebSocketServer): Target local server fixture.
-        on_connect (list[bytes] | None): Optional on_connect payloads.
-        auto_reconnect (bool | None): Optional reconnect toggle.
+        server: Target local server fixture.
+        on_connect: Optional on_connect payloads.
+        auto_reconnect: Optional reconnect toggle.
 
     Returns:
-        WsConnection: Connected websocket listener instance.
+        Connected websocket listener instance.
     """
     ringbuffer = BytesRingBuffer(max_capacity=128, only_insert_unique=False)
     config = make_connection_config(
@@ -512,7 +433,7 @@ def connection_config_factory() -> Callable[..., WsConnectionConfig]:
     """Provide a factory for server-bound connection configs.
 
     Returns:
-        Callable[..., WsConnectionConfig]: Config factory callable.
+        Config factory callable.
     """
     return make_connection_config
 
@@ -522,7 +443,7 @@ def connection_factory() -> Callable[..., Awaitable[WsConnection]]:
     """Provide a factory for connected WsConnection instances.
 
     Returns:
-        Callable[..., Awaitable[WsConnection]]: Async connection factory.
+        Async connection factory.
     """
     return connect_to_server
 
@@ -532,7 +453,7 @@ def state_waiter() -> Callable[..., Awaitable[None]]:
     """Provide a helper to await connection state changes.
 
     Returns:
-        Callable[..., Awaitable[None]]: State wait helper.
+        State wait helper.
     """
     return wait_for_connection_state
 
@@ -542,7 +463,7 @@ def latency_waiter() -> Callable[..., Awaitable[None]]:
     """Provide a helper to await latency updates.
 
     Returns:
-        Callable[..., Awaitable[None]]: Latency wait helper.
+        Latency wait helper.
     """
     return wait_for_latency_update
 
@@ -552,7 +473,7 @@ def payload_factory() -> Callable[..., bytes]:
     """Provide a helper for fixed-size payloads.
 
     Returns:
-        Callable[..., bytes]: Payload factory.
+        Payload factory.
     """
     return make_message_payload
 
@@ -562,7 +483,7 @@ def oversized_payload_factory() -> Callable[..., bytes]:
     """Provide a helper for oversized payloads.
 
     Returns:
-        Callable[..., bytes]: Oversized payload factory.
+        Oversized payload factory.
     """
     return make_oversized_payload
 
@@ -572,7 +493,7 @@ def chaos_runner() -> Callable[..., Awaitable[list[Any]]]:
     """Provide a helper to run chaotic concurrent tasks.
 
     Returns:
-        Callable[..., Awaitable[list[Any]]]: Chaos helper coroutine factory.
+        Chaos helper coroutine factory.
     """
     return chaotic_tasks
 
@@ -582,7 +503,7 @@ def basic_server() -> LocalWebSocketServer:
     """Create a basic echo server fixture.
 
     Returns:
-        LocalWebSocketServer: Configured server instance.
+        Configured server instance.
     """
     return LocalWebSocketServer()
 
@@ -592,7 +513,7 @@ def server_with_delay() -> LocalWebSocketServer:
     """Create a delayed echo server fixture.
 
     Returns:
-        LocalWebSocketServer: Configured server instance.
+        Configured server instance.
     """
     return LocalWebSocketServer(delay_ms=50)
 
@@ -602,7 +523,7 @@ def server_reject_connections() -> LocalWebSocketServer:
     """Create a rejecting server fixture.
 
     Returns:
-        LocalWebSocketServer: Configured server instance.
+        Configured server instance.
     """
     return LocalWebSocketServer(behavior="reject")
 
@@ -612,7 +533,7 @@ def server_send_invalid_frames() -> LocalWebSocketServer:
     """Create a server that sends malformed frames.
 
     Returns:
-        LocalWebSocketServer: Configured server instance.
+        Configured server instance.
     """
     return LocalWebSocketServer(behavior="invalid_frames")
 
@@ -622,7 +543,7 @@ def server_send_close_frame() -> LocalWebSocketServer:
     """Create a server that closes after a message.
 
     Returns:
-        LocalWebSocketServer: Configured server instance.
+        Configured server instance.
     """
     return LocalWebSocketServer(behavior="close_frame")
 
@@ -632,7 +553,7 @@ def server_with_compression() -> LocalWebSocketServer:
     """Create a server with permessage-deflate enabled.
 
     Returns:
-        LocalWebSocketServer: Configured server instance.
+        Configured server instance.
     """
     return LocalWebSocketServer(compression=True)
 
@@ -642,7 +563,7 @@ def server_with_fragmentation() -> LocalWebSocketServer:
     """Create a server that fragments outgoing messages.
 
     Returns:
-        LocalWebSocketServer: Configured server instance.
+        Configured server instance.
     """
     return LocalWebSocketServer(fragmentation=True)
 
@@ -654,10 +575,10 @@ async def running_server(
     """Start and stop the provided server fixture per test.
 
     Args:
-        request (pytest.FixtureRequest): Pytest fixture request.
+        request: Pytest fixture request.
 
     Returns:
-        AsyncIterator[LocalWebSocketServer]: Yielding active server.
+        Yielding active server.
     """
     server = request.getfixturevalue(request.param)
     await server.serve()
@@ -672,10 +593,10 @@ def live_timeout_s(request: pytest.FixtureRequest) -> float:
     """Live-test timeout from command line options.
 
     Args:
-        request (pytest.FixtureRequest): Pytest fixture request.
+        request: Pytest fixture request.
 
     Returns:
-        float: Timeout in seconds.
+        Timeout in seconds.
     """
     return float(request.config.getoption("--live-timeout"))
 
@@ -685,7 +606,7 @@ def live_test_config() -> dict[str, Any]:
     """Configuration for live tests.
 
     Returns:
-        dict[str, Any]: Live test config mapping.
+        Live test config mapping.
     """
     return {
         "binance_futures_base": "wss://fstream.binance.com/ws",

@@ -1,14 +1,22 @@
 """End-to-end integration tests for the WebSocket module.
 
-This module provides comprehensive E2E coverage across:
-- WsConnection lifecycle (connect, send, receive, disconnect)
-- WsSingle wrapper (async context manager, iteration)
-- WsPool management (multiple connections, deduplication, fastest vs multicast)
-- Message flow (bursts, large payloads, fragmentation, empty payloads)
-- Reconnection (auto-reconnect, server restart)
-- Latency (ping/pong timing)
-- Error resilience (malformed frames, close during flight, callback exceptions)
-- Stress (connection churn, sustained throughput)
+Layer-3 (mini-integration) tests combining WsConnection, WsSingle, and
+WsPool with real local servers.
+
+Key coverage:
+- Full lifecycle across all layers: connect, send, receive, disconnect.
+- Rapid connect/disconnect churn (50 cycles) to detect fd leaks.
+- Rejection and retry paths.
+- Message flow: 1000-message bursts, large payloads near max_frame_size,
+  empty payloads, fragmented messages, and concurrent ping/message traffic.
+- Reconnection: auto-reconnect iterator and WsSingle context-manager mode.
+- Pool semantics: all-healthy startup, rejection handling, hash deduplication,
+  fastest vs multicast send routing.
+- Latency: ping/pong timing updates from the default 1000.0 ms.
+- Error resilience: malformed frames, close-while-in-flight, callback
+  exceptions, and bounded memory growth across 100 cycles.
+- Stress: 100-cycle connection churn without fd exhaustion, and sustained
+  throughput over 5-second bursts.
 """
 
 from __future__ import annotations
@@ -36,14 +44,7 @@ from mm_toolbox.websocket.single import WsSingle
 
 
 def _noop_handler(msg: bytes) -> None:
-    """No-op message handler for pool tests.
-
-    Args:
-        msg (bytes): Incoming message payload.
-
-    Returns:
-        None: This handler does not return a value.
-    """
+    """No-op message handler for pool tests."""
     return None
 
 
@@ -53,12 +54,9 @@ async def _wait_for_single_state(
     """Wait for a WsSingle instance to reach the expected state.
 
     Args:
-        ws (WsSingle): WsSingle instance.
-        expected (ConnectionState): Expected connection state.
-        timeout_s (float): Timeout in seconds.
-
-    Returns:
-        None: This helper does not return a value.
+        ws: WsSingle instance.
+        expected: Expected connection state.
+        timeout_s: Timeout in seconds.
 
     Raises:
         AssertionError: If state is not reached in time.
@@ -78,22 +76,14 @@ async def _wait_for_single_state(
 
 @pytest.mark.asyncio
 class TestConnectionLifecycleE2E:
-    """E2E tests covering full connection lifecycle across all layers."""
+    """Layer-3 tests covering full connection lifecycle across all layers."""
 
     async def test_normal_connect_send_receive_disconnect_all_layers(
         self,
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Validate WsConnection, WsSingle, and WsPool in sequence.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a local echo server, When WsConnection, WsSingle, and WsPool are exercised in sequence, Then each layer connects, sends, receives, and disconnects cleanly."""
         async with basic_server:
             # --- Layer 1: WsConnection ---
             ringbuffer = BytesRingBuffer(max_capacity=128, only_insert_unique=False)
@@ -161,15 +151,10 @@ class TestConnectionLifecycleE2E:
         basic_server,
         connection_factory,
     ) -> None:
-        """Ensure 50 rapid connect/send/close cycles do not exhaust resources.
+        """Given a local echo server, When 50 rapid connect/send/close cycles are performed, Then each connection ends in DISCONNECTED without resource exhaustion.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This is a regression guard against fd leaks or background-task
+        accumulation that would surface only after many lifecycles."""
         async with basic_server:
             for _ in range(50):
                 conn = await connection_factory(basic_server)
@@ -184,15 +169,7 @@ class TestConnectionLifecycleE2E:
         server_reject_connections,
         connection_config_factory,
     ) -> None:
-        """Ensure rejected connections reach DISCONNECTED and retry can be broken.
-
-        Args:
-            server_reject_connections: Fixture providing rejecting server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a rejecting server, When direct connection and reconnect iterator are used, Then both reach DISCONNECTED and the retry loop can be broken after a few attempts."""
         async with server_reject_connections:
             # Direct new() should connect but server closes immediately
             ringbuffer = BytesRingBuffer(max_capacity=8, only_insert_unique=False)
@@ -223,28 +200,22 @@ class TestConnectionLifecycleE2E:
 
 @pytest.mark.asyncio
 class TestMessageFlowE2E:
-    """E2E tests for various message flow scenarios."""
+    """Layer-3 tests for various message flow scenarios."""
 
     async def test_burst_messages_1000(
         self,
         basic_server,
         connection_factory,
     ) -> None:
-        """Send 1000 messages rapidly and collect all echoes.
+        """Given a live connection, When 1000 messages are sent rapidly, Then all 1000 echoes are collected without drops.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Large bursts stress the ringbuffer and the async frame-processing
+loop; missing messages here indicate a buffering or backpressure bug."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             collected: list[bytes] = []
 
             async def _collector() -> None:
-                """Collect 1000 echoed messages."""
                 while len(collected) < 1000:
                     try:
                         msg = await asyncio.wait_for(
@@ -269,15 +240,10 @@ class TestMessageFlowE2E:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Verify payloads near max_frame_size round-trip correctly.
+        """Given max_frame_size=1024, When payloads of 1023 and 1024 bytes are sent, Then both round-trip correctly.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Boundary testing near the frame-size limit catches off-by-one
+errors in the size-check logic."""
         async with basic_server:
             ringbuffer = BytesRingBuffer(max_capacity=16, only_insert_unique=False)
             config = connection_config_factory(basic_server)
@@ -302,15 +268,7 @@ class TestMessageFlowE2E:
         basic_server,
         connection_factory,
     ) -> None:
-        """Verify empty payload is echoed back correctly.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given an empty payload, When sent and echoed, Then the received message is also empty."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             conn.send_data(b"")
@@ -323,15 +281,7 @@ class TestMessageFlowE2E:
         server_with_fragmentation,
         connection_config_factory,
     ) -> None:
-        """Verify fragmented messages reassemble correctly.
-
-        Args:
-            server_with_fragmentation: Fixture providing fragmenting echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a fragmenting server, When messages of varying sizes are sent, Then they reassemble correctly on receipt."""
         async with server_with_fragmentation:
             ringbuffer = BytesRingBuffer(max_capacity=32, only_insert_unique=False)
             config = connection_config_factory(server_with_fragmentation)
@@ -350,19 +300,10 @@ class TestMessageFlowE2E:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Send before disconnect and verify reconnection yields a usable conn.
+        """Given auto_reconnect=True, When the previous connection closes, Then the iterator yields a fresh usable connection.
 
-        Note: WsConnection.new_with_reconnect yields a fresh connection after
-        the previous one closes.  We validate the iterator pattern here rather
-        than transparent auto-reconnect inside a single WsConnection instance.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This validates the iterator pattern rather than transparent
+auto-reconnect inside a single WsConnection instance."""
         async with basic_server:
             ringbuffer = BytesRingBuffer(max_capacity=16, only_insert_unique=False)
             config = connection_config_factory(basic_server, auto_reconnect=True)
@@ -385,16 +326,10 @@ class TestMessageFlowE2E:
         connection_config_factory,
         latency_waiter,
     ) -> None:
-        """Send 500 messages while latency pings run every 50 ms.
+        """Given 500 messages sent while latency pings run every 50 ms, Then all messages are collected and the connection stays CONNECTED.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-            latency_waiter: Fixture providing latency wait helper.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Concurrent ping and data traffic exercises the frame multiplexing
+path; dropped messages or disconnects here indicate a race condition."""
         async with basic_server:
             ringbuffer = BytesRingBuffer(max_capacity=128, only_insert_unique=False)
             config = connection_config_factory(basic_server)
@@ -406,7 +341,6 @@ class TestMessageFlowE2E:
             collected: list[bytes] = []
 
             async def _collector() -> None:
-                """Collect up to 500 echoed messages."""
                 while len(collected) < 500:
                     try:
                         msg = await asyncio.wait_for(ringbuffer.aconsume(), timeout=5.0)
@@ -431,29 +365,16 @@ class TestMessageFlowE2E:
 # --------------------------------------------------------------------------- #
 
 
-# --------------------------------------------------------------------------- #
-# Reconnection
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.asyncio
 class TestReconnectionE2E:
-    """E2E tests for reconnection behavior."""
+    """Layer-3 tests for reconnection behavior."""
 
     async def test_clean_server_close_auto_reconnect(
         self,
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Close server while connected, restart, and verify reconnection.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given auto_reconnect=True, When the connection is closed and restarted, Then the iterator yields a fresh CONNECTED instance."""
         async with basic_server:
             ringbuffer = BytesRingBuffer(max_capacity=16, only_insert_unique=False)
             config = connection_config_factory(basic_server, auto_reconnect=True)
@@ -474,15 +395,7 @@ class TestReconnectionE2E:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure async with WsSingle and auto_reconnect connects and sends.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given WsSingle with auto_reconnect=True, When used in an async with block, Then it connects, sends, and closes cleanly."""
         async with basic_server:
             config = connection_config_factory(basic_server, auto_reconnect=True)
             async with WsSingle(config) as ws:
@@ -499,22 +412,14 @@ class TestReconnectionE2E:
 
 @pytest.mark.asyncio
 class TestPoolE2E:
-    """E2E tests for WsPool behavior."""
+    """Layer-3 tests for WsPool behavior."""
 
     async def test_pool_all_healthy(
         self,
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Start a pool of 5 and verify all connections are healthy.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a pool of 5 connections, When started, Then all are CONNECTED and a fastest-only send reaches the server."""
         async with basic_server:
             pool_config = WsPoolConfig(num_connections=5, evict_interval_s=60)
             config = connection_config_factory(basic_server)
@@ -533,21 +438,13 @@ class TestPoolE2E:
         server_reject_connections,
         connection_config_factory,
     ) -> None:
-        """Ensure a pool handles rejection gracefully (connections drop to 0).
+        """Given a rejecting server, When a pool starts, Then it starts without exception but has zero healthy connections after the dust settles.
 
-        Note: The local reject server accepts the websocket handshake before
-        sending a close frame, so ws_connect succeeds and WsConnection.new
-        returns normally.  The connections then immediately disconnect.  We
-        verify the pool still starts (no exception) but has zero healthy
-        connections after the dust settles.
-
-        Args:
-            server_reject_connections: Fixture providing rejecting server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        The local reject server accepts the websocket handshake before
+sending a close frame, so ws_connect succeeds and WsConnection.new
+returns normally. The connections then immediately disconnect. We
+verify the pool still starts (no exception) but has zero healthy
+connections after the dust settles."""
         async with server_reject_connections:
             pool_config = WsPoolConfig(num_connections=3, evict_interval_s=60)
             config = connection_config_factory(server_reject_connections)
@@ -563,15 +460,10 @@ class TestPoolE2E:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Broadcast same message to all connections; pool iterator deduplicates.
+        """Given a multicast send to 3 connections, When the pool iterates, Then only one copy of the message is yielded.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Hash deduplication is critical for pools subscribed to the same
+exchange stream; without it downstream consumers would see N copies."""
         async with basic_server:
             pool_config = WsPoolConfig(num_connections=3, evict_interval_s=60)
             config = connection_config_factory(basic_server)
@@ -583,7 +475,6 @@ class TestPoolE2E:
                 await asyncio.sleep(0.3)
 
                 async def _collector() -> None:
-                    """Collect messages from pool iterator (should dedup)."""
                     async for msg in pool:
                         if msg == b"dedup-test":
                             collected.append(msg)
@@ -610,15 +501,7 @@ class TestPoolE2E:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Send with only_fastest=True and only_fastest=False without crashes.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given both routing modes, When send_data is called, Then neither crashes and both reach the server."""
         async with basic_server:
             pool_config = WsPoolConfig(num_connections=3, evict_interval_s=60)
             config = connection_config_factory(basic_server)
@@ -643,7 +526,7 @@ class TestPoolE2E:
 
 @pytest.mark.asyncio
 class TestLatencyE2E:
-    """E2E tests for latency tracking."""
+    """Layer-3 tests for latency tracking."""
 
     async def test_normal_ping_pong_latency(
         self,
@@ -651,16 +534,7 @@ class TestLatencyE2E:
         connection_config_factory,
         latency_waiter,
     ) -> None:
-        """Wait for ping/pong to update latency from the default 1000.0 ms.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-            latency_waiter: Fixture providing latency wait helper.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a live connection with 100 ms ping interval, When latency updates, Then it drops below the default 1000.0 ms sentinel."""
         async with basic_server:
             ringbuffer = BytesRingBuffer(max_capacity=8, only_insert_unique=False)
             config = connection_config_factory(basic_server)
@@ -678,22 +552,14 @@ class TestLatencyE2E:
 
 @pytest.mark.asyncio
 class TestErrorResilienceE2E:
-    """E2E tests for graceful handling of errors."""
+    """Layer-3 tests for graceful handling of errors."""
 
     async def test_malformed_frames(
         self,
         server_send_invalid_frames,
         connection_config_factory,
     ) -> None:
-        """Ensure malformed frames cause a graceful disconnect.
-
-        Args:
-            server_send_invalid_frames: Fixture providing invalid frame server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a server that sends malformed frames, When they arrive, Then the connection gracefully disconnects without crashing."""
         async with server_send_invalid_frames:
             ringbuffer = BytesRingBuffer(max_capacity=8, only_insert_unique=False)
             config = connection_config_factory(server_send_invalid_frames)
@@ -708,15 +574,10 @@ class TestErrorResilienceE2E:
         basic_server,
         connection_factory,
     ) -> None:
-        """Send many messages and immediately close; ensure no crash.
+        """Given 1000 in-flight messages, When close() is called immediately, Then no crash occurs and the final state is DISCONNECTED.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Abrupt close during heavy traffic is a common teardown scenario;
+this test guards against use-after-free or task-leak bugs."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             for i in range(1000):
@@ -730,20 +591,14 @@ class TestErrorResilienceE2E:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure an exception in the on_message callback does not kill the conn.
+        """Given an on_message callback that always raises, When a message arrives, Then the exception is swallowed and the connection stays CONNECTED.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Callback exceptions must not propagate into the frame-processing
+loop and tear down the transport."""
         async with basic_server:
             config = connection_config_factory(basic_server)
 
             def _bad_handler(msg: bytes) -> None:
-                """Handler that always raises."""
                 raise ValueError("callback error")
 
             ws = WsSingle(config, on_message=_bad_handler)
@@ -760,15 +615,10 @@ class TestErrorResilienceE2E:
         basic_server,
         connection_factory,
     ) -> None:
-        """Run 100 open/close cycles and assert memory growth is bounded.
+        """Given 100 open/close cycles, When memory snapshots are compared, Then growth is bounded below 5 MB.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Unbounded growth across repeated lifecycles indicates leaked
+tasks, buffers, or transport references."""
         async with basic_server:
             tracemalloc.start()
             gc.collect()
@@ -806,15 +656,10 @@ class TestStressE2E:
         basic_server,
         connection_factory,
     ) -> None:
-        """Perform 100 rapid open/close cycles without fd exhaustion.
+        """Given 100 rapid open/close cycles, When file-descriptor limits are checked, Then they are unchanged.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This is a stricter regression guard than the 50-cycle E2E test;
+it validates that we are not leaking sockets or asyncio transports."""
         async with basic_server:
             initial_fd = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
             for i in range(100):
@@ -832,22 +677,16 @@ class TestStressE2E:
         basic_server,
         connection_factory,
     ) -> None:
-        """Measure message throughput over a 5-second burst.
+        """Given a 5-second burst of messages, When the collector drains, Then throughput exceeds 10 messages per second.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This is a coarse sanity check rather than a benchmark; it mainly
+guards against severe regressions in frame-parsing or ringbuffer throughput."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             ringbuffer = conn.get_ringbuffer()
             collected: list[bytes] = []
 
             async def _collector() -> None:
-                """Collect messages for the duration of the burst."""
                 while True:
                     try:
                         msg = await asyncio.wait_for(ringbuffer.aconsume(), timeout=1.0)

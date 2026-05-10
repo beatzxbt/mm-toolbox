@@ -1,6 +1,16 @@
 """Live Binance Futures integration tests for websocket components.
 
-Run with: pytest tests/websocket/integration/test_live_binance.py --run-live
+Layer-3 smoke tests executed against the real Binance Futures websocket
+feed. Run with:
+    pytest tests/websocket/integration/test_live_binance.py --run-live
+
+Key coverage:
+- WsSingle on BTCUSDT @bookTicker: validates schema decoding, timestamp
+  freshness, and bid/ask semantics.
+- WsPool on BTCUSDT @bookTicker: validates multi-connection pooling
+  against a live exchange with real latency.
+
+These tests are skipped by default and require a stable internet connection.
 """
 
 from __future__ import annotations
@@ -151,7 +161,7 @@ class TestLiveBinanceFutures(_LiveBinanceHarness):
         live_test_config: dict[str, Any],
         live_timeout_s: float,
     ) -> None:
-        """Validate WsSingle on real BTC futures @bookTicker feed."""
+        """Given the live Binance BTCUSDT @bookTicker stream, When WsSingle connects, Then at least 3 valid bookTicker events are decoded with correct timestamps and bid/ask ordering."""
         config = WsConnectionConfig.default(
             f"{live_test_config['binance_futures_base']}/btcusdt@bookTicker"
         )
@@ -184,7 +194,7 @@ class TestLiveBinanceFutures(_LiveBinanceHarness):
         live_test_config: dict[str, Any],
         live_timeout_s: float,
     ) -> None:
-        """Validate WsPool on real BTC futures @bookTicker feed."""
+        """Given the live Binance BTCUSDT @bookTicker stream, When a WsPool of 2 connections starts, Then at least 3 valid events are received after the pool reports active connections."""
         config = WsConnectionConfig.default(
             f"{live_test_config['binance_futures_base']}/btcusdt@bookTicker"
         )

@@ -1,4 +1,9 @@
-"""Configuration forwarding tests for WsConnection."""
+"""Configuration forwarding tests for WsConnection.
+
+Layer-1 tests verifying that WsConnection.new correctly passes
+config fields (e.g., max_frame_size) into the underlying ws_connect call.
+This ensures user-supplied limits are respected by the transport layer.
+"""
 
 from __future__ import annotations
 
@@ -8,19 +13,11 @@ from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
 from mm_toolbox.websocket.connection import WsConnection, WsConnectionConfig
 
 
-@pytest.mark.asyncio
 class TestWsConnectionConfigForwarding:
-    """Validate config fields are forwarded to PicoWS connect call."""
+    """Layer-1 tests for config field forwarding from WsConnection to ws_connect."""
 
     async def test_new_forwards_max_frame_size(self, monkeypatch) -> None:
-        """Ensure WsConnection.new passes max_frame_size to ws_connect.
-
-        Args:
-            monkeypatch: Pytest fixture for replacing module attributes.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a custom max_frame_size in config, When WsConnection.new is called, Then that value is passed to ws_connect."""
         captured: dict[str, object] = {}
 
         async def fake_ws_connect(

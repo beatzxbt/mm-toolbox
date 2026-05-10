@@ -1,4 +1,9 @@
-"""Message callback tests for WsSingle."""
+"""Message callback tests for WsSingle.
+
+Layer-2 tests validating on_message callback invocation, exception handling,
+fragmented message delivery, concurrent callback + iteration, and
+set_on_connect propagation.
+"""
 
 from __future__ import annotations
 
@@ -15,11 +20,8 @@ async def shutdown_ws_task(ws: WsSingle, task: asyncio.Task[None]) -> None:
     """Stop a WsSingle start() task gracefully.
 
     Args:
-        ws (WsSingle): WsSingle instance to close.
-        task (asyncio.Task[None]): Task running ws.start().
-
-    Returns:
-        None: This helper does not return a value.
+        ws: WsSingle instance to close.
+        task: Task running ws.start().
     """
     ws.close()
     task.cancel()
@@ -28,50 +30,26 @@ async def shutdown_ws_task(ws: WsSingle, task: asyncio.Task[None]) -> None:
 
 
 class TestWsSingleCallbackValidation:
-    """Validate WsSingle callback signature validation."""
+    """Layer-2 tests for WsSingle callback signature validation."""
 
     def test_callback_validation(self) -> None:
-        """Ensure invalid callback signatures raise errors.
+        """Given valid and invalid callbacks, Then only the valid one is accepted.
 
-        Returns:
-            None: This test does not return a value.
-        """
+        Early validation prevents frame-dispatch runtime errors."""
         from mm_toolbox.websocket.connection import WsConnectionConfig
 
         config = WsConnectionConfig.default("wss://test.com")
 
         def valid_callback(msg: bytes) -> None:
-            """Accept a single bytes payload.
-
-            Args:
-                msg (bytes): Incoming message.
-
-            Returns:
-                None: This callback does not return a value.
-            """
             return None
 
         ws = WsSingle(config, on_message=valid_callback)
         assert ws._on_message is valid_callback
 
         def invalid_no_args() -> None:
-            """Callback missing required bytes parameter.
-
-            Returns:
-                None: This callback does not return a value.
-            """
             return None
 
         def invalid_two_args(_one: bytes, _two: bytes) -> None:
-            """Callback with too many parameters.
-
-            Args:
-                _one (bytes): First payload.
-                _two (bytes): Second payload.
-
-            Returns:
-                None: This callback does not return a value.
-            """
             return None
 
         with pytest.raises(ValueError):
@@ -83,35 +61,19 @@ class TestWsSingleCallbackValidation:
 
 @pytest.mark.asyncio
 class TestWsSingleMessageCallbacks:
-    """Validate on_message callback behavior."""
+    """Layer-2 tests for on_message callback behavior."""
 
     async def test_on_message_callback_invoked(
         self,
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure on_message callback fires for each message.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given an on_message callback, When messages arrive, Then the callback fires for each one."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             received: list[bytes] = []
 
             def on_message(msg: bytes) -> None:
-                """Append incoming messages to the collection.
-
-                Args:
-                    msg (bytes): Incoming message.
-
-                Returns:
-                    None: This callback does not return a value.
-                """
                 received.append(msg)
 
             ws = WsSingle(config, on_message=on_message)
@@ -128,27 +90,14 @@ class TestWsSingleMessageCallbacks:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure callback exceptions do not crash the connection.
+        """Given a callback that always raises, When a message arrives, Then the connection stays CONNECTED.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Callback exceptions must not tear down the transport; otherwise a
+buggy handler would kill the entire websocket session."""
         async with basic_server:
             config = connection_config_factory(basic_server)
 
             def on_message(_msg: bytes) -> None:
-                """Raise to simulate callback errors.
-
-                Args:
-                    _msg (bytes): Incoming message.
-
-                Returns:
-                    None: This callback does not return a value.
-                """
                 raise ValueError("boom")
 
             ws = WsSingle(config, on_message=on_message)
@@ -164,28 +113,15 @@ class TestWsSingleMessageCallbacks:
         server_with_fragmentation,
         connection_config_factory,
     ) -> None:
-        """Ensure fragmented messages are reassembled before callbacks.
+        """Given a fragmenting server, When a message arrives, Then the callback receives the reassembled payload.
 
-        Args:
-            server_with_fragmentation: Fixture providing fragmented server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Fragmented frames must be buffered internally; delivering partial
+fragments to the callback would break message parsers."""
         async with server_with_fragmentation:
             config = connection_config_factory(server_with_fragmentation)
             received: list[bytes] = []
 
             def on_message(msg: bytes) -> None:
-                """Append fragmented message payloads.
-
-                Args:
-                    msg (bytes): Incoming message.
-
-                Returns:
-                    None: This callback does not return a value.
-                """
                 received.append(msg)
 
             ws = WsSingle(config, on_message=on_message)
@@ -201,15 +137,10 @@ class TestWsSingleMessageCallbacks:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure callback and async iteration can run in parallel instances.
+        """Given one WsSingle with a callback and another with async iteration, When a message is broadcast, Then both receive it.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This validates that callback and iterator paths are independent
+and do not contend for the same ringbuffer slot."""
         async with basic_server:
             config1 = connection_config_factory(basic_server)
             config2 = connection_config_factory(basic_server)
@@ -217,14 +148,6 @@ class TestWsSingleMessageCallbacks:
             received_iter: list[bytes] = []
 
             def on_message(msg: bytes) -> None:
-                """Collect callback messages for concurrency validation.
-
-                Args:
-                    msg (bytes): Incoming message.
-
-                Returns:
-                    None: This callback does not return a value.
-                """
                 received_cb.append(msg)
 
             ws_cb = WsSingle(config1, on_message=on_message)
@@ -234,11 +157,6 @@ class TestWsSingleMessageCallbacks:
             async with ws_iter:
 
                 async def _collector() -> None:
-                    """Collect a single message via async iteration.
-
-                    Returns:
-                        None: This helper does not return a value.
-                    """
                     async for msg in ws_iter:
                         received_iter.append(msg)
                         if len(received_iter) >= 1:
@@ -259,15 +177,7 @@ class TestWsSingleMessageCallbacks:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure _consume_callbacks exits when connection is closed.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a running WsSingle, When it is shut down, Then the internal callback consumer exits cleanly."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             ws = WsSingle(config)
@@ -280,15 +190,10 @@ class TestWsSingleMessageCallbacks:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure set_on_connect updates current and future connections.
+        """Given a connected WsSingle, When set_on_connect is called, Then the update propagates to both the wrapper and the underlying connection.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Propagation is required so that reconnections use the new payload
+rather than the stale one."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             async with WsSingle(config) as ws:
@@ -305,28 +210,15 @@ class TestWsSingleMessageCallbacks:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure empty payload reaches the callback.
+        """Given an empty payload broadcast, When the callback fires, Then it receives an empty bytes object.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Empty frames are valid websocket messages and must not be silently
+dropped by the callback dispatcher."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             received: list[bytes] = []
 
             def on_message(msg: bytes) -> None:
-                """Collect all messages including empty.
-
-                Args:
-                    msg (bytes): Incoming message.
-
-                Returns:
-                    None: This callback does not return a value.
-                """
                 received.append(msg)
 
             ws = WsSingle(config, on_message=on_message)

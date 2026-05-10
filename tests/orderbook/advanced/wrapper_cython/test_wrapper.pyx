@@ -31,6 +31,14 @@ DEF LOT_SIZE = 0.001
 
 
 cdef OrderbookLevels _alloc_levels(u64 count):
+    """Allocate an OrderbookLevels struct with given capacity.
+
+    Args:
+        count: Number of OrderbookLevel slots to allocate.
+
+    Returns:
+        OrderbookLevels with allocated array and num_levels set.
+    """
     cdef OrderbookLevel* arr = <OrderbookLevel*>malloc(count * sizeof(OrderbookLevel))
     cdef OrderbookLevels levels
     levels.num_levels = count
@@ -39,6 +47,11 @@ cdef OrderbookLevels _alloc_levels(u64 count):
 
 
 cdef void _free_levels(OrderbookLevels* levels):
+    """Free OrderbookLevels memory.
+
+    Args:
+        levels: Pointer to OrderbookLevels to free.
+    """
     if levels != NULL and levels.levels != NULL:
         free(levels.levels)
         levels.levels = NULL
@@ -46,6 +59,18 @@ cdef void _free_levels(OrderbookLevels* levels):
 
 
 cdef OrderbookLevels _make_levels(double* prices, double* sizes, u64 count, double tick_size, double lot_size):
+    """Create OrderbookLevels from price/size arrays.
+
+    Args:
+        prices: Array of price values.
+        sizes: Array of size values.
+        count: Number of levels.
+        tick_size: Tick size for conversion.
+        lot_size: Lot size for conversion.
+
+    Returns:
+        OrderbookLevels populated with converted tick/lot values.
+    """
     cdef OrderbookLevels levels = _alloc_levels(count)
     cdef u64 i
     for i in range(count):
@@ -56,10 +81,25 @@ cdef OrderbookLevels _make_levels(double* prices, double* sizes, u64 count, doub
 
 
 cdef bint _approx_eq(double a, double b, double tol=1e-9):
+    """Check if two doubles are approximately equal.
+
+    Args:
+        a: First value.
+        b: Second value.
+        tol: Absolute tolerance (default 1e-9).
+
+    Returns:
+        True if |a - b| < tol.
+    """
     return fabs(a - b) < tol
 
 
 cdef AdvancedOrderbook _create_book():
+    """Create an AdvancedOrderbook with standard test settings.
+
+    Returns:
+        Initialized AdvancedOrderbook with TICK_SIZE, LOT_SIZE, and 64 levels.
+    """
     return AdvancedOrderbook(
         tick_size=TICK_SIZE,
         lot_size=LOT_SIZE,
@@ -70,6 +110,11 @@ cdef AdvancedOrderbook _create_book():
 
 
 cdef void _populate_book(AdvancedOrderbook book):
+    """Populate book with standard 2-level snapshot for delegation tests.
+
+    Args:
+        book: AdvancedOrderbook to populate with bids [100.00, 99.99] and asks [100.01, 100.02].
+    """
     cdef double bid_prices[2]
     cdef double bid_sizes[2]
     cdef double ask_prices[2]
@@ -88,11 +133,13 @@ cdef void _populate_book(AdvancedOrderbook book):
 
 
 def test_wrapper_init():
+    """Test AdvancedOrderbook initializes without error."""
     cdef AdvancedOrderbook book = _create_book()
     assert book is not None
 
 
 def test_wrapper_consume_snapshot_delegation():
+    """Test consume_snapshot delegates correctly and mid price is computed."""
     cdef AdvancedOrderbook book = _create_book()
     _populate_book(book)
     cdef double mid = book.get_mid_price()
@@ -100,6 +147,7 @@ def test_wrapper_consume_snapshot_delegation():
 
 
 def test_wrapper_consume_deltas_delegation():
+    """Test consume_deltas delegates correctly and updates BBO size."""
     cdef AdvancedOrderbook book = _create_book()
     _populate_book(book)
     
@@ -120,6 +168,7 @@ def test_wrapper_consume_deltas_delegation():
 
 
 def test_wrapper_consume_bbo_delegation():
+    """Test consume_bbo delegates correctly and updates BBO size."""
     cdef AdvancedOrderbook book = _create_book()
     _populate_book(book)
     
@@ -137,6 +186,7 @@ def test_wrapper_consume_bbo_delegation():
 
 
 def test_wrapper_calculation_delegation():
+    """Test all price/spread/impact calculations delegate correctly."""
     cdef AdvancedOrderbook book = _create_book()
     _populate_book(book)
     
@@ -147,6 +197,7 @@ def test_wrapper_calculation_delegation():
 
 
 def test_wrapper_clear_delegation():
+    """Test clear() empties book and subsequent operations raise RuntimeError."""
     cdef AdvancedOrderbook book = _create_book()
     _populate_book(book)
     book.clear()

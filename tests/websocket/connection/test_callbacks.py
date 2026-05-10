@@ -1,7 +1,16 @@
-"""Callback-driven tests for WsConnection using real WebSocket frames.
+"""Callback-driven frame-handling tests for WsConnection.
 
-Covers on_connect payloads, frame handling with fragmentation/compression,
-buffer accumulation, and disconnect handling.
+Layer-2 tests exercising the on_connect, on_frame, and on_disconnect
+callback paths against a local WebSocket server.
+
+Key coverage:
+- on_connect payloads sent immediately after handshake.
+- Single, fragmented, and compressed TEXT frames reassembled correctly.
+- Ringbuffer accumulation and exact/max-frame-size boundary rejection.
+- Oversized payload safety (must not crash or leak into buffer).
+- Empty payload fast path.
+- Graceful disconnect on server CLOSE frame and mid-message termination.
+- should_stop guard preventing further frame processing after close.
 """
 
 from __future__ import annotations
@@ -17,22 +26,14 @@ from tests.websocket.conftest import wait_for_connection_state
 
 @pytest.mark.asyncio
 class TestWsConnectionCallbacks:
-    """Validate WsConnection callback-driven behaviors."""
+    """Layer-2 tests for WsConnection callback-driven frame handling."""
 
     async def test_on_connected_with_real_frame(
         self,
         basic_server,
         connection_factory,
     ) -> None:
-        """Verify on_connect payloads are sent after connection.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given on_connect payloads configured, When connection succeeds, Then payloads are transmitted to the server."""
         async with basic_server:
             payload = b'{"type":"hello"}'
             conn = await connection_factory(basic_server, on_connect=[payload])
@@ -45,15 +46,7 @@ class TestWsConnectionCallbacks:
         basic_server,
         connection_factory,
     ) -> None:
-        """Ensure a single server message reaches the ringbuffer.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given one TEXT frame from the server, When it arrives, Then it is placed intact into the ringbuffer."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             await basic_server.send_to_all_clients(b"hello")
@@ -67,15 +60,10 @@ class TestWsConnectionCallbacks:
         server_with_fragmentation,
         connection_factory,
     ) -> None:
-        """Verify fragmented frames are reassembled into one message.
+        """Given a server that fragments outbound frames, When a message arrives, Then it is reassembled into the original payload.
 
-        Args:
-            server_with_fragmentation: Fixture providing fragmented server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Fragmentation is common with large messages or certain proxies; the
+driver must buffer and reassemble before surfacing to the ringbuffer."""
         async with server_with_fragmentation:
             conn = await connection_factory(server_with_fragmentation)
             payload = b"fragmented-message"
@@ -90,15 +78,7 @@ class TestWsConnectionCallbacks:
         server_with_compression,
         connection_factory,
     ) -> None:
-        """Verify compressed frames decode into the original message.
-
-        Args:
-            server_with_compression: Fixture providing compressed server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a server with permessage-deflate enabled, When a message arrives, Then it is decompressed to the original payload."""
         async with server_with_compression:
             conn = await connection_factory(server_with_compression)
             payload = b"compressed-message"
@@ -113,15 +93,7 @@ class TestWsConnectionCallbacks:
         basic_server,
         connection_factory,
     ) -> None:
-        """Ensure multiple frames accumulate in the ringbuffer.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given multiple sequential frames, When they arrive, Then all are stored in the ringbuffer without loss."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             payloads = [b"one", b"two", b"three"]
@@ -141,16 +113,10 @@ class TestWsConnectionCallbacks:
         connection_factory,
         oversized_payload_factory,
     ) -> None:
-        """Verify oversized messages are rejected safely.
+        """Given a payload larger than max_frame_size, When it arrives, Then it is discarded and the ringbuffer stays empty.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-            oversized_payload_factory: Fixture providing oversized payloads.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This protects downstream consumers from unbounded memory growth
+when a peer sends unexpectedly large frames."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             oversized = oversized_payload_factory()
@@ -166,16 +132,7 @@ class TestWsConnectionCallbacks:
         connection_factory,
         state_waiter,
     ) -> None:
-        """Verify disconnection updates connection state.
-
-        Args:
-            server_send_close_frame: Fixture providing close-frame server.
-            connection_factory: Fixture providing connected WsConnection factory.
-            state_waiter: Fixture providing state wait helper.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a server that sends a CLOSE frame, When the client processes it, Then state transitions to DISCONNECTED."""
         async with server_send_close_frame:
             conn = await connection_factory(server_send_close_frame)
             conn.send_data(b"close-me")
@@ -188,16 +145,7 @@ class TestWsConnectionCallbacks:
         connection_factory,
         state_waiter,
     ) -> None:
-        """Verify disconnection during traffic leaves clean state.
-
-        Args:
-            server_send_close_frame: Fixture providing close-frame server.
-            connection_factory: Fixture providing connected WsConnection factory.
-            state_waiter: Fixture providing state wait helper.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a server that closes mid-traffic, When the close arrives, Then the connection ends in a clean DISCONNECTED state."""
         async with server_send_close_frame:
             conn = await connection_factory(server_send_close_frame)
             conn.send_data(b"partial")
@@ -210,16 +158,7 @@ class TestWsConnectionCallbacks:
         connection_factory,
         state_waiter,
     ) -> None:
-        """Verify server CLOSE frame transitions state and cleans up.
-
-        Args:
-            server_send_close_frame: Fixture providing close-frame server.
-            connection_factory: Fixture providing connected WsConnection factory.
-            state_waiter: Fixture providing state wait helper.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a server CLOSE frame, When handled, Then state transitions and background tasks are cleaned up."""
         async with server_send_close_frame:
             conn = await connection_factory(server_send_close_frame)
             conn.send_data(b"close-me")
@@ -232,15 +171,7 @@ class TestWsConnectionCallbacks:
         basic_server,
         connection_factory,
     ) -> None:
-        """Verify closing prevents further frame processing.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given the connection is closed, When the server sends more frames, Then they are ignored by the client."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             ringbuffer = conn.get_ringbuffer()
@@ -257,15 +188,10 @@ class TestWsConnectionCallbacks:
         basic_server,
         connection_factory,
     ) -> None:
-        """Verify incomplete fragments are cleared on disconnect.
+        """Given an incomplete fragmented message, When disconnect occurs, Then the partial buffer is cleared.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Skipped because the underlying buffer is a cdef field inaccessible
+from Python."""
         pytest.skip("_unfin_msg_buffer is a cdef field inaccessible from Python")
 
     async def test_empty_payload_fast_path(
@@ -273,15 +199,7 @@ class TestWsConnectionCallbacks:
         basic_server,
         connection_factory,
     ) -> None:
-        """Verify empty TEXT frame reaches the ringbuffer.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given an empty TEXT frame, When it arrives, Then it is stored as an empty bytes object in the ringbuffer."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             await basic_server.send_to_all_clients(b"")
@@ -295,15 +213,10 @@ class TestWsConnectionCallbacks:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Verify frame size boundary at max_frame_size.
+        """Given max_frame_size=1024, When payloads of 1023, 1024, and 1025 bytes arrive, Then only the 1025-byte payload is rejected.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Boundary testing is critical because off-by-one errors in frame-size
+logic can silently drop valid messages or admit oversized ones."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             config.max_frame_size = 1024
@@ -331,15 +244,7 @@ class TestWsConnectionCallbacks:
         basic_server,
         connection_factory,
     ) -> None:
-        """Verify PING with payload triggers PONG with matching payload.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_factory: Fixture providing connected WsConnection factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a server PING with a custom payload, When the client responds, Then a matching PONG is received by the server."""
         async with basic_server:
             conn = await connection_factory(basic_server)
             client = next(iter(basic_server._clients))

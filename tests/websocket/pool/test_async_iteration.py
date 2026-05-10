@@ -1,4 +1,15 @@
-"""Async iteration tests for WsPool."""
+"""Async iteration tests for WsPool.
+
+Layer-2 tests validating that WsPool correctly exposes an async iterator
+over deduplicated messages from its underlying connections.
+
+Key coverage:
+- Basic async iteration yields messages from the pool ringbuffer.
+- Arrival validation (all expected payloads arrive, ordering is relaxed).
+- Disconnect handling: iteration can be cancelled after pool connections drop.
+- StopAsyncIteration raised after pool.close().
+- Timeout behavior: __anext__ returns promptly once the pool is closed.
+"""
 
 from __future__ import annotations
 
@@ -10,35 +21,20 @@ from mm_toolbox.websocket.pool import WsPool, WsPoolConfig
 
 
 def noop_message_handler(msg: bytes) -> None:
-    """No-op message handler for pool tests.
-
-    Args:
-        msg (bytes): Incoming message payload.
-
-    Returns:
-        None: This handler does not return a value.
-    """
+    """No-op message handler for pool tests."""
     return None
 
 
 @pytest.mark.asyncio
 class TestWsPoolAsyncIteration:
-    """Validate async iteration over pool ringbuffer."""
+    """Layer-2 tests for async iteration over the pool ringbuffer."""
 
     async def test_async_iteration_over_pool_ringbuffer(
         self,
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure async iteration yields messages from the pool.
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a pool with 2 connections, When the server broadcasts 3 messages, Then async iteration yields all 3."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
@@ -51,11 +47,6 @@ class TestWsPoolAsyncIteration:
             async with pool:
 
                 async def _collector() -> None:
-                    """Collect a fixed number of pool messages.
-
-                    Returns:
-                        None: This helper does not return a value.
-                    """
                     async for msg in pool:
                         if msg in expected:
                             seen.add(msg)
@@ -76,15 +67,10 @@ class TestWsPoolAsyncIteration:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure all sent messages arrive without strict ordering.
+        """Given a pool with 2 connections, When multiple messages are broadcast, Then all arrive even if ordering varies.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        Cross-connection scheduling means order is not guaranteed; the
+important invariant is completeness, not sequence."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
@@ -98,11 +84,6 @@ class TestWsPoolAsyncIteration:
             async with pool:
 
                 async def _collector() -> None:
-                    """Collect all expected pool messages.
-
-                    Returns:
-                        None: This helper does not return a value.
-                    """
                     async for msg in pool:
                         if msg in expected:
                             seen.add(msg)
@@ -122,15 +103,7 @@ class TestWsPoolAsyncIteration:
         server_send_close_frame,
         connection_config_factory,
     ) -> None:
-        """Ensure iteration can be cancelled after disconnects.
-
-        Args:
-            server_send_close_frame: Fixture providing close-frame server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a pool connected to a close-frame server, When disconnects occur, Then the pending __anext__ either returns the last message or can be cancelled cleanly."""
         async with server_send_close_frame:
             config = connection_config_factory(server_send_close_frame)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
@@ -155,15 +128,7 @@ class TestWsPoolAsyncIteration:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure __anext__ raises StopAsyncIteration after pool.close().
-
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        """Given a closed pool, When __anext__ is called, Then StopAsyncIteration is raised immediately."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)
@@ -181,15 +146,10 @@ class TestWsPoolAsyncIteration:
         basic_server,
         connection_config_factory,
     ) -> None:
-        """Ensure __anext__ returns within a reasonable timeout window.
+        """Given a closed pool, When __anext__ is called, Then it returns within 1.5 seconds.
 
-        Args:
-            basic_server: Fixture providing a basic echo server.
-            connection_config_factory: Fixture providing config factory.
-
-        Returns:
-            None: This test does not return a value.
-        """
+        This prevents the iterator from hanging indefinitely when the
+underlying connections have all been torn down."""
         async with basic_server:
             config = connection_config_factory(basic_server)
             pool_config = WsPoolConfig(num_connections=2, evict_interval_s=60)

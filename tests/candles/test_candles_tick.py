@@ -1,4 +1,10 @@
-"""Test suite for TickCandles specific functionality."""
+"""Layer 2 — Component tests for ``TickCandles``.
+
+Validates tick-count-based candle completion: candles close after a fixed
+number of trades regardless of price, volume, or time. Covers exact-count
+boundaries, mixed trade sizes (which must not affect the count), rapid
+successions, and price-pattern independence.
+"""
 
 import asyncio
 
@@ -9,24 +15,22 @@ from mm_toolbox.candles.base import Trade
 
 
 class TestTickCandlesSpecific:
-    """Test TickCandles specific process_trade implementation."""
+    """Layer 2 — ``TickCandles``-specific ``process_trade`` behaviour."""
 
     def setup_method(self):
-        """Set up test fixtures."""
+        """Create a fresh asyncio event loop for each test method."""
         asyncio.set_event_loop(asyncio.new_event_loop())
 
     def test_tick_based_candle_completion(self):
-        """Test that candles complete based on tick count."""
-        tick_candles = TickCandles(3)  # 3 ticks per bucket
+        """Given a bucket of 3 ticks, the 4th trade closes the candle."""
+        tick_candles = TickCandles(3)
 
-        # Process exactly 3 trades (should stay in same candle)
         for i in range(3):
             trade = Trade(
                 time_ms=1640995200000 + i * 1000, is_buy=True, price=100.0 + i, size=1.0
             )
             tick_candles.process_trade(trade)
 
-        # One more trade should trigger new candle
         final_trade = Trade(time_ms=1640995203000, is_buy=True, price=110.0, size=1.0)
         tick_candles.process_trade(final_trade)
 
@@ -35,11 +39,10 @@ class TestTickCandlesSpecific:
         assert tick_candles.latest_candle.open_price == 110.0
 
     def test_tick_count_accuracy(self):
-        """Test that tick counting is accurate."""
+        """Given various bucket sizes, exactly *count* trades close one candle."""
         for count in [1, 3, 5, 7, 10, 15]:
             tc = TickCandles(count)
 
-            # Process exactly that many trades
             for i in range(count):
                 trade = Trade(
                     time_ms=1640995200000 + i * 1000,
@@ -53,10 +56,9 @@ class TestTickCandlesSpecific:
             assert tc.latest_candle.num_trades == 0
 
     def test_tick_candles_with_mixed_trade_sizes(self):
-        """Test TickCandles with various trade sizes."""
+        """Given trades with very different sizes, the tick count is unaffected."""
         tick_candles = TickCandles(4)
 
-        # Trades with different sizes (size shouldn't affect tick count)
         trades = [
             Trade(time_ms=1000, is_buy=True, price=100.0, size=0.1),
             Trade(time_ms=2000, is_buy=False, price=99.0, size=10.0),
@@ -68,16 +70,15 @@ class TestTickCandlesSpecific:
             tick_candles.process_trade(trade)
 
         assert len(tick_candles) == 1
-        assert tick_candles.latest_candle.num_trades == 0  # Reset after 4th trade
+        assert tick_candles.latest_candle.num_trades == 0
 
     def test_tick_candles_rapid_succession(self):
-        """Test TickCandles with rapid trade succession."""
+        """Given 25 trades in 1ms intervals, exactly 2 candles complete with 5 remaining."""
         tick_candles = TickCandles(10)
 
-        # Send many trades in rapid succession
-        for i in range(25):  # Will complete 2+ candles
+        for i in range(25):
             trade = Trade(
-                time_ms=1640995200000 + i,  # 1ms apart
+                time_ms=1640995200000 + i,
                 is_buy=i % 3 == 0,
                 price=100.0 + (i * 0.01),
                 size=1.0 + (i * 0.1),
@@ -88,13 +89,12 @@ class TestTickCandlesSpecific:
         assert tick_candles.latest_candle.num_trades == 5
 
     def test_tick_candles_price_patterns(self):
-        """Test TickCandles with various price patterns."""
-        # Test different price movement patterns
+        """Given up, down, volatile, and flat patterns, tick counting is invariant."""
         price_patterns = [
-            [100.0, 101.0, 102.0, 103.0],  # Upward trend
-            [100.0, 99.0, 98.0, 97.0],  # Downward trend
-            [100.0, 102.0, 98.0, 101.0],  # Volatile
-            [100.0, 100.0, 100.0, 100.0],  # Flat
+            [100.0, 101.0, 102.0, 103.0],
+            [100.0, 99.0, 98.0, 97.0],
+            [100.0, 102.0, 98.0, 101.0],
+            [100.0, 100.0, 100.0, 100.0],
         ]
 
         for pattern in price_patterns:
@@ -112,7 +112,7 @@ class TestTickCandlesSpecific:
             assert tc.latest_candle.num_trades == 0
 
     def test_invalid_ticks_per_bucket(self):
-        """Test that non-positive ticks_per_bucket raises ValueError."""
+        """Given a non-positive tick count, construction raises ValueError."""
         with pytest.raises(ValueError):
             TickCandles(0)
         with pytest.raises(ValueError):
