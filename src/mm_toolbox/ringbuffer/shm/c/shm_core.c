@@ -127,6 +127,15 @@ int shm_consumer_peek_available(ShmConsumerContext* ctx, uint64_t* msg_len_out,
     /* Read message length */
     msg_len = shm_read_u64_le(ctx->data, read_pos & ctx->mask, ctx->mask);
 
+    /* Validate message length to prevent out-of-bounds access */
+    if (msg_len > ctx->capacity - SHM_MSG_HEADER_SIZE) {
+        return 0;
+    }
+    /* Check for overflow in header + msg_len */
+    if (msg_len > UINT64_MAX - SHM_MSG_HEADER_SIZE) {
+        return 0;
+    }
+
     /* Check if complete message is available */
     if (avail < SHM_MSG_HEADER_SIZE + msg_len) {
         return 0;
