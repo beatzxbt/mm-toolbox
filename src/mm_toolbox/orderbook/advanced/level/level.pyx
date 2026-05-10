@@ -141,15 +141,22 @@ cdef class PyOrderbookLevel:
     @staticmethod
     cdef PyOrderbookLevel from_struct(OrderbookLevel level):
         """Create a PyOrderbookLevel from a C OrderbookLevel struct.
-        
+
         Args:
             level: The C OrderbookLevel struct to wrap.
-            
+
         Returns:
             A new PyOrderbookLevel instance wrapping the struct.
         """
-        cdef PyOrderbookLevel wrapper = PyOrderbookLevel.__new__(PyOrderbookLevel)
-        wrapper._level = level
+        cdef PyOrderbookLevel wrapper = PyOrderbookLevel.__new__(
+            PyOrderbookLevel,
+            level.price,
+            level.size,
+            level.norders,
+            level.ticks,
+            level.lots,
+            False,
+        )
         return wrapper
 
     cdef OrderbookLevel to_c_struct(self):
