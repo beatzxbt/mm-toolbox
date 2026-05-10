@@ -118,23 +118,6 @@ class TestSharedBytesRingBuffer:
             cons.close()
             prod.close()
 
-    def test_packed_roundtrip(self, shm_path: str) -> None:
-        """Verify packed messages unpack correctly.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
-        prod = ShmSpscProducer(shm_path, 1 << 14, create=True)
-        cons = ShmSpscConsumer(shm_path)
-        try:
-            items = [b"a", b"bb", b"ccc", b"dddd"]
-            assert prod.insert_packed(items)
-            got = cons.consume_packed()
-            assert got == items
-        finally:
-            cons.close()
-            prod.close()
-
     def test_oversize_rejected(self, shm_path: str) -> None:
         """Reject inserts that exceed capacity.
 
@@ -240,18 +223,6 @@ class TestSharedBytesRingBuffer:
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         try:
             assert prod.insert_batch([])
-        finally:
-            prod.close()
-
-    def test_insert_packed_empty_list(self, shm_path: str) -> None:
-        """insert_packed with empty list returns True.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
-        prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
-        try:
-            assert prod.insert_packed([])
         finally:
             prod.close()
 
@@ -576,45 +547,6 @@ class TestSharedBytesRingBuffer:
             assert not prod.insert_batch(msgs)
         finally:
             prod.close()
-
-    def test_insert_packed_oversized_item(self, shm_path: str) -> None:
-        """Item with len > 0xFFFFFFFF returns False.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
-        prod = ShmSpscProducer(shm_path, 1 << 20, create=True)
-        try:
-            oversized = b"x" * (0xFFFFFFFF + 1)
-            assert not prod.insert_packed([oversized])
-        finally:
-            prod.close()
-
-    def test_consume_packed_corrupted(self, shm_path: str) -> None:
-        """Corrupted length prefix inside packed message raises ValueError.
-
-        Args:
-            shm_path: Temporary file path for the shared memory ringbuffer.
-        """
-        prod = ShmSpscProducer(shm_path, 1 << 14, create=True, unlink_on_close=False)
-        prod.insert_packed([b"a", b"bb"])
-        prod.close()
-        try:
-            with open(shm_path, "r+b") as f:
-                # Header is 64 bytes; packed msg starts at offset 64.
-                # 8-byte total size, then 4-byte length prefix for first item.
-                f.seek(64 + 8)
-                # Corrupt length to a huge value
-                f.write(struct.pack("<I", 0x7FFFFFFF))
-            cons = ShmSpscConsumer(shm_path)
-            try:
-                with pytest.raises(ValueError):
-                    cons.consume_packed()
-            finally:
-                cons.close()
-        finally:
-            if os.path.exists(shm_path):
-                os.unlink(shm_path)
 
     def test_unlink_on_close_false(self, shm_path: str) -> None:
         """Close producer with unlink_on_close=False; file still exists.

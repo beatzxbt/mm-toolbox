@@ -425,87 +425,6 @@ cdef class ShmMpscProducer(_ShmRingBase):
         self._prod_ctxs[ring_idx].cached_write = write_pos
         return True
 
-    cpdef bint insert_packed(self, list[bytes] items):
-        """Insert items packed into one message on a single sub-ring."""
-        cdef:
-            u64 ring_idx = self._ring_idx
-            Py_ssize_t i, n = len(items)
-            bytes it
-            u64 total = 0
-            u64 L64
-            u64 capacity = self._per_ring_capacity
-            u64 mask = self._per_ring_mask
-            u64 write_pos
-            u64 dropped = 0
-            u64 now_ns
-            Py_ssize_t L
-            ShmSubRingHeader* sub_hdr = self._sub_hdrs[ring_idx]
-            unsigned char* sub_data = self._sub_datas[ring_idx]
-            u64 read_pos
-            u64 free_bytes
-            u64 dropped_pos
-            u64 msg_len
-
-        if n == 0:
-            return True
-        if capacity <= 8:
-            return False
-        for i in range(n):
-            it = items[i]
-            L64 = <u64>len(it)
-            if L64 > 0xFFFFFFFF:
-                return False
-            if total > (<u64>-1) - <u64>4 - L64:
-                return False
-            total += <u64>4 + L64
-        if total <= 0:
-            return True
-        if total > capacity - 8:
-            return False
-
-        write_pos = self._prod_ctxs[ring_idx].cached_write
-        with nogil:
-            read_pos = atomic_load_acquire(&sub_hdr.read_pos)
-        self._prod_ctxs[ring_idx].cached_read = read_pos
-        free_bytes = capacity - (write_pos - read_pos)
-        if free_bytes < 8 + total:
-            dropped_pos = read_pos
-            while True:
-                msg_len = read_u64_le(sub_data, dropped_pos & mask, mask)
-                if msg_len > capacity or (8 + msg_len) > capacity:
-                    return False
-                dropped_pos += 8 + msg_len
-                dropped += 1
-                free_bytes = capacity - (write_pos - dropped_pos)
-                if free_bytes >= 8 + total:
-                    with nogil:
-                        atomic_store_release(&sub_hdr.read_pos, dropped_pos)
-                        if dropped:
-                            atomic_sub(&sub_hdr.msg_count, dropped)
-                    self._prod_ctxs[ring_idx].cached_read = dropped_pos
-                    break
-
-        write_pos = self._prod_ctxs[ring_idx].cached_write
-        write_u64_le(sub_data, write_pos & mask, mask, total)
-        write_pos += 8
-        for i in range(n):
-            it = items[i]
-            L = len(it)
-            sub_data[(write_pos + 0) & mask] = <unsigned char>(L & 0xFF)
-            sub_data[(write_pos + 1) & mask] = <unsigned char>((L >> 8) & 0xFF)
-            sub_data[(write_pos + 2) & mask] = <unsigned char>((L >> 16) & 0xFF)
-            sub_data[(write_pos + 3) & mask] = <unsigned char>((L >> 24) & 0xFF)
-            write_pos += 4
-            copy_into_ring(sub_data, write_pos, mask, <const unsigned char*>it, <size_t>L, capacity)
-            write_pos += <u64>L
-        with nogil:
-            now_ns = <u64>c_time_monotonic_ns()
-            atomic_store_release(&sub_hdr.write_pos, write_pos)
-            atomic_add(&sub_hdr.msg_count, 1)
-            atomic_store_release(&sub_hdr.latest_insert_time_ns, now_ns)
-        self._prod_ctxs[ring_idx].cached_write = write_pos
-        return True
-
     def __len__(self) -> int:
         cdef u64 count = 0
         cdef u64 i
@@ -939,28 +858,6 @@ cdef class ShmMpscConsumer(_ShmRingBase):
             if not found:
                 break
         return total_copied
-
-    cpdef list consume_packed(self):
-        """Consume and unpack a packed message."""
-        cdef bytes buf = self.consume()
-        cdef memoryview mv = memoryview(buf)
-        cdef Py_ssize_t n = mv.shape[0]
-        cdef Py_ssize_t off = 0
-        cdef list items = []
-        cdef u64 L
-        while off + 4 <= n:
-            L = (
-                (<u64>mv[off])
-                | (<u64>mv[off + 1] << 8)
-                | (<u64>mv[off + 2] << 16)
-                | (<u64>mv[off + 3] << 24)
-            )
-            off += 4
-            if off + L > n:
-                raise ValueError("Corrupted packed message")
-            items.append(bytes(mv[off : off + L]))
-            off += L
-        return items
 
     def __len__(self) -> int:
         cdef u64 count = 0
