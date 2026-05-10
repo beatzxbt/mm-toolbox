@@ -444,6 +444,9 @@ cdef class BytesRingBufferFast:
             raise ValueError(f"Expected item size cannot be negative; expected >0 but got {expected_item_size}")
         if buffer_percent < 0.0:
             raise ValueError(f"Buffer percent cannot be negative; got {buffer_percent}")
+        import math
+        if not math.isfinite(buffer_percent):
+            raise ValueError(f"buffer_percent must be finite; got {buffer_percent}")
 
         self._max_capacity = 1 << (max_capacity - 1).bit_length() if max_capacity > 1 else 1
         self._mask = self._max_capacity - 1
@@ -451,6 +454,16 @@ cdef class BytesRingBufferFast:
         cdef u64 slot_size_base = <u64>(expected_item_size * (1.0 + buffer_percent / 100.0))
         self._slot_size = self._next_power_of_2(slot_size_base)
         self._slot_size_log2 = (<u64>self._slot_size - 1).bit_length()
+
+        # Validate slot_size to prevent overflow in total_bytes calculation
+        if self._slot_size == 0:
+            raise ValueError("Calculated slot size cannot be zero")
+        cdef size_t max_alloc = <size_t>-1
+        if self._slot_size > <u64>(max_alloc // self._max_capacity):
+            raise ValueError(
+                f"Buffer allocation would overflow: capacity={self._max_capacity}, "
+                f"slot_size={self._slot_size}"
+            )
         
         self._tail = 0
         self._head = 0
