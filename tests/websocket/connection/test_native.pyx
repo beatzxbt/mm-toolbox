@@ -28,7 +28,15 @@ from mm_toolbox.websocket.connection import WsConnectionConfig
 # =============================================================================
 
 cdef WsConnection _make_conn(int max_frame_size=1024, double ping_interval_s=0.1):
-    """Create a WsConnection with test config for direct state inspection."""
+    """Create a WsConnection with test config for direct state inspection.
+
+    Args:
+        max_frame_size: Maximum WebSocket frame size.
+        ping_interval_s: Latency ping interval in seconds.
+
+    Returns:
+        WsConnection with configured ringbuffer and test config.
+    """
     ringbuffer = BytesRingBuffer(max_capacity=16, only_insert_unique=False)
     config = WsConnectionConfig.default(
         wss_url="wss://test.example.com",
@@ -39,12 +47,21 @@ cdef WsConnection _make_conn(int max_frame_size=1024, double ping_interval_s=0.1
 
 
 cdef WsConnection _make_conn_fast():
-    """Create a WsConnection with small ping interval for timeout tests."""
+    """Create a WsConnection with small ping interval for timeout tests.
+
+    Returns:
+        WsConnection with 50ms ping interval.
+    """
     return _make_conn(1024, 0.05)
 
 
 def _mock_latency(WsConnection conn, double latency_ms):
-    """Set latency for testing eviction logic."""
+    """Set latency for testing eviction logic.
+
+    Args:
+        conn: WsConnection to modify.
+        latency_ms: Latency value to set.
+    """
     conn._latency_ms = latency_ms
     conn._latency_ema.update(latency_ms)
 
@@ -179,7 +196,10 @@ def test_disconnect_sets_transport_none():
 # =============================================================================
 
 def test_should_stop_blocks_frame_processing():
-    """Verify _should_stop prevents on_ws_frame from processing data."""
+    """Verify _should_stop=True with DISCONNECTED state blocks frame processing.
+
+    Expected: on_ws_frame returns early, leaving ringbuffer empty.
+    """
     cdef WsConnection conn = _make_conn()
     cdef BytesRingBuffer rb = conn._ringbuffer
     

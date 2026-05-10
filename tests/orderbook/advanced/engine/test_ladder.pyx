@@ -36,7 +36,16 @@ DEF LOT_SIZE = 0.001
 # Helper Functions
 # =============================================================================
 cdef bint _approx_eq(double a, double b, double tol=1e-9):
-    """Check if two doubles are approximately equal."""
+    """Check if two doubles are approximately equal.
+
+    Args:
+        a: First value.
+        b: Second value.
+        tol: Absolute tolerance (default 1e-9).
+
+    Returns:
+        True if |a - b| < tol.
+    """
     return fabs(a - b) < tol
 
 

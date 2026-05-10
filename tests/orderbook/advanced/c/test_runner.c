@@ -1,5 +1,9 @@
 /**
- * test_runner.c - Main test runner combining all C test suites
+ * @file test_runner.c
+ * @brief Main test runner combining all C test suites for the orderbook module.
+ *
+ * Aggregates helpers_suite and ladder_suite under a single root suite
+ * and delegates to the µnit framework for execution.
  */
 
 #include "munit.h"
@@ -19,6 +23,13 @@ static const MunitSuite root_suite = {
     MUNIT_SUITE_OPTION_NONE
 };
 
+/**
+ * @brief Entry point for the orderbook C test suite.
+ *
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return Exit code from munit_suite_main.
+ */
 int main(int argc, char* argv[]) {
     suites[0] = helpers_suite;
     suites[1] = ladder_suite;

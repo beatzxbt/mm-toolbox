@@ -43,7 +43,14 @@ DEF LOT_SIZE = 0.001
 # Helper Functions
 # =============================================================================
 cdef OrderbookLevels _alloc_levels(u64 count):
-    """Allocate an OrderbookLevels struct with given capacity."""
+    """Allocate an OrderbookLevels struct with given capacity.
+
+    Args:
+        count: Number of OrderbookLevel slots to allocate.
+
+    Returns:
+        OrderbookLevels with allocated array and num_levels set.
+    """
     cdef OrderbookLevel* arr = <OrderbookLevel*>malloc(count * sizeof(OrderbookLevel))
     cdef OrderbookLevels levels
     levels.num_levels = count
@@ -52,7 +59,11 @@ cdef OrderbookLevels _alloc_levels(u64 count):
 
 
 cdef void _free_levels(OrderbookLevels* levels):
-    """Free OrderbookLevels memory."""
+    """Free OrderbookLevels memory.
+
+    Args:
+        levels: Pointer to OrderbookLevels to free.
+    """
     if levels != NULL and levels.levels != NULL:
         free(levels.levels)
         levels.levels = NULL
@@ -66,7 +77,18 @@ cdef OrderbookLevels _make_levels(
     double tick_size,
     double lot_size,
 ):
-    """Create OrderbookLevels from arrays with tick/lot conversion."""
+    """Create OrderbookLevels from arrays with tick/lot conversion.
+
+    Args:
+        prices: Array of price values.
+        sizes: Array of size values.
+        count: Number of levels.
+        tick_size: Tick size for conversion.
+        lot_size: Lot size for conversion.
+
+    Returns:
+        OrderbookLevels populated with converted tick/lot values.
+    """
     cdef OrderbookLevels levels = _alloc_levels(count)
     cdef u64 i
     for i in range(count):
@@ -77,7 +99,16 @@ cdef OrderbookLevels _make_levels(
 
 
 cdef bint _approx_eq(double a, double b, double tol=1e-9):
-    """Check if two doubles are approximately equal."""
+    """Check if two doubles are approximately equal.
+
+    Args:
+        a: First value.
+        b: Second value.
+        tol: Absolute tolerance (default 1e-9).
+
+    Returns:
+        True if |a - b| < tol.
+    """
     return fabs(a - b) < tol
 
 
