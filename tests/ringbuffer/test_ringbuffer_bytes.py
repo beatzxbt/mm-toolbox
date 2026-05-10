@@ -90,40 +90,17 @@ class TestBytesRingBufferBasics:
         assert remaining == [b"second", b"third"]
         assert rb.is_empty()
 
-    def test_indexing_and_contains(self):
-        """Test indexing and contains operations."""
+    def test_contains_operations(self):
+        """Test contains operations."""
         rb = BytesRingBuffer(5)
         data = [b"alpha", b"beta", b"gamma"]
         rb.insert_batch(data)
-
-        # Test indexing
-        assert rb[0] == b"alpha"
-        assert rb[1] == b"beta"
-        assert rb[-1] == b"gamma"
 
         # Test contains
         assert b"alpha" in rb
         assert b"beta" in rb
         assert b"gamma" in rb
         assert b"missing" not in rb
-
-    def test_overwrite_operations(self):
-        """Test overwrite_latest functionality."""
-        rb = BytesRingBuffer(3)
-        rb.insert_batch([b"a", b"b", b"c"])
-
-        # Test overwrite without incrementing count
-        rb.overwrite_latest(b"new", increment_count=False)
-        assert len(rb) == 3
-        unwrapped = rb.unwrapped()
-        assert unwrapped == [b"a", b"b", b"new"]
-
-        # Test overwrite with incrementing count
-        rb.overwrite_latest(b"newer", increment_count=True)
-        # Capacity is 4, so we can have 4 elements
-        unwrapped = rb.unwrapped()
-        assert len(unwrapped) == 4
-        assert unwrapped == [b"a", b"b", b"new", b"newer"]
 
 
 class TestBytesRingBufferSpecialCases:
@@ -295,6 +272,130 @@ class TestBytesRingBufferFast:
         assert result == b"existing_1"
 
 
+class TestBytesRingBufferInsertChar:
+    """Test insert_char on BytesRingBuffer and BytesRingBufferFast."""
+
+    def test_insert_char_roundtrip_bytes_ringbuffer(self):
+        rb = BytesRingBuffer(4)
+        data = b"hello"
+        rb.insert_char(data, len(data))
+        assert rb.consume() == b"hello"
+
+    def test_insert_char_empty_bytes_ringbuffer(self):
+        rb = BytesRingBuffer(4)
+        rb.insert_char(b"", 0)
+        assert rb.consume() == b""
+
+    def test_insert_char_large_data_bytes_ringbuffer(self):
+        rb = BytesRingBuffer(4)
+        data = b"x" * 1000
+        rb.insert_char(data, len(data))
+        assert rb.consume() == data
+
+    def test_insert_char_roundtrip_fast(self):
+        rb = BytesRingBufferFast(4, expected_item_size=128, disable_async=True)
+        data = b"hello"
+        rb.insert_char(data, len(data))
+        assert rb.consume() == b"hello"
+
+    def test_insert_char_empty_fast(self):
+        rb = BytesRingBufferFast(4, expected_item_size=16, disable_async=True)
+        rb.insert_char(b"", 0)
+        assert rb.consume() == b""
+
+    def test_insert_char_large_data_fast(self):
+        rb = BytesRingBufferFast(4, expected_item_size=1024, disable_async=True)
+        data = b"x" * 1000
+        rb.insert_char(data, len(data))
+        assert rb.consume() == data
+
+
+class TestBytesRingBufferConsumeInto:
+    """Test consume_into on BytesRingBuffer and BytesRingBufferFast."""
+
+    def test_consume_into_basic_bytes_ringbuffer(self):
+        rb = BytesRingBuffer(4)
+        rb.insert(b"hello")
+        dst = bytearray(10)
+        n = rb.consume_into(dst)
+        assert n == 5
+        assert dst[:5] == b"hello"
+
+    def test_consume_into_buffer_too_small_bytes_ringbuffer(self):
+        rb = BytesRingBuffer(4)
+        rb.insert(b"hello")
+        dst = bytearray(3)
+        with pytest.raises(ValueError, match="too small"):
+            rb.consume_into(dst)
+
+    def test_consume_into_basic_fast(self):
+        rb = BytesRingBufferFast(4, expected_item_size=128, disable_async=True)
+        rb.insert(b"hello")
+        dst = bytearray(10)
+        n = rb.consume_into(dst)
+        assert n == 5
+        assert dst[:5] == b"hello"
+
+    def test_consume_into_buffer_too_small_fast(self):
+        rb = BytesRingBufferFast(4, expected_item_size=128, disable_async=True)
+        rb.insert(b"hello")
+        dst = bytearray(3)
+        with pytest.raises(ValueError, match="too small"):
+            rb.consume_into(dst)
+
+
+class TestBytesRingBufferConsumeAllInto:
+    """Test consume_all_into on BytesRingBuffer and BytesRingBufferFast."""
+
+    def test_consume_all_into_basic_bytes_ringbuffer(self):
+        rb = BytesRingBuffer(4)
+        rb.insert_batch([b"hello", b"world"])
+        buffers = [bytearray(10), bytearray(10)]
+        n = rb.consume_all_into(buffers)
+        assert n == 2
+        assert buffers[0][:5] == b"hello"
+        assert buffers[1][:5] == b"world"
+
+    def test_consume_all_into_buffer_too_small_bytes_ringbuffer(self):
+        rb = BytesRingBuffer(4)
+        rb.insert_batch([b"hello", b"world"])
+        buffers = [bytearray(10), bytearray(3)]
+        with pytest.raises(ValueError, match="too small"):
+            rb.consume_all_into(buffers)
+
+    def test_consume_all_into_more_buffers_than_items_bytes_ringbuffer(self):
+        rb = BytesRingBuffer(4)
+        rb.insert_batch([b"hello"])
+        buffers = [bytearray(10), bytearray(10), bytearray(10)]
+        n = rb.consume_all_into(buffers)
+        assert n == 1
+        assert buffers[0][:5] == b"hello"
+
+    def test_consume_all_into_basic_fast(self):
+        rb = BytesRingBufferFast(4, expected_item_size=128, disable_async=True)
+        rb.insert_batch([b"hello", b"world"])
+        buffers = [bytearray(10), bytearray(10)]
+        n = rb.consume_all_into(buffers)
+        assert n == 2
+        assert buffers[0][:5] == b"hello"
+        assert buffers[1][:5] == b"world"
+
+    def test_consume_all_into_buffer_too_small_fast(self):
+        rb = BytesRingBufferFast(4, expected_item_size=128, disable_async=True)
+        rb.insert_batch([b"hello", b"world"])
+        buffers = [bytearray(10), bytearray(3)]
+        with pytest.raises(ValueError, match="too small"):
+            rb.consume_all_into(buffers)
+
+    def test_consume_all_into_more_buffers_than_items_fast(self):
+        rb = BytesRingBufferFast(4, expected_item_size=128, disable_async=True)
+        rb.insert_batch([b"hello"])
+        buffers = [bytearray(10), bytearray(10), bytearray(10)]
+        n = rb.consume_all_into(buffers)
+        assert n == 1
+        assert buffers[0][:5] == b"hello"
+
+
 class TestBytesRingBufferEdgeCases:
     """Test edge cases and error conditions."""
 
@@ -304,9 +405,6 @@ class TestBytesRingBufferEdgeCases:
 
         with pytest.raises((IndexError, ValueError)):
             rb.consume()
-
-        with pytest.raises(IndexError):
-            _ = rb[0]
 
     def test_single_element_buffer(self):
         """Test buffer with capacity of 1."""
@@ -335,3 +433,81 @@ class TestBytesRingBufferEdgeCases:
 
         with pytest.raises((TypeError, ValueError)):
             rb.insert([1, 2, 3])
+
+    def test_insert_returns_bool(self):
+        """Test that insert returns True."""
+        rb = BytesRingBuffer(4)
+        assert rb.insert(b"hello") is True
+        assert rb.insert_batch([b"a", b"b"]) is True
+        assert len(rb) == 3
+
+
+class TestBytesRingBufferTimestamps:
+    """Test timestamp tracking on monolithic bytes ringbuffers."""
+
+    def test_latest_insert_time_ns_initial(self):
+        rb = BytesRingBuffer(4)
+        assert rb.latest_insert_time_ns == 0
+
+    def test_latest_insert_time_ns_updated_on_insert(self):
+        rb = BytesRingBuffer(4)
+        rb.insert(b"a")
+        t1 = rb.latest_insert_time_ns
+        assert t1 > 0
+        import time
+
+        time.sleep(0.001)
+        rb.insert(b"b")
+        t2 = rb.latest_insert_time_ns
+        assert t2 > t1
+
+    def test_latest_insert_time_ns_updated_on_insert_batch(self):
+        rb = BytesRingBuffer(4)
+        rb.insert_batch([b"a", b"b"])
+        assert rb.latest_insert_time_ns > 0
+
+    def test_latest_consume_time_ns_initial(self):
+        rb = BytesRingBuffer(4)
+        assert rb.latest_consume_time_ns == 0
+
+    def test_latest_consume_time_ns_updated_on_consume(self):
+        rb = BytesRingBuffer(4)
+        rb.insert_batch([b"a", b"b"])
+        t1 = rb.latest_insert_time_ns
+        rb.consume()
+        t2 = rb.latest_consume_time_ns
+        assert t2 > 0
+        assert t2 >= t1
+
+
+class TestBytesRingBufferFastTimestamps:
+    """Test timestamp tracking on fast bytes ringbuffers."""
+
+    def test_latest_insert_time_ns_initial(self):
+        rb = BytesRingBufferFast(4)
+        assert rb.latest_insert_time_ns == 0
+
+    def test_latest_insert_time_ns_updated_on_insert(self):
+        rb = BytesRingBufferFast(4)
+        rb.insert(b"a")
+        t1 = rb.latest_insert_time_ns
+        assert t1 > 0
+        import time
+
+        time.sleep(0.001)
+        rb.insert(b"b")
+        t2 = rb.latest_insert_time_ns
+        assert t2 > t1
+
+    def test_latest_consume_time_ns_initial(self):
+        rb = BytesRingBufferFast(4)
+        assert rb.latest_consume_time_ns == 0
+
+    def test_latest_consume_time_ns_updated_on_consume(self):
+        rb = BytesRingBufferFast(4)
+        rb.insert_batch([b"a", b"b"])
+        t1 = rb.latest_insert_time_ns
+        rb.consume()
+        t2 = rb.latest_consume_time_ns
+        assert t2 > 0
+        assert t2 >= t1

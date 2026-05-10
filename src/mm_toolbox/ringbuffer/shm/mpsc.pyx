@@ -425,87 +425,6 @@ cdef class ShmMpscProducer(_ShmRingBase):
         self._prod_ctxs[ring_idx].cached_write = write_pos
         return True
 
-    cpdef bint insert_packed(self, list[bytes] items):
-        """Insert items packed into one message on a single sub-ring."""
-        cdef:
-            u64 ring_idx = self._ring_idx
-            Py_ssize_t i, n = len(items)
-            bytes it
-            u64 total = 0
-            u64 L64
-            u64 capacity = self._per_ring_capacity
-            u64 mask = self._per_ring_mask
-            u64 write_pos
-            u64 dropped = 0
-            u64 now_ns
-            Py_ssize_t L
-            ShmSubRingHeader* sub_hdr = self._sub_hdrs[ring_idx]
-            unsigned char* sub_data = self._sub_datas[ring_idx]
-            u64 read_pos
-            u64 free_bytes
-            u64 dropped_pos
-            u64 msg_len
-
-        if n == 0:
-            return True
-        if capacity <= 8:
-            return False
-        for i in range(n):
-            it = items[i]
-            L64 = <u64>len(it)
-            if L64 > 0xFFFFFFFF:
-                return False
-            if total > (<u64>-1) - <u64>4 - L64:
-                return False
-            total += <u64>4 + L64
-        if total <= 0:
-            return True
-        if total > capacity - 8:
-            return False
-
-        write_pos = self._prod_ctxs[ring_idx].cached_write
-        with nogil:
-            read_pos = atomic_load_acquire(&sub_hdr.read_pos)
-        self._prod_ctxs[ring_idx].cached_read = read_pos
-        free_bytes = capacity - (write_pos - read_pos)
-        if free_bytes < 8 + total:
-            dropped_pos = read_pos
-            while True:
-                msg_len = read_u64_le(sub_data, dropped_pos & mask, mask)
-                if msg_len > capacity or (8 + msg_len) > capacity:
-                    return False
-                dropped_pos += 8 + msg_len
-                dropped += 1
-                free_bytes = capacity - (write_pos - dropped_pos)
-                if free_bytes >= 8 + total:
-                    with nogil:
-                        atomic_store_release(&sub_hdr.read_pos, dropped_pos)
-                        if dropped:
-                            atomic_sub(&sub_hdr.msg_count, dropped)
-                    self._prod_ctxs[ring_idx].cached_read = dropped_pos
-                    break
-
-        write_pos = self._prod_ctxs[ring_idx].cached_write
-        write_u64_le(sub_data, write_pos & mask, mask, total)
-        write_pos += 8
-        for i in range(n):
-            it = items[i]
-            L = len(it)
-            sub_data[(write_pos + 0) & mask] = <unsigned char>(L & 0xFF)
-            sub_data[(write_pos + 1) & mask] = <unsigned char>((L >> 8) & 0xFF)
-            sub_data[(write_pos + 2) & mask] = <unsigned char>((L >> 16) & 0xFF)
-            sub_data[(write_pos + 3) & mask] = <unsigned char>((L >> 24) & 0xFF)
-            write_pos += 4
-            copy_into_ring(sub_data, write_pos, mask, <const unsigned char*>it, <size_t>L, capacity)
-            write_pos += <u64>L
-        with nogil:
-            now_ns = <u64>c_time_monotonic_ns()
-            atomic_store_release(&sub_hdr.write_pos, write_pos)
-            atomic_add(&sub_hdr.msg_count, 1)
-            atomic_store_release(&sub_hdr.latest_insert_time_ns, now_ns)
-        self._prod_ctxs[ring_idx].cached_write = write_pos
-        return True
-
     def __len__(self) -> int:
         cdef u64 count = 0
         cdef u64 i
@@ -541,6 +460,24 @@ cdef class ShmMpscProducer(_ShmRingBase):
     @property
     def num_rings(self) -> int:
         return <Py_ssize_t>self._num_rings
+
+    cpdef bint is_empty(self):
+        """Check if the buffer is empty."""
+        return len(self) == 0
+
+    cpdef bint is_full(self):
+        """Check if the buffer is full (no space for even a 0-byte message in any sub-ring)."""
+        cdef u64 read_pos
+        cdef u64 i
+        cdef u64 free_bytes
+        for i in range(self._num_rings):
+            with nogil:
+                read_pos = atomic_load_acquire(&self._sub_hdrs[i].read_pos)
+            self._prod_ctxs[i].cached_read = read_pos
+            free_bytes = self._per_ring_capacity - (self._prod_ctxs[i].cached_write - read_pos)
+            if free_bytes >= 8:
+                return False
+        return True
 
 
 cdef class ShmMpscConsumer(_ShmRingBase):
@@ -940,28 +877,6 @@ cdef class ShmMpscConsumer(_ShmRingBase):
                 break
         return total_copied
 
-    cpdef list consume_packed(self):
-        """Consume and unpack a packed message."""
-        cdef bytes buf = self.consume()
-        cdef memoryview mv = memoryview(buf)
-        cdef Py_ssize_t n = mv.shape[0]
-        cdef Py_ssize_t off = 0
-        cdef list items = []
-        cdef u64 L
-        while off + 4 <= n:
-            L = (
-                (<u64>mv[off])
-                | (<u64>mv[off + 1] << 8)
-                | (<u64>mv[off + 2] << 16)
-                | (<u64>mv[off + 3] << 24)
-            )
-            off += 4
-            if off + L > n:
-                raise ValueError("Corrupted packed message")
-            items.append(bytes(mv[off : off + L]))
-            off += L
-        return items
-
     def __len__(self) -> int:
         cdef u64 count = 0
         cdef u64 i
@@ -997,3 +912,85 @@ cdef class ShmMpscConsumer(_ShmRingBase):
     @property
     def num_rings(self) -> int:
         return <Py_ssize_t>self._num_rings
+
+    def consume_iterable(self):
+        """Iterate over items, blocking until each is available."""
+        while True:
+            yield self.consume()
+
+    async def aconsume(self):
+        """Async consume a single item."""
+        import asyncio
+        return self.consume()
+
+    async def aconsume_iterable(self):
+        """Async iterator over consumed items."""
+        while True:
+            yield await self.aconsume()
+
+    cpdef list unwrapped(self):
+        """Return a list of all logical contents without consuming."""
+        cdef list res = []
+        cdef u64 msg_len = 0
+        cdef u64 pos = 0
+        cdef u64 next_pos = 0
+        cdef u64 w = 0
+        cdef u64 r = 0
+        cdef u64 mask = self._per_ring_mask
+        cdef u64 cap = self._per_ring_capacity
+        cdef bytes out
+        cdef u64 ring_idx
+        cdef u64 i
+
+        for i in range(self._num_rings):
+            ring_idx = (self._next_ring + i) % self._num_rings
+            with nogil:
+                w = atomic_load_acquire(&self._sub_hdrs[ring_idx].write_pos)
+                r = atomic_load_acquire(&self._sub_hdrs[ring_idx].read_pos)
+
+            pos = r
+            while pos < w:
+                msg_len = read_u64_le(self._sub_datas[ring_idx], pos & mask, mask)
+                if msg_len > cap or 8 + msg_len > cap:
+                    break
+                next_pos = pos + 8 + msg_len
+                if next_pos > w:
+                    break
+                out = bytes(<Py_ssize_t>msg_len)
+                copy_from_ring(<unsigned char*>out, self._sub_datas[ring_idx], pos + 8, mask, <size_t>msg_len, cap)
+                res.append(out)
+                pos = next_pos
+        return res
+
+    cpdef bint contains(self, bytes item):
+        """Check if item is present in the buffer."""
+        cdef bytes b
+        for b in self.unwrapped():
+            if b == item:
+                return True
+        return False
+
+    def __contains__(self, bytes item):
+        """Delegate to contains()."""
+        return self.contains(item)
+
+    cpdef bint is_empty(self):
+        """Check if the buffer is empty."""
+        return len(self) == 0
+
+    cpdef bint is_full(self):
+        """Check if the buffer is full (no space for even a 0-byte message in any sub-ring)."""
+        cdef u64 read_pos
+        cdef u64 write_pos
+        cdef u64 i
+        for i in range(self._num_rings):
+            with nogil:
+                read_pos = atomic_load_acquire(&self._sub_hdrs[i].read_pos)
+                write_pos = atomic_load_acquire(&self._sub_hdrs[i].write_pos)
+            if (self._per_ring_capacity - (write_pos - read_pos)) >= 8:
+                return False
+        return True
+
+    cpdef void clear(self):
+        """Drain all available items from the buffer."""
+        self.consume_all()

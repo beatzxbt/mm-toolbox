@@ -73,23 +73,6 @@ class TestGenericRingBufferBasics:
         expected = ["z", "w", "v", "u"]
         assert list(rb.unwrapped()) == expected
 
-    def test_overwrite_operations(self):
-        """Test overwrite_latest functionality."""
-        rb = GenericRingBuffer(3)
-        rb.insert_batch([1, 2, 3])
-
-        # Test overwrite without incrementing count
-        rb.overwrite_latest(99, increment_count=False)
-        assert len(rb) == 3  # Count unchanged
-        assert list(rb.unwrapped()) == [1, 2, 99]
-
-        # Test overwrite with incrementing count
-        rb.overwrite_latest(100, increment_count=True)
-        # The capacity is 4 (rounded from 3), so we can have 4 elements
-        unwrapped = rb.unwrapped()
-        assert len(unwrapped) == 4
-        assert unwrapped == [1, 2, 99, 100]
-
     def test_consume_operations(self):
         """Test consume and consume_all operations."""
         rb = GenericRingBuffer(4)
@@ -105,27 +88,6 @@ class TestGenericRingBufferBasics:
         all_consumed = rb.consume_all()
         assert all_consumed == ["b", "c"]
         assert rb.is_empty()
-
-    def test_indexing_operations(self):
-        """Test array-like indexing."""
-        rb = GenericRingBuffer(5)
-        data = ["x", "y", "z", "w"]
-        rb.insert_batch(data)
-
-        # Test positive indexing
-        assert rb[0] == "x"
-        assert rb[1] == "y"
-        assert rb[3] == "w"
-
-        # Test negative indexing
-        assert rb[-1] == "w"
-        assert rb[-2] == "z"
-
-        # Test out of bounds
-        with pytest.raises(IndexError):
-            _ = rb[10]
-        with pytest.raises(IndexError):
-            _ = rb[-10]
 
     def test_contains_operations(self):
         """Test membership testing."""
@@ -165,9 +127,6 @@ class TestGenericRingBufferEdgeCases:
         # These should raise errors on empty buffer
         with pytest.raises((IndexError, ValueError)):
             rb.consume()
-
-        with pytest.raises(IndexError):
-            _ = rb[0]
 
         # peekleft and peekright may return None or raise errors on empty buffer
         try:
@@ -414,20 +373,47 @@ class TestGenericRingBufferPerformance:
         # Test that async methods raise errors (tested elsewhere)
         assert rb_no_async is not None
 
-    def test_memory_efficiency_with_overwrites(self):
-        """Test memory efficiency with many overwrites."""
-        rb = GenericRingBuffer(100)
+    def test_insert_returns_bool(self):
+        """Test that insert returns True."""
+        rb = GenericRingBuffer(4)
+        assert rb.insert(1) is True
+        assert rb.insert_batch([2, 3]) is True
+        assert len(rb) == 3
 
-        # Fill with data
-        initial_data = [f"item_{i}" for i in range(50)]
-        rb.insert_batch(initial_data)
-        assert len(rb) == 50
 
-        # Perform many overwrites
-        for i in range(10):
-            rb.overwrite_latest(f"overwrite_{i}", increment_count=False)
+class TestGenericRingBufferTimestamps:
+    """Test timestamp tracking on monolithic ringbuffers."""
 
-        # Should still have same count with last overwrite
-        assert len(rb) == 50
-        unwrapped = rb.unwrapped()
-        assert unwrapped[-1] == "overwrite_9"
+    def test_latest_insert_time_ns_initial(self):
+        rb = GenericRingBuffer(4)
+        assert rb.latest_insert_time_ns == 0
+
+    def test_latest_insert_time_ns_updated_on_insert(self):
+        rb = GenericRingBuffer(4)
+        rb.insert("a")
+        t1 = rb.latest_insert_time_ns
+        assert t1 > 0
+        import time
+
+        time.sleep(0.001)
+        rb.insert("b")
+        t2 = rb.latest_insert_time_ns
+        assert t2 > t1
+
+    def test_latest_insert_time_ns_updated_on_insert_batch(self):
+        rb = GenericRingBuffer(4)
+        rb.insert_batch(["a", "b"])
+        assert rb.latest_insert_time_ns > 0
+
+    def test_latest_consume_time_ns_initial(self):
+        rb = GenericRingBuffer(4)
+        assert rb.latest_consume_time_ns == 0
+
+    def test_latest_consume_time_ns_updated_on_consume(self):
+        rb = GenericRingBuffer(4)
+        rb.insert_batch(["a", "b"])
+        t1 = rb.latest_insert_time_ns
+        rb.consume()
+        t2 = rb.latest_consume_time_ns
+        assert t2 > 0
+        assert t2 >= t1

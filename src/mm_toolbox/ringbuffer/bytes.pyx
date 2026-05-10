@@ -7,6 +7,8 @@ from typing import Iterator, AsyncIterator
 
 from libc.stdint cimport uint64_t as u64
 
+from mm_toolbox.time.time cimport time_monotonic_ns
+
 cdef class BytesRingBuffer:
     """A fixed-size ring buffer for bytes objects."""
 
@@ -18,14 +20,12 @@ cdef class BytesRingBuffer:
         self._tail = 0
         self._head = 0
         self._size = 0
+        self._latest_insert_time_ns = 0
+        self._latest_consume_time_ns = 0
         self._buffer: list = [b""] * self._max_capacity
         self._buffer_not_empty_event = asyncio.Event()
         self._disable_async = disable_async
         self._only_insert_unique = only_insert_unique
-
-    cpdef list raw(self, bint copy=True):
-        """Return a copy of the internal buffer array."""
-        return self._buffer.copy() if copy else self._buffer
 
     cpdef list unwrapped(self):
         """Return a list of the buffer's contents in logical (oldest to newest) order."""
@@ -42,18 +42,10 @@ cdef class BytesRingBuffer:
             return buf[tail:tail + size]
         return buf[tail:] + buf[:(tail + size) & mask]
 
-    cpdef void overwrite_latest(self, bytes item, bint increment_count=False):
-        """Overwrite the latest element in the buffer. Optionally increment count."""
-        cdef u64 idx = (self._head - 1) & self._mask
-        if increment_count:
-            self.insert(item)
-        else:
-            self._buffer[idx] = item
-
-    cpdef void insert(self, bytes item):
+    cpdef bint insert(self, bytes item):
         """Add a new element to the end of the buffer."""
         if self._only_insert_unique and self.contains(item):
-            return
+            return True
 
         cdef:
             u64     head = self._head
@@ -71,8 +63,65 @@ cdef class BytesRingBuffer:
         self._tail = tail
         if not self._disable_async and self._size == 1:
             self._buffer_not_empty_event.set()
+        self._latest_insert_time_ns = <u64>time_monotonic_ns()
+        return True
 
-    cpdef void insert_batch(self, list[bytes] items):
+    cpdef bint insert_char(self, const char* data, Py_ssize_t n):
+        """Add a new element directly from char* to avoid byte conversion overhead."""
+        cdef bytes item = data[:n]
+        return self.insert(item)
+
+    cpdef int consume_into(self, bytearray dst):
+        """Consume one item and copy it into the provided bytearray."""
+        self.__enforce_ringbuffer_not_empty()
+        cdef:
+            u64 tail = self._tail
+            bytes item = self._buffer[tail]
+            Py_ssize_t item_len = len(item)
+            Py_ssize_t dst_len = len(dst)
+        if dst_len < item_len:
+            raise ValueError(f"Destination buffer too small: {dst_len} < {item_len}")
+        memcpy(<char*>dst, <const char*>item, item_len)
+        self._tail = (tail + 1) & self._mask
+        self._size -= 1
+        if not self._disable_async and self.is_empty():
+            self._buffer_not_empty_event.clear()
+        self._latest_consume_time_ns = <u64>time_monotonic_ns()
+        return item_len
+
+    cpdef int consume_all_into(self, list buffers):
+        """Consume all available items and copy them into the provided bytearrays.
+
+        Returns the number of messages copied.
+        """
+        cdef:
+            u64 n = min(<u64>len(buffers), self._size)
+            u64 i
+            u64 tail = self._tail
+            u64 mask = self._mask
+            bytes item
+            bytearray dst
+            Py_ssize_t item_len
+            Py_ssize_t dst_len
+        if n == 0:
+            return 0
+        for i in range(n):
+            item = self._buffer[tail]
+            dst = buffers[i]
+            item_len = len(item)
+            dst_len = len(dst)
+            if dst_len < item_len:
+                raise ValueError(f"Destination buffer too small at index {i}: {dst_len} < {item_len}")
+            memcpy(<char*>dst, <const char*>item, item_len)
+            tail = (tail + 1) & mask
+        self._tail = tail
+        self._size -= n
+        if not self._disable_async and self.is_empty():
+            self._buffer_not_empty_event.clear()
+        self._latest_consume_time_ns = <u64>time_monotonic_ns()
+        return n
+
+    cpdef bint insert_batch(self, list[bytes] items):
         """Add a batch of elements to the end of the buffer."""
         cdef:
             bytes item
@@ -87,7 +136,7 @@ cdef class BytesRingBuffer:
             bint unique = self._only_insert_unique
 
         if n == 0:
-            return
+            return True
 
         if not unique:
             if n >= max_capacity:
@@ -125,6 +174,8 @@ cdef class BytesRingBuffer:
 
         if not self._disable_async and old_size == 0 and self._size > 0:
             self._buffer_not_empty_event.set()
+        self._latest_insert_time_ns = <u64>time_monotonic_ns()
+        return True
 
     cpdef bint contains(self, bytes item):
         """Checks if the item exists in the buffer, searching from newest to oldest."""
@@ -154,6 +205,7 @@ cdef class BytesRingBuffer:
         self._size -= 1
         if not self._disable_async and self.is_empty():
             self._buffer_not_empty_event.clear()
+        self._latest_consume_time_ns = <u64>time_monotonic_ns()
         return item
 
     cpdef list consume_all(self):
@@ -219,21 +271,15 @@ cdef class BytesRingBuffer:
         """Get the number of elements currently in the buffer."""
         return self._size
 
-    def __getitem__(self, int idx):
-        """Get the element at the given index."""
-        cdef:
-            u64     size = self._size
-            u64     tail = self._tail
-            u64     mask = self._mask
-            list    buffer = self._buffer
+    @property
+    def latest_insert_time_ns(self):
+        """Return the timestamp (ns) of the latest successful insert."""
+        return self._latest_insert_time_ns
 
-        if idx < 0:
-            idx += size
-        if idx < 0 or <u64>idx >= size: 
-            raise IndexError(f"Index out of range; expected within ({-size} <> {size}) but got {idx}")
-
-        cdef u64 fixed_idx = (tail + <u64>idx) & mask
-        return buffer[fixed_idx]
+    @property
+    def latest_consume_time_ns(self):
+        """Return the timestamp (ns) of the latest successful consume."""
+        return self._latest_consume_time_ns
 
     cdef inline bint __enforce_ringbuffer_not_empty(self):
         if self.is_empty():
@@ -275,6 +321,8 @@ cdef class BytesRingBufferFast:
         self._tail = 0
         self._head = 0
         self._size = 0
+        self._latest_insert_time_ns = 0
+        self._latest_consume_time_ns = 0
         
         cdef u64 total_bytes = self._max_capacity * self._slot_size
         self._buffer = <char*>PyMem_Malloc(total_bytes)
@@ -320,14 +368,6 @@ cdef class BytesRingBufferFast:
         n |= n >> 32
         return n + 1
 
-    cpdef list raw(self, bint copy=True):
-        """Return a copy of the internal buffer array."""
-        cdef list result = []
-        cdef u64 i
-        for i in range(self._max_capacity):
-            result.append(self._make_bytes(i))
-        return result
-
     cpdef list unwrapped(self):
         """Return a list of the buffer's contents in logical (oldest to newest) order."""
         cdef:
@@ -344,29 +384,10 @@ cdef class BytesRingBufferFast:
             result.append(self._make_bytes(idx))
         return result
 
-    cpdef void overwrite_latest(self, bytes item, bint increment_count=False):
-        """Overwrite the latest element in the buffer. Optionally increment count."""
-        if increment_count:
-            self.insert(item)
-            return
-
-        cdef:
-            u64 idx = (self._head - 1) & self._mask
-            char* dest = self._get_slot_ptr(idx)
-            Py_ssize_t item_len = len(item)
-            Py_ssize_t copy_len
-
-        if item_len > self._slot_size:
-            raise ValueError(f"Item length {item_len} exceeds slot size {self._slot_size}")
-        copy_len = item_len
-        
-        memcpy(dest, <const char*>item, copy_len)
-        self._lengths[idx] = copy_len
-
-    cpdef void insert(self, bytes item):
+    cpdef bint insert(self, bytes item):
         """Add a new element to the end of the buffer."""
         if self._only_insert_unique and self.contains(item):
-            return
+            return True
 
         cdef:
             u64     head = self._head
@@ -394,8 +415,10 @@ cdef class BytesRingBufferFast:
         
         if not self._disable_async and self._size == 1:
             self._buffer_not_empty_event.set()
+        self._latest_insert_time_ns = <u64>time_monotonic_ns()
+        return True
 
-    cpdef void insert_char(self, const char* item, Py_ssize_t item_len):
+    cpdef bint insert_char(self, const char* item, Py_ssize_t item_len):
         """Add a new element directly from char* to avoid byte conversion overhead."""
         cdef:
             u64     head = self._head
@@ -422,8 +445,61 @@ cdef class BytesRingBufferFast:
         
         if not self._disable_async and self._size == 1:
             self._buffer_not_empty_event.set()
+        self._latest_insert_time_ns = <u64>time_monotonic_ns()
+        return True
 
-    cpdef void insert_batch(self, list[bytes] items):
+    cpdef int consume_into(self, bytearray dst):
+        """Consume one item and copy it into the provided bytearray."""
+        if self._size == 0:
+            raise IndexError("Cannot pop from an empty RingBuffer;")
+        cdef:
+            u64 tail = self._tail
+            char* src = self._get_slot_ptr(tail)
+            u64 item_len = self._lengths[tail]
+            Py_ssize_t dst_len = len(dst)
+        if dst_len < <Py_ssize_t>item_len:
+            raise ValueError(f"Destination buffer too small: {dst_len} < {item_len}")
+        memcpy(<char*>dst, src, item_len)
+        self._tail = (tail + 1) & self._mask
+        self._size -= 1
+        if not self._disable_async and self._size == 0:
+            self._buffer_not_empty_event.clear()
+        self._latest_consume_time_ns = <u64>time_monotonic_ns()
+        return <int>item_len
+
+    cpdef int consume_all_into(self, list buffers):
+        """Consume all available items and copy them into the provided bytearrays.
+
+        Returns the number of messages copied.
+        """
+        cdef:
+            u64 n = min(<u64>len(buffers), self._size)
+            u64 i
+            u64 tail = self._tail
+            u64 mask = self._mask
+            char* src
+            bytearray dst
+            u64 item_len
+            Py_ssize_t dst_len
+        if n == 0:
+            return 0
+        for i in range(n):
+            src = self._get_slot_ptr(tail)
+            item_len = self._lengths[tail]
+            dst = buffers[i]
+            dst_len = len(dst)
+            if dst_len < <Py_ssize_t>item_len:
+                raise ValueError(f"Destination buffer too small at index {i}: {dst_len} < {item_len}")
+            memcpy(<char*>dst, src, item_len)
+            tail = (tail + 1) & mask
+        self._tail = tail
+        self._size -= n
+        if not self._disable_async and self._size == 0:
+            self._buffer_not_empty_event.clear()
+        self._latest_consume_time_ns = <u64>time_monotonic_ns()
+        return <int>n
+
+    cpdef bint insert_batch(self, list[bytes] items):
         """Add a batch of elements to the end of the buffer."""
         cdef:
             bytes item
@@ -439,7 +515,7 @@ cdef class BytesRingBufferFast:
             bint unique = self._only_insert_unique
 
         if n == 0:
-            return
+            return True
 
         if not unique:
             if n >= max_capacity:
@@ -490,6 +566,8 @@ cdef class BytesRingBufferFast:
 
         if not self._disable_async and old_size == 0 and self._size > 0:
             self._buffer_not_empty_event.set()
+        self._latest_insert_time_ns = <u64>time_monotonic_ns()
+        return True
 
     cpdef bint contains(self, bytes item):
         """Checks if the item exists in the buffer, searching from newest to oldest."""
@@ -523,6 +601,7 @@ cdef class BytesRingBufferFast:
         self._size -= 1
         if not self._disable_async and self._size == 0:
             self._buffer_not_empty_event.clear()
+        self._latest_consume_time_ns = <u64>time_monotonic_ns()
         return item
 
     cpdef list consume_all(self):
@@ -593,17 +672,12 @@ cdef class BytesRingBufferFast:
         """Get the number of elements currently in the buffer."""
         return self._size
 
-    def __getitem__(self, int idx):
-        """Get the element at the given index."""
-        cdef:
-            u64     size = self._size
-            u64     tail = self._tail
-            u64     mask = self._mask
+    @property
+    def latest_insert_time_ns(self):
+        """Return the timestamp (ns) of the latest successful insert."""
+        return self._latest_insert_time_ns
 
-        if idx < 0:
-            idx += size
-        if idx < 0 or <u64>idx >= size: 
-            raise IndexError(f"Index out of range; expected within ({-size} <> {size}) but got {idx}")
-
-        cdef u64 fixed_idx = (tail + <u64>idx) & mask
-        return self._make_bytes(fixed_idx)
+    @property
+    def latest_consume_time_ns(self):
+        """Return the timestamp (ns) of the latest successful consume."""
+        return self._latest_consume_time_ns
