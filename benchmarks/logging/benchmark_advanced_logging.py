@@ -346,9 +346,10 @@ class AdvancedLoggingBenchmark(BenchmarkRunner[AdvancedLoggingBenchmarkConfig]):
         processes: list[multiprocessing.Process] = []
 
         handler = CountingLogHandler()
+        shm_path = str(_to_socket_path(ipc_path))
         master = MasterLogger(
             config=LoggerConfig(
-                path=ipc_path,
+                path=shm_path,
                 do_stdout=False,
                 flush_interval_s=self.config.flush_interval_s,
                 emit_internal=False,
@@ -366,7 +367,7 @@ class AdvancedLoggingBenchmark(BenchmarkRunner[AdvancedLoggingBenchmarkConfig]):
                 proc = multiprocessing.Process(
                     target=_worker_emit_burst,
                     args=(
-                        ipc_path,
+                        shm_path,
                         f"W{worker_idx}",
                         message_size,
                         self.config.duration_sec,

@@ -24,6 +24,7 @@ try:
         BenchmarkCLI,
         BenchmarkReporter,
         BenchmarkRunner,
+        BenchmarkStatistics,
         ComparativeReporter,
     )
 except ModuleNotFoundError:
@@ -33,6 +34,7 @@ except ModuleNotFoundError:
         BenchmarkCLI,
         BenchmarkReporter,
         BenchmarkRunner,
+        BenchmarkStatistics,
         ComparativeReporter,
     )
 

@@ -17,15 +17,14 @@ from dataclasses import dataclass
 import websockets
 
 from mm_toolbox.websocket.connection import ConnectionState, WsConnectionConfig
+from mm_toolbox.websocket.pool import WsPool, WsPoolConfig
+from mm_toolbox.websocket.single import WsSingle
 
 
 def _noop_handler(msg: bytes) -> None:
     """No-op message handler for benchmarks."""
     pass
 
-
-from mm_toolbox.websocket.pool import WsPool, WsPoolConfig
-from mm_toolbox.websocket.single import WsSingle
 
 try:
     from benchmarks.core import BenchmarkCLI

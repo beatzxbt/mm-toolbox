@@ -104,6 +104,8 @@ def latency_benchmark_insert(
     for _ in range(min(1000, num_iterations // 10)):
         producer.insert(payload)
 
+    producer.close()
+
     producer = ShmMpscProducer(
         path, capacity_bytes, num_rings=num_rings, create=True, unlink_on_close=True
     )
@@ -129,7 +131,7 @@ def latency_benchmark_consume(
     """
     num_rings = 1
     producer = ShmMpscProducer(
-        path, capacity_bytes, num_rings=num_rings, create=True, unlink_on_close=True
+        path, capacity_bytes, num_rings=num_rings, create=True, unlink_on_close=False
     )
     payload = b"x" * payload_size
 
@@ -144,6 +146,8 @@ def latency_benchmark_consume(
         consumer.consume()
         latencies[i] = time.perf_counter_ns() - start
 
+    consumer.close()
+    producer.close()
     return latencies
 
 
