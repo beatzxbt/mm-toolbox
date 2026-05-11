@@ -6,6 +6,9 @@ import asyncio
 from typing import Iterator, AsyncIterator
 
 from libc.stdint cimport uint64_t as u64
+from libc.string cimport memcpy, memcmp
+from cpython.bytes cimport PyBytes_FromStringAndSize
+from cpython.mem cimport PyMem_Malloc, PyMem_Free
 
 from mm_toolbox.time.time cimport time_monotonic_ns
 
@@ -99,7 +102,7 @@ cdef class BytesRingBuffer:
         self._latest_insert_time_ns = <u64>time_monotonic_ns()
         return True
 
-    cdef bint insert_char(self, const char* data, Py_ssize_t n):
+    cpdef bint insert_char(self, const char* data, Py_ssize_t n):
         """Add a new element directly from char* to avoid byte conversion overhead.
 
         Args:
@@ -422,14 +425,6 @@ cdef class BytesRingBuffer:
 
 # BytesRingBufferFast - High-performance version with pre-allocated memory slots
 
-import asyncio
-from typing import Iterator, AsyncIterator
-
-from libc.stdint cimport uint64_t as u64
-from libc.string cimport memcpy, memcmp
-from cpython.bytes cimport PyBytes_FromStringAndSize
-from cpython.mem cimport PyMem_Malloc, PyMem_Free
-
 cdef class BytesRingBufferFast:
     """A high-performance fixed-size ring buffer using pre-allocated memory slots.
 
@@ -565,7 +560,7 @@ cdef class BytesRingBufferFast:
         self._latest_insert_time_ns = <u64>time_monotonic_ns()
         return True
 
-    cdef bint insert_char(self, const char* item, Py_ssize_t item_len):
+    cpdef bint insert_char(self, const char* item, Py_ssize_t item_len):
         """Add a new element directly from char* to avoid byte conversion overhead."""
         cdef:
             u64     head = self._head
