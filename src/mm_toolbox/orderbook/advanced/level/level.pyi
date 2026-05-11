@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, Self
+from typing import Any, List, Optional
 
 import numpy as np
 import numpy.typing as npt
@@ -88,7 +88,7 @@ class PyOrderbookLevel:
         lot_size: float,
         norders: int = 1,
         verify_values: bool = True,
-    ) -> Self:
+    ) -> PyOrderbookLevel:
         """Create a new PyOrderbookLevel instance with pre-computed ticks and lots.
 
         Args:
@@ -130,7 +130,7 @@ class PyOrderbookLevels:
         sizes: List[float],
         norders: Optional[List[int]] = None,
         verify_values: bool = True,
-    ) -> Self:
+    ) -> PyOrderbookLevels:
         """Create a new PyOrderbookLevels instance from lists.
 
         Args:
@@ -156,7 +156,7 @@ class PyOrderbookLevels:
         tick_size: float,
         lot_size: float,
         verify_values: bool = True,
-    ) -> Self:
+    ) -> PyOrderbookLevels:
         """Create a new PyOrderbookLevels instance from lists with pre-computed ticks and lots.
 
         Args:
@@ -182,7 +182,7 @@ class PyOrderbookLevels:
         sizes: npt.NDArray[np.float64],
         norders: Optional[npt.NDArray[np.uint64]] = None,
         verify_values: bool = True,
-    ) -> Self:
+    ) -> PyOrderbookLevels:
         """Create a new PyOrderbookLevels instance from numpy arrays.
 
         Args:
@@ -208,7 +208,7 @@ class PyOrderbookLevels:
         tick_size: float,
         lot_size: float,
         verify_values: bool = True,
-    ) -> Self:
+    ) -> PyOrderbookLevels:
         """Create a new PyOrderbookLevels instance from numpy arrays with pre-computed ticks and lots.
 
         Args:

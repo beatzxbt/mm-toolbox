@@ -41,7 +41,8 @@ class TelegramLogHandler(BaseLogHandler):
         await self._limiter.acquire(1)
         payload = dict(self.partial_payload)
         payload["text"] = text
-        resp = await self._http_session.post(  # type: ignore[union-attr]
+        assert self._http_session is not None
+        resp = await self._http_session.post(
             self.url,
             headers=self.headers,
             data=self.encode_json(payload),
