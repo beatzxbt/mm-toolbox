@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - Fix P0 core bugs: BBO worse-price handling, delta bid loop, u64 overflow.
 - Fix heap buffer overflow in `consume_deltas`.
 - Fix `PyOrderbookLevel.from_struct()` missing `__cinit__` arguments.
+- Guard double-to-uint64 conversions against non-finite and negative values.
 - Reorganize tests into 3-tier architecture and fix weak/zero assertions.
 
 ### Candles
@@ -31,11 +32,17 @@ All notable changes to this project will be documented in this file.
 - Remove packed operations from SHM ringbuffers.
 - Unify monolithic and split ringbuffer APIs.
 - Remove `overwrite_latest`; add `insert_char`/`consume_into` to bytes ringbuffers.
+- Add allocation overflow checks in `BytesRingBufferFast` constructor.
+- Validate message lengths in consumer path to prevent out-of-bounds access.
+- Harden shared-memory file creation with `O_EXCL`, `O_NOFOLLOW`, and `fstat` validation.
+- Remove `insert_char` from public Python API to prevent out-of-bounds reads.
 
 ### Logging
 - Finalize advanced logging system.
 - Redesign standard logger as single-threaded sync logger.
 - Fix `.shm/` artifact buildup in tests by using `tmp_path` for IPC fixtures.
+- Create fresh HTTP sessions per push and randomize default SHM path.
+- Prevent u32 overflow in binary protocol buffer capacity calculations.
 
 ### Websocket
 - Remove `WsConnectionState`; add direct accessors and tests.
@@ -43,6 +50,7 @@ All notable changes to this project will be documented in this file.
 - Remove redundant state checks from public send methods.
 - Remove thread-safety dispatch; assume single-threaded callers.
 - Increase default ping interval to 1s; use fast EMA for latency tracking.
+- Replace `get_type_hints` with safe annotation inspection to prevent code execution.
 - Add local server benchmarks for `WsSingle` and `WsPool`.
 - Remove live Binance benchmark in favor of local server benchmarks.
 - Simplify benchmark CLI to symbols and stream-kinds only.
@@ -63,6 +71,7 @@ All notable changes to this project will be documented in this file.
 - Add candle types, moving averages, and MPSC pipeline demos.
 - Restore `binance_stream.py` with SPSC SHM ringbuffer.
 - Fix `binance_stream.py` SPSC startup race condition.
+- Repair `binance_stream.py` with multiple critical fixes.
 
 ### Build / CI
 - Build macOS arm64-only wheels; ignore local wheel artifacts.
