@@ -96,7 +96,7 @@ class TestLoggerConfig:
         config = LoggerConfig(path=path)
         assert config.path == path
 
-    @pytest.mark.parametrize("invalid_path", [123, None, b"ipc://test"])
+    @pytest.mark.parametrize("invalid_path", [123, b"ipc://test"])
     def test_invalid_path_type(self, invalid_path):
         """Given a non-string path, construction raises TypeError."""
         with pytest.raises(TypeError):

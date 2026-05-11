@@ -7,6 +7,7 @@ This ensures user-supplied limits are respected by the transport layer.
 
 from __future__ import annotations
 
+import pytest
 
 from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
 from mm_toolbox.websocket.connection import WsConnection, WsConnectionConfig
@@ -15,6 +16,7 @@ from mm_toolbox.websocket.connection import WsConnection, WsConnectionConfig
 class TestWsConnectionConfigForwarding:
     """Layer-1 tests for config field forwarding from WsConnection to ws_connect."""
 
+    @pytest.mark.asyncio
     async def test_new_forwards_max_frame_size(self, monkeypatch) -> None:
         """Given a custom max_frame_size in config, When WsConnection.new is called, Then that value is passed to ws_connect."""
         captured: dict[str, object] = {}

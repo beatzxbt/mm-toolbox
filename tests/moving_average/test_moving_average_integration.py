@@ -67,14 +67,9 @@ def _reference_wma(values: np.ndarray, window: int) -> np.ndarray:
     return result
 
 
-def _make_instance(ma_cls: Any, window: int, fast: bool = False) -> Any:
+def _make_instance(ma_cls: Any, window: int, is_fast: bool = False) -> Any:
     """Instantiate an MA with the minimal required kwargs."""
-    kwargs = {"window": window}
-    # SMA and WMA use 'fast', EMA and TEMA use 'is_fast'
-    if ma_cls in (SimpleMovingAverage, WeightedMovingAverage):
-        kwargs["fast"] = fast
-    else:
-        kwargs["is_fast"] = fast
+    kwargs = {"window": window, "is_fast": is_fast}
     if ma_cls is TimeExponentialMovingAverage:
         kwargs["half_life_s"] = 1.0
     return ma_cls(**kwargs)
@@ -167,7 +162,7 @@ class TestFastMode:
     @pytest.mark.parametrize("ma_cls", MA_CLASSES, ids=MA_NAMES)
     def test_fast_mode_raises_on_get_values(self, ma_cls: Any):
         """``get_values()`` is forbidden in fast mode."""
-        ma = _make_instance(ma_cls, window=4, fast=True)
+        ma = _make_instance(ma_cls, window=4, is_fast=True)
         ma.initialize(np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64))
 
         with pytest.raises(ValueError, match="fast mode"):
@@ -176,7 +171,7 @@ class TestFastMode:
     @pytest.mark.parametrize("ma_cls", MA_CLASSES, ids=MA_NAMES)
     def test_fast_mode_raises_on_len(self, ma_cls: Any):
         """``len()`` is forbidden in fast mode."""
-        ma = _make_instance(ma_cls, window=4, fast=True)
+        ma = _make_instance(ma_cls, window=4, is_fast=True)
         ma.initialize(np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64))
 
         with pytest.raises(ValueError, match="fast mode"):
@@ -189,8 +184,8 @@ class TestFastMode:
         init_vals = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64)
         updates = [5.0, 6.0, 7.0, 8.0]
 
-        ma_fast = _make_instance(ma_cls, window=window, fast=True)
-        ma_norm = _make_instance(ma_cls, window=window, fast=False)
+        ma_fast = _make_instance(ma_cls, window=window, is_fast=True)
+        ma_norm = _make_instance(ma_cls, window=window, is_fast=False)
 
         ma_fast.initialize(init_vals.copy())
         ma_norm.initialize(init_vals.copy())
@@ -206,7 +201,7 @@ class TestFastMode:
     @pytest.mark.parametrize("ma_cls", MA_CLASSES, ids=MA_NAMES)
     def test_fast_mode_len_stays_zero(self, ma_cls: Any):
         """Fast mode must never accumulate history."""
-        ma = _make_instance(ma_cls, window=4, fast=True)
+        ma = _make_instance(ma_cls, window=4, is_fast=True)
         ma.initialize(np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64))
 
         for _ in range(10):

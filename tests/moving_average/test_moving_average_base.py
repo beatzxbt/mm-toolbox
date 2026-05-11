@@ -39,15 +39,15 @@ class TestMovingAverageFastMode:
     """Layer 1 — Fast mode behaviour where historical storage is skipped."""
 
     def test_fast_mode_get_values_raises(self):
-        """Given ``fast=True``, ``get_values()`` raises ``ValueError``."""
-        ma = SimpleMovingAverage(window=3, fast=True)
+        """Given ``is_fast=True``, ``get_values()`` raises ``ValueError``."""
+        ma = SimpleMovingAverage(window=3, is_fast=True)
         ma.initialize(np.array([1.0, 2.0, 3.0]))
         with pytest.raises(ValueError, match="fast mode"):
             ma.get_values()
 
     def test_fast_mode_len_raises(self):
-        """Given ``fast=True``, ``__len__`` raises ``ValueError``."""
-        ma = WeightedMovingAverage(window=3, fast=True)
+        """Given ``is_fast=True``, ``__len__`` raises ``ValueError``."""
+        ma = WeightedMovingAverage(window=3, is_fast=True)
         ma.initialize(np.array([1.0, 2.0, 3.0]))
         with pytest.raises(ValueError, match="fast mode"):
             len(ma)

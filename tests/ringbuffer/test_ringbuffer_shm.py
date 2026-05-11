@@ -248,12 +248,12 @@ class TestSharedBytesRingBuffer:
 
     # --- P0 Critical ---
 
-    def test_insert_char_roundtrip(self, shm_path: str) -> None:
-        """Given insert_char data, When consumed, Then roundtrips correctly."""
+    def test_insert_roundtrip(self, shm_path: str) -> None:
+        """Given insert data, When consumed, Then roundtrips correctly."""
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True)
         cons = ShmSpscConsumer(shm_path)
         try:
-            assert prod.insert_char(b"hello", 5)
+            assert prod.insert(b"hello")
             got = cons.consume()
             assert got == b"hello"
         finally:
