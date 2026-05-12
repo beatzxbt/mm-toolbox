@@ -6,31 +6,35 @@ on:
   pull_request:
     branches: [ main, develop, 'v[0-9]+.[0-9]+*' ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Test on Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.12", "3.13"]
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-    
+
     - name: Install uv
-      uses: astral-sh/setup-uv@v3
+      uses: astral-sh/setup-uv@v5
       with:
         version: "latest"
-    
+        enable-cache: true
+
+    - name: Install Python ${{ matrix.python-version }}
+      run: uv python install ${{ matrix.python-version }}
+
     - name: Install dependencies
       run: |
-        uv sync --all-groups --no-install-project
+        uv sync --all-groups --no-install-project --python ${{ matrix.python-version }}
 
     - name: Build Cython extensions
       run: |
@@ -39,16 +43,11 @@ jobs:
     - name: Run tests
       run: |
         make test-all
-    
+
     - name: Run code quality checks
       run: |
-        # Format check (but don't fix)
         uv run ruff format --check .
-
-        # Lint check (but don't fix)
         uv run ruff check .
-
-        # Type check
         make typecheck
 
   build-wheel:
@@ -59,68 +58,63 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.12"
-    
+
     - name: Install uv
-      uses: astral-sh/setup-uv@v3
+      uses: astral-sh/setup-uv@v5
       with:
         version: "latest"
-    
+        enable-cache: true
+
     - name: Install build dependencies
       run: |
         uv sync --group build --no-install-project
-    
+
     - name: Build wheel
       run: |
         make wheel
-    
+
     - name: Check distribution
       run: |
         make check-dist
-    
+
     - name: Upload wheel as artifact
       uses: actions/upload-artifact@v4
       with:
         name: wheel-python-3.12
         path: dist/*.whl
-    
+        retention-days: 7
+
     - name: Upload sdist as artifact
       uses: actions/upload-artifact@v4
       with:
         name: sdist
         path: dist/*.tar.gz
+        retention-days: 7
 
   build-multiplatform:
     name: Build wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     needs: test
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     env:
       CIBW_BUILD: "cp312-* cp313-*"
-      CIBW_SKIP: "*-win* *-manylinux_i686"
-      CIBW_ARCHS_LINUX: "x86_64 aarch64"
-      CIBW_ARCHS_MACOS: "arm64"
-    
+      CIBW_SKIP: "*-win*"
+      CIBW_ARCHS_LINUX: "x86_64 i686 aarch64 ppc64le s390x"
+      CIBW_ARCHS_MACOS: "x86_64 arm64 universal2"
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.12"
-    
+
     - name: Install uv
-      uses: astral-sh/setup-uv@v3
+      uses: astral-sh/setup-uv@v5
       with:
         version: "latest"
-    
+        enable-cache: true
+
     - name: Install cibuildwheel
       run: |
         uv tool install cibuildwheel
@@ -129,12 +123,17 @@ jobs:
       if: runner.os == 'Linux'
       uses: docker/setup-qemu-action@v3
 
+    - name: Print wheel targets
+      run: |
+        uv tool run cibuildwheel --print-build-identifiers
+
     - name: Build wheels
       run: |
         uv tool run cibuildwheel --output-dir wheelhouse
-    
+
     - name: Upload wheels as artifacts
       uses: actions/upload-artifact@v4
       with:
         name: wheels-${{ matrix.os }}
         path: ./wheelhouse/*.whl
+        retention-days: 7

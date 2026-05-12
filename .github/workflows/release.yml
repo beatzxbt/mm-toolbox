@@ -14,6 +14,10 @@ on:
         - testpypi
         - pypi
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-wheels:
     name: Build wheels on ${{ matrix.os }}
@@ -31,15 +35,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.12"
-
     - name: Install uv
-      uses: astral-sh/setup-uv@v3
+      uses: astral-sh/setup-uv@v5
       with:
         version: "latest"
+        enable-cache: true
 
     - name: Install cibuildwheel
       run: |
@@ -68,6 +68,7 @@ jobs:
       with:
         name: wheels-${{ matrix.os }}
         path: wheelhouse/*.whl
+        retention-days: 14
 
   build-sdist:
     name: Build sdist
@@ -77,15 +78,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.12"
-
     - name: Install uv
-      uses: astral-sh/setup-uv@v3
+      uses: astral-sh/setup-uv@v5
       with:
         version: "latest"
+        enable-cache: true
 
     - name: Install build dependencies
       run: |
@@ -104,6 +101,7 @@ jobs:
       with:
         name: sdist
         path: dist/*.tar.gz
+        retention-days: 14
 
   publish-testpypi:
     name: Publish to TestPyPI
