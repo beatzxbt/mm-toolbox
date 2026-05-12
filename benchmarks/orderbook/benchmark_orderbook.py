@@ -42,8 +42,14 @@ except ModuleNotFoundError:
 
 from mm_toolbox.orderbook.advanced import (
     AdvancedOrderbook,
-    OrderbookLevel,
     OrderbookSortedness,
+)
+
+
+# Known sortedness for the benchmark data (set based on the input dataset).
+DELTA_SORTEDNESS: OrderbookSortedness = OrderbookSortedness.ASCENDING
+SNAPSHOT_SORTEDNESS: OrderbookSortedness = (
+    OrderbookSortedness.BIDS_DESCENDING_ASKS_ASCENDING
 )
 
 
@@ -55,6 +61,7 @@ class AdvancedOrderbookBenchmarkConfig(BaseBenchmarkConfig):
     tick_size: float = 0.01
     lot_size: float = 0.001
     num_levels: int = 2048
+    use_sortedness_hint: bool = False
 
 
 @dataclass
@@ -277,6 +284,9 @@ class AdvancedOrderbookBenchmark(BenchmarkRunner[AdvancedOrderbookBenchmarkConfi
         super().__init__(config)
         self.decoder = msgspec.json.Decoder()
         self._messages_override: list[dict] | None = None
+        self._loaded_messages: list[dict] | None = None
+        self._delta_sortedness: OrderbookSortedness = OrderbookSortedness.UNKNOWN
+        self._snapshot_sortedness: OrderbookSortedness = OrderbookSortedness.UNKNOWN
 
     def set_messages(self, messages: list[dict]) -> None:
         """Set pre-loaded messages for reuse across runs."""
@@ -284,12 +294,19 @@ class AdvancedOrderbookBenchmark(BenchmarkRunner[AdvancedOrderbookBenchmarkConfi
 
     def _create_subject(self) -> AdvancedOrderbook:
         """Create AdvancedOrderbook instance."""
+        if self.config.use_sortedness_hint:
+            self._delta_sortedness = DELTA_SORTEDNESS
+            self._snapshot_sortedness = SNAPSHOT_SORTEDNESS
+        else:
+            self._delta_sortedness = OrderbookSortedness.UNKNOWN
+            self._snapshot_sortedness = OrderbookSortedness.UNKNOWN
+
         return AdvancedOrderbook(
             tick_size=self.config.tick_size,
             lot_size=self.config.lot_size,
             num_levels=self.config.num_levels,
-            delta_sortedness=OrderbookSortedness.BIDS_DESCENDING_ASKS_ASCENDING,
-            snapshot_sortedness=OrderbookSortedness.BIDS_DESCENDING_ASKS_ASCENDING,
+            delta_sortedness=self._delta_sortedness,
+            snapshot_sortedness=self._snapshot_sortedness,
         )
 
     def _parse_levels_to_numpy(
@@ -364,17 +381,17 @@ class AdvancedOrderbookBenchmark(BenchmarkRunner[AdvancedOrderbookBenchmarkConfi
 
     def _process_bbo(self, orderbook: AdvancedOrderbook, data: dict) -> tuple[int, int]:
         """Process BBO and return latency + consumed level count."""
-        bid_level = OrderbookLevel(
-            price=float(data["b"]),
-            size=float(data["B"]),
-        )
-        ask_level = OrderbookLevel(
-            price=float(data["a"]),
-            size=float(data["A"]),
-        )
-
+        ask_price = float(data["a"])
+        ask_size = float(data["A"])
+        bid_price = float(data["b"])
+        bid_size = float(data["B"])
         start = time.perf_counter_ns()
-        orderbook.consume_bbo(ask_level, bid_level)
+        orderbook.consume_bbo_values(
+            ask_price=ask_price,
+            ask_size=ask_size,
+            bid_price=bid_price,
+            bid_size=bid_size,
+        )
         elapsed = time.perf_counter_ns() - start
 
         return elapsed, 2
@@ -383,6 +400,8 @@ class AdvancedOrderbookBenchmark(BenchmarkRunner[AdvancedOrderbookBenchmarkConfi
         """Load messages from input file or override."""
         if self._messages_override is not None:
             return self._messages_override
+        if self._loaded_messages is not None:
+            return self._loaded_messages
 
         input_path = Path(self.config.input_path)
         if not input_path.exists():
@@ -395,7 +414,21 @@ class AdvancedOrderbookBenchmark(BenchmarkRunner[AdvancedOrderbookBenchmarkConfi
                 if line:
                     messages.append(self.decoder.decode(line))
 
+        self._loaded_messages = messages
         return messages
+
+    def _print_sortedness_report(self) -> None:
+        """Print sortedness configuration for this benchmark run."""
+        print(
+            "Using snapshot sortedness: "
+            f"{self._snapshot_sortedness.name} "
+            f"(hint={'ON' if self.config.use_sortedness_hint else 'OFF'})"
+        )
+        print(
+            "Using delta sortedness: "
+            f"{self._delta_sortedness.name} "
+            f"(hint={'ON' if self.config.use_sortedness_hint else 'OFF'})"
+        )
 
     def _record_metric(
         self, operation: str, latency_ns: int, num_levels_consumed: int
@@ -411,6 +444,7 @@ class AdvancedOrderbookBenchmark(BenchmarkRunner[AdvancedOrderbookBenchmarkConfi
         messages = self._load_messages()
 
         print(f"Loaded {len(messages)} messages")
+        self._print_sortedness_report()
         print(f"Warmup: {self.config.warmup_operations} messages")
         print("Running benchmark...")
 
@@ -538,6 +572,7 @@ def _build_config_from_args(args) -> AdvancedOrderbookBenchmarkConfig:
         warmup_operations=args.warmup,
         num_operations=max_messages,
         num_levels=args.levels,
+        use_sortedness_hint=args.use_sortedness_hint,
     )
 
 
@@ -560,7 +595,7 @@ def _run_single(config: AdvancedOrderbookBenchmarkConfig) -> None:
 
 def _run_multi_size(base_config: AdvancedOrderbookBenchmarkConfig) -> None:
     """Run benchmark across multiple orderbook sizes."""
-    sizes = [2**i for i in range(6, 13, 2)]
+    sizes = [2**i for i in range(3, 13, 2)]
     summaries: list[MultiSizeSummary] = []
     all_stats: list[tuple[int, BenchmarkStatistics]] = []
 
@@ -589,6 +624,7 @@ def _run_multi_size(base_config: AdvancedOrderbookBenchmarkConfig) -> None:
                 num_levels=size,
                 warmup_operations=base_config.warmup_operations,
                 num_operations=base_config.num_operations,
+                use_sortedness_hint=base_config.use_sortedness_hint,
             )
             benchmark = AdvancedOrderbookBenchmark(config)
             benchmark.set_messages(messages)
@@ -655,8 +691,17 @@ def main() -> None:
             "(default: 2048, ignored if --multi-size is used)"
         ),
     )
+    cli.parser.add_argument(
+        "--use-sortedness-hint",
+        action="store_true",
+        default=False,
+        help=(
+            "Use known sortedness constants for delta and snapshot "
+            "(default: False, uses UNKNOWN)."
+        ),
+    )
     cli.parser.description += (
-        ". For --multi-size, tested levels are 2^6..2^12 (64..4096)."
+        ". For --multi-size, tested levels are 2^3..2^12 (8..4096)."
     )
 
     args = cli.parse()
