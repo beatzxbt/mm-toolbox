@@ -116,6 +116,22 @@ wheel-check: ## Validate wheel contains native extensions
 upload-test: ## Upload to TestPyPI
 	uv run python -m twine upload --repository testpypi dist/*
 
+# Platform-specific wheel builds (for parallel execution)
+macos-wheels: ## Build macOS wheels
+	uv run cibuildwheel --platform macos
+
+linux-wheels-x86_64: ## Build Linux x86_64 wheels
+	CIBW_ARCHS_LINUX=x86_64 uv run cibuildwheel --platform linux
+
+linux-wheels-aarch64: ## Build Linux aarch64 wheels (longer timeout for QEMU)
+	CIBW_ARCHS_LINUX=aarch64 timeout 1800 uv run cibuildwheel --platform linux
+
+linux-wheels: ## Build all Linux wheels in parallel (run with: make -j2 linux-wheels)
+	$(MAKE) -j2 linux-wheels-x86_64 linux-wheels-aarch64
+
+wheels: ## Build all wheels (macOS + Linux)
+	$(MAKE) macos-wheels linux-wheels
+
 # Pattern rule so additional args do not trigger "No rule to make target"
 %:
 	@:
