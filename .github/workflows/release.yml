@@ -23,9 +23,9 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     env:
       CIBW_BUILD: "cp312-* cp313-*"
-      CIBW_SKIP: "*-win* *-manylinux_i686"
-      CIBW_ARCHS_LINUX: "x86_64 aarch64"
-      CIBW_ARCHS_MACOS: "arm64"
+      CIBW_SKIP: "*-win*"
+      CIBW_ARCHS_LINUX: "x86_64 i686 aarch64 ppc64le s390x"
+      CIBW_ARCHS_MACOS: "x86_64 arm64 universal2"
 
     steps:
     - name: Checkout code
@@ -110,6 +110,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'testpypi'
     needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     environment:
       name: testpypi
       url: https://test.pypi.org/p/mm-toolbox
@@ -139,7 +141,6 @@ jobs:
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         repository-url: https://test.pypi.org/legacy/
-        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
         skip-existing: true
 
   publish-pypi:
@@ -147,6 +148,8 @@ jobs:
     if: github.event_name == 'release' || github.event.inputs.environment == 'pypi'
     needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     environment:
       name: pypi
       url: https://pypi.org/p/mm-toolbox
@@ -175,5 +178,4 @@ jobs:
     - name: Publish to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
-        password: ${{ secrets.PYPI_API_TOKEN }}
         skip-existing: true
