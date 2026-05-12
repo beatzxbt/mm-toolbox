@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 1.0.0b6 (2026-05-12)
+## 1.0.0b7 (2026-05-12)
 
 ### Orderbook
 - Lower minimum levels from 64 to 4.
