@@ -20,7 +20,7 @@ class TestTimeCandlesSpecific:
 
     def setup_method(self):
         """Create a fresh asyncio event loop for each test method."""
-        asyncio.set_event_loop(asyncio.new_event_loop())
+        self.loop = asyncio.new_event_loop()
 
     def test_time_based_candle_completion(self):
         """Given a 60-second bucket, a trade 70 s after the first triggers closure."""

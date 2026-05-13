@@ -20,7 +20,7 @@ class TestCandlesModuleIntegration:
 
     def setup_method(self):
         """Create a fresh asyncio event loop for each test method."""
-        asyncio.set_event_loop(asyncio.new_event_loop())
+        self.loop = asyncio.new_event_loop()
 
     def test_all_candle_types_import(self):
         """Given the candles package, all five public types are importable."""
@@ -153,7 +153,7 @@ class TestCandlesAsyncIntegration:
 
     def setup_method(self):
         """Create a fresh asyncio event loop for each test method."""
-        asyncio.set_event_loop(asyncio.new_event_loop())
+        self.loop = asyncio.new_event_loop()
 
     def test_async_context_all_candles(self):
         """Given an async context, all candle types process trades correctly."""
@@ -173,8 +173,7 @@ class TestCandlesAsyncIntegration:
 
             return True
 
-        loop = asyncio.get_event_loop()
-        result = loop.run_until_complete(test_async())
+        result = self.loop.run_until_complete(test_async())
         assert result is True
 
     def test_concurrent_candle_processing(self):

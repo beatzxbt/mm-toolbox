@@ -217,12 +217,18 @@ async def _print_periodic_summary(
             aggregator.print_summary()
 
 
-async def _run(shutdown_event: asyncio.Event) -> None:
-    """Set up the WsPool and run the event loop.
+async def _run() -> None:
+    """Set up the WsPool and run the event loop."""
+    shutdown_event = asyncio.Event()
 
-    Args:
-        shutdown_event: Event to signal graceful shutdown.
-    """
+    def _signal_handler() -> None:
+        print("\nReceived shutdown signal, stopping...")
+        shutdown_event.set()
+
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, _signal_handler)
+
     symbol = "btcusdt"
 
     print(f"Connecting to Binance futures @trade stream for {symbol.upper()}...")
@@ -250,31 +256,17 @@ async def _run(shutdown_event: asyncio.Event) -> None:
         finally:
             aggregator.stop_consumers()
             aggregator.print_summary()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.remove_signal_handler(sig)
+            print("Shutdown complete.")
 
 
 def main() -> None:
     """Main entry point."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    shutdown_event = asyncio.Event()
-
-    def _signal_handler() -> None:
-        print("\nReceived shutdown signal, stopping...")
-        shutdown_event.set()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, _signal_handler)
-
     try:
-        loop.run_until_complete(_run(shutdown_event))
+        asyncio.run(_run())
     except KeyboardInterrupt:
         pass
-    finally:
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.remove_signal_handler(sig)
-        loop.close()
-        print("Shutdown complete.")
 
 
 if __name__ == "__main__":

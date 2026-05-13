@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
     
     steps:
     - name: Checkout code
@@ -80,7 +80,7 @@ jobs:
     - name: Upload wheel as artifact
       uses: actions/upload-artifact@v4
       with:
-        name: wheel-python-3.12
+        name: wheel-python
         path: dist/*.whl
         retention-days: 7
 
@@ -100,7 +100,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     env:
-      CIBW_BUILD: "cp312-* cp313-*"
+      CIBW_BUILD: "cp312-* cp313-* cp314-*"
       CIBW_SKIP: "*-win*"
       CIBW_ARCHS_LINUX: "x86_64 i686 aarch64 ppc64le s390x"
       CIBW_ARCHS_MACOS: "x86_64 arm64 universal2"

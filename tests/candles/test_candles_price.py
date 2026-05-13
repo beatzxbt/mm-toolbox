@@ -19,7 +19,7 @@ class TestPriceCandlesSpecific:
 
     def setup_method(self):
         """Create a fresh asyncio event loop for each test method."""
-        asyncio.set_event_loop(asyncio.new_event_loop())
+        self.loop = asyncio.new_event_loop()
 
     def test_price_movement_based_completion(self):
         """Given a bucket size of 0.05, a 0.06 price move triggers a new candle."""

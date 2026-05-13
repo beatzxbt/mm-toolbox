@@ -129,6 +129,9 @@ class BaseLogHandler(ABC):
         """
         with self._ev_loop_lock:
             if self._ev_loop is None or self._ev_loop.is_closed():
+                # Python 3.14: Manual loop creation is required because
+                # this runs in a dedicated background thread for long-lived
+                # async I/O, not the main thread where asyncio.run() is used.
                 loop = asyncio.new_event_loop()
                 self._ev_loop = loop
 

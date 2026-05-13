@@ -203,7 +203,7 @@ class TestBaseCandlesFunctionality:
 
     def setup_method(self):
         """Create a fresh asyncio event loop for each test method."""
-        asyncio.set_event_loop(asyncio.new_event_loop())
+        self.loop = asyncio.new_event_loop()
 
     def test_base_candles_initialization(self):
         """Given valid parameters, every subclass instantiates without error."""
@@ -440,7 +440,7 @@ class TestAsyncIteratorTransitions:
 
     def setup_method(self):
         """Create a fresh asyncio event loop for each test method."""
-        asyncio.set_event_loop(asyncio.new_event_loop())
+        self.loop = asyncio.new_event_loop()
 
     def test_anext_candle_immediate(self):
         """Given a pending ``Candle`` event, ``__anext__`` returns it immediately."""
@@ -453,7 +453,7 @@ class TestAsyncIteratorTransitions:
             candle = await tick_candles.__anext__()
             assert candle.close_price == 100.0
 
-        asyncio.get_event_loop().run_until_complete(_helper())
+        self.loop.run_until_complete(_helper())
 
     def test_anext_none_creates_list(self):
         """Given no pending event, ``__anext__`` awaits via a new Future."""
@@ -472,7 +472,7 @@ class TestAsyncIteratorTransitions:
             candle = await task
             assert isinstance(candle, Candle)
 
-        asyncio.get_event_loop().run_until_complete(_helper())
+        self.loop.run_until_complete(_helper())
 
     def test_anext_list_appends(self):
         """Given multiple concurrent consumers, ``__anext__`` resolves all on closure."""
@@ -495,7 +495,7 @@ class TestAsyncIteratorTransitions:
             candle2 = await task2
             assert candle1 is candle2
 
-        asyncio.get_event_loop().run_until_complete(_helper())
+        self.loop.run_until_complete(_helper())
 
 
 if __name__ == "__main__":

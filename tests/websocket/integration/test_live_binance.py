@@ -18,7 +18,8 @@ from __future__ import annotations
 import asyncio
 from decimal import Decimal, InvalidOperation
 from time import time_ns
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import msgspec
 import pytest

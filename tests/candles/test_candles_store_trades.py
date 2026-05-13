@@ -131,7 +131,6 @@ def test_insert_and_reset_copy_respects_store_trades(
 ):
     """Given ``store_trades`` flag, closed candles via async iterator respect it."""
     loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
     try:
         candles = TickCandles(1, store_trades=store_trades)
         trade = BaseTrade(time_ms=1000, is_buy=True, price=100.0, size=1.0)

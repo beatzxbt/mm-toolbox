@@ -317,7 +317,7 @@ class StandardOrderbookBenchmark(BenchmarkRunner[StandardOrderbookBenchmarkConfi
             raise FileNotFoundError(f"Input file not found: {input_path}")
 
         messages: list[dict] = []
-        with open(input_path) as file:
+        with open(input_path, encoding="utf-8") as file:
             for line in file:
                 line = line.strip()
                 if line:

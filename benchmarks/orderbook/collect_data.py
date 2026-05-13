@@ -161,7 +161,7 @@ class BinanceDataCollector:
         print(f"Writing output to: {output_path}")
         print(f"Target messages: {self.config.max_messages}")
 
-        with open(output_path, "w") as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             self.output_file = f
 
             async with aiohttp.ClientSession() as session:

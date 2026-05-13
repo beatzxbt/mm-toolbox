@@ -19,7 +19,7 @@ class TestVolumeCandlesSpecific:
 
     def setup_method(self):
         """Create a fresh asyncio event loop for each test method."""
-        asyncio.set_event_loop(asyncio.new_event_loop())
+        self.loop = asyncio.new_event_loop()
 
     def test_volume_based_candle_completion(self):
         """Given a 500-volume bucket, the candle completes when cumulative volume exceeds the threshold."""

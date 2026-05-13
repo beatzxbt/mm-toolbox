@@ -13,7 +13,8 @@ import asyncio
 import contextlib
 import random
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Awaitable, Callable, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from typing import Any
 
 import pytest
 import websockets

@@ -70,7 +70,7 @@ class StartupEvent:
 
     def set(self) -> None:
         """Signal that startup is complete."""
-        with open(self.path, "w") as f:
+        with open(self.path, "w", encoding="utf-8") as f:
             f.write("ready")
 
     def wait(self, timeout: float = 30.0, poll_interval: float = 0.01) -> bool:
@@ -86,7 +86,7 @@ class StartupEvent:
         start = time.time()
         while time.time() - start < timeout:
             try:
-                with open(self.path, "r") as f:
+                with open(self.path, "r", encoding="utf-8") as f:
                     if f.read().strip() == "ready":
                         return True
             except FileNotFoundError:

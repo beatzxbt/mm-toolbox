@@ -21,7 +21,7 @@ Thank you for contributing to MM Toolbox. This document covers everything you ne
 
 ## Prerequisites
 
-- **Python**: 3.12 or 3.13 (CPython only)
+- **Python**: 3.12, 3.13, or 3.14 (CPython only)
 - **uv**: Modern Python package manager ([install guide](https://docs.astral.sh/uv/))
 - **C compiler**: GCC (for Cython/C extensions)
 - **Make**: For build automation
@@ -29,7 +29,7 @@ Thank you for contributing to MM Toolbox. This document covers everything you ne
 Verify your environment:
 
 ```bash
-python --version  # Should be 3.12+ or 3.13+
+python --version  # Should be 3.12+, 3.13+, or 3.14+
 uv --version      # Should be 0.5+
 make --version    # Should be GNU Make 3.81+ or equivalent
 ```
@@ -694,7 +694,7 @@ uv run cibuildwheel --platform auto
 
 Configured for:
 
-- Python 3.12 and 3.13
+- Python 3.12, 3.13, and 3.14
 - Linux (x86_64, aarch64)
 - macOS (x86_64, arm64)
 
