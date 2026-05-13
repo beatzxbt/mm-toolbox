@@ -682,3 +682,175 @@ class TestSharedBytesRingBuffer:
             assert prod.is_full()
         finally:
             prod.close()
+
+
+class TestSpscMapCreateErrorPaths:
+    """Layer 2 — _map_create error paths for SPSC producer creation."""
+
+    def test_map_create_file_already_exists(self, shm_path: str) -> None:
+        """Given existing file, When creating producer, Then OSError raised.
+
+        _map_create uses O_EXCL, so open fails if the backing file already
+        exists.
+        """
+        with open(shm_path, "wb") as f:
+            f.write(b"\x00")
+        with pytest.raises(OSError, match="open failed"):
+            ShmSpscProducer(shm_path, 1 << 12, create=True)
+
+
+class TestSpscMapAttachValidation:
+    """Layer 2 — _map_attach validation paths for SPSC consumer attachment."""
+
+    def test_map_attach_non_regular_file(self, shm_path: str) -> None:
+        """Given FIFO path, When consumer attaches, Then RuntimeError raised.
+
+        A FIFO can be opened but is not a regular file, so the S_ISREG check
+        in _map_attach is exercised.
+        """
+        os.mkfifo(shm_path)
+        try:
+            with pytest.raises(RuntimeError, match="not a regular file"):
+                ShmSpscConsumer(shm_path)
+        finally:
+            os.unlink(shm_path)
+
+    def test_map_attach_bad_permissions(self, shm_path: str) -> None:
+        """Given file with wrong permissions, When consumer attaches, Then RuntimeError raised."""
+        with open(shm_path, "wb") as f:
+            f.write(b"\x00" * 64)
+        os.chmod(shm_path, 0o644)
+        try:
+            with pytest.raises(RuntimeError, match="incorrect permissions"):
+                ShmSpscConsumer(shm_path)
+        finally:
+            os.chmod(shm_path, 0o600)
+
+    def test_map_attach_invalid_capacity_zero(self, shm_path: str) -> None:
+        """Given header with capacity=0, When consumer attaches, Then RuntimeError raised."""
+        _MAGIC = 0x53484252
+        fd = os.open(shm_path, os.O_CREAT | os.O_WRONLY, 0o600)
+        try:
+            header = struct.pack("QQQQQQQQ", _MAGIC, 0, 0, 0, 0, 0, 0, 0)
+            os.write(fd, header + b"\x00" * (64 - len(header)))
+        finally:
+            os.close(fd)
+        with pytest.raises(RuntimeError, match="invalid"):
+            ShmSpscConsumer(shm_path)
+
+    def test_map_attach_invalid_mask(self, shm_path: str) -> None:
+        """Given header with mask != capacity-1, When consumer attaches, Then RuntimeError raised."""
+        _MAGIC = 0x53484252
+        fd = os.open(shm_path, os.O_CREAT | os.O_WRONLY, 0o600)
+        try:
+            header = struct.pack("QQQQQQQQ", _MAGIC, 16, 7, 0, 0, 0, 0, 0)
+            os.write(fd, header + b"\x00" * (64 - len(header)))
+        finally:
+            os.close(fd)
+        # mask != capacity - 1 (e.g. capacity=16, mask=7 is correct, so use wrong mask)
+        with open(shm_path, "r+b") as f:
+            f.seek(16)
+            f.write(struct.pack("Q", 123))
+        with pytest.raises(RuntimeError, match="invalid"):
+            ShmSpscConsumer(shm_path)
+
+    def test_map_attach_truncated_after_header(self, shm_path: str) -> None:
+        """Given file with valid header but too small for capacity, When consumer attaches, Then RuntimeError raised."""
+        _MAGIC = 0x53484252
+        fd = os.open(shm_path, os.O_CREAT | os.O_WRONLY, 0o600)
+        try:
+            header = struct.pack("QQQQQQQQ", _MAGIC, 1024, 1023, 0, 0, 0, 0, 0)
+            os.write(fd, header + b"\x00" * (64 - len(header)))
+        finally:
+            os.close(fd)
+        # File is only 64 bytes but capacity claims 1024 bytes (need 64+1024)
+        with pytest.raises(RuntimeError, match="too small for header capacity"):
+            ShmSpscConsumer(shm_path)
+
+    def test_map_attach_bad_magic(self, shm_path: str) -> None:
+        """Given file with wrong magic, When consumer attaches, Then RuntimeError raised."""
+        fd = os.open(shm_path, os.O_CREAT | os.O_WRONLY, 0o600)
+        try:
+            header = struct.pack("QQQQQQQQ", 0xDEADBEEF, 1024, 1023, 0, 0, 0, 0, 0)
+            os.write(fd, header + b"\x00" * (64 - len(header)))
+        finally:
+            os.close(fd)
+        with pytest.raises(RuntimeError, match="header mismatch"):
+            ShmSpscConsumer(shm_path)
+
+
+class TestSpscConsumerPeekEdgeCases:
+    """Layer 2 — Consumer peekleft/peekright edge cases with corrupted data."""
+
+    def test_peekright_corrupted_message_length(self, shm_path: str) -> None:
+        """Given corrupted msg_len > capacity, When peekright called, Then returns None."""
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True, unlink_on_close=False)
+        try:
+            prod.insert(b"x")
+            # Corrupt the message length at data offset 0 (file offset 64)
+            with open(shm_path, "r+b") as f:
+                f.seek(64)
+                f.write(struct.pack("Q", 0xFFFFFFFFFFFFFFFF))
+            cons = ShmSpscConsumer(shm_path)
+            try:
+                assert cons.peekright() is None
+            finally:
+                cons.close()
+        finally:
+            if os.path.exists(shm_path):
+                os.unlink(shm_path)
+
+    def test_peekright_next_pos_exceeds_write(self, shm_path: str) -> None:
+        """Given corrupted msg_len making next_pos > write_pos, When peekright called, Then returns None."""
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True, unlink_on_close=False)
+        try:
+            prod.insert(b"x")  # actual total = 9 bytes
+            # Corrupt msg_len to 100 so next_pos = 8 + 100 = 108 > write_pos=9
+            with open(shm_path, "r+b") as f:
+                f.seek(64)
+                f.write(struct.pack("Q", 100))
+            cons = ShmSpscConsumer(shm_path)
+            try:
+                assert cons.peekright() is None
+            finally:
+                cons.close()
+        finally:
+            if os.path.exists(shm_path):
+                os.unlink(shm_path)
+
+    def test_peekleft_race_returns_none(self, shm_path: str) -> None:
+        """Given message consumed between peek and copy, When peekleft called, Then returns None.
+
+        Simulates the race where another consumer (or the same consumer in
+        another thread) advances read_pos after peek_available succeeds but
+        before the payload is copied.
+        """
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True, unlink_on_close=False)
+        try:
+            prod.insert(b"race")
+            cons = ShmSpscConsumer(shm_path)
+            try:
+                # Manually advance read_pos to simulate a race
+                cons.consume()
+                # Now buffer is empty; peekleft should return None
+                assert cons.peekleft() is None
+            finally:
+                cons.close()
+        finally:
+            if os.path.exists(shm_path):
+                os.unlink(shm_path)
+
+    def test_peekright_empty_after_consume(self, shm_path: str) -> None:
+        """Given all messages consumed, When peekright called, Then returns None."""
+        prod = ShmSpscProducer(shm_path, 1 << 12, create=True, unlink_on_close=False)
+        try:
+            prod.insert(b"x")
+            cons = ShmSpscConsumer(shm_path)
+            try:
+                cons.consume()
+                assert cons.peekright() is None
+            finally:
+                cons.close()
+        finally:
+            if os.path.exists(shm_path):
+                os.unlink(shm_path)

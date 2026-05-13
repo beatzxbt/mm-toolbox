@@ -10,77 +10,6 @@ from libc.stdint cimport (
 )
 from cpython.bytes cimport PyBytes_FromStringAndSize
 
-from mm_toolbox.logging.advanced.protocol cimport MessageType, InternalMessage
-
-
-cdef inline InternalMessage create_internal_message(MessageType type, u64 timestamp_ns, u32 len, unsigned char* data) noexcept nogil:
-    """Create an internal message struct.
-
-    Args:
-        type (MessageType): Message classification.
-        timestamp_ns (u64): Nanosecond timestamp.
-        len (u32): Byte length of the payload.
-        data (unsigned char*): Pointer to the payload data.
-
-    Returns:
-        InternalMessage: Populated message struct.
-    """
-    cdef InternalMessage message
-    message.type = type
-    message.timestamp_ns = timestamp_ns
-    message.len = len
-    message.data = data
-    return message
-
-cdef bytes internal_message_to_bytes(InternalMessage message):
-    """Serialize an InternalMessage to bytes.
-
-    Args:
-        message (InternalMessage): Message to serialize.
-
-    Returns:
-        bytes: Serialized binary payload.
-    """
-    cdef BinaryWriter writer = BinaryWriter()
-    writer.write_u8(<u8>message.type)
-    writer.write_u64(message.timestamp_ns)
-    writer.write_u32(message.len)
-    writer.write_chars(message.data, message.len)
-    return writer.finalize()
-
-cdef InternalMessage bytes_to_internal_message(bytes message):
-    """Parse bytes into an InternalMessage with owned data.
-
-    Args:
-        message (bytes): Serialized message payload.
-
-    Returns:
-        InternalMessage: Parsed message with heap-owned data.
-
-    """
-    cdef:
-        BinaryReader    reader = BinaryReader(message)
-        MessageType     msg_type = <MessageType>reader.read_u8()
-        u64             timestamp_ns = reader.read_u64()
-        u32             data_len = reader.read_u32()
-        unsigned char*  data = NULL
-        unsigned char*  source = NULL
-    if data_len > 0:
-        source = reader.read_chars(data_len)
-        data = <unsigned char*>malloc(data_len * sizeof(unsigned char))
-        if not data:
-            raise MemoryError("Failed to allocate memory for InternalMessage data")
-        memcpy(data, source, data_len)
-    return create_internal_message(msg_type, timestamp_ns, data_len, data)
-
-cdef void free_internal_message_data(unsigned char* data) noexcept nogil:
-    """Release heap memory allocated for InternalMessage.data.
-
-    Args:
-        data (unsigned char*): Data pointer to free.
-    """
-    if data != NULL:
-        free(data)
 
 cdef class BinaryWriter:
     """Fast, type-safe binary serializer."""
@@ -181,18 +110,6 @@ cdef class BinaryWriter:
         (<u64*>&self._buffer[self._pos])[0] = value
         self._pos += 8
     
-    cdef void write_bytes(self, bytes data):
-        """Write a Python bytes object.
-
-        Args:
-            data (bytes): Payload to write.
-        """
-        cdef u32 length = len(data)
-        self._ensure_capacity(length)
-        cdef const unsigned char[:] data_view = data    # type: ignore
-        memcpy(&self._buffer[self._pos], &data_view[0], length)
-        self._pos += length
-
     cdef void write_chars(self, unsigned char* data, u32 length):
         """Write raw bytes from a C pointer.
 
@@ -213,17 +130,6 @@ cdef class BinaryWriter:
         cdef bytes result = PyBytes_FromStringAndSize(<char*>self._buffer, self._pos)
         self._pos = 0
         return result
-
-    cdef (unsigned char*, u32) finalize_to_chars(self) nogil:
-        """Return the buffer pointer and length, and reset the write position.
-
-        Returns:
-            tuple(unsigned char*, u32): Buffer pointer and current length.
-        """
-        cdef unsigned char* ptr = self._buffer
-        cdef u32 len = self._pos
-        self._pos = 0
-        return (ptr, len)
     
     cdef inline void reset(self) nogil:
         """Reset the write position without returning data."""
@@ -307,41 +213,3 @@ cdef class BinaryReader:
         memcpy(&value, &self._buf_view[self._pos], sizeof(u64))
         self._pos += 8
         return value
-    
-    cdef bytes read_bytes(self, u32 length):
-        """Read a slice of bytes.
-
-        Args:
-            length (u32): Number of bytes to read.
-
-        Returns:
-            bytes: The read slice.
-
-        Raises:
-            ValueError: On buffer underrun.
-        """
-        cdef bytes result
-        if self._pos + length > self._len:
-            raise ValueError("Buffer underrun reading bytes")
-        result = self._buffer[self._pos:self._pos + length]
-        self._pos += length
-        return result
-
-    cdef unsigned char* read_chars(self, u32 length):
-        """Read a raw pointer into the buffer.
-
-        Args:
-            length (u32): Number of bytes to expose.
-
-        Returns:
-            unsigned char*: Pointer at the current read position.
-
-        Raises:
-            ValueError: On buffer underrun.
-        """
-        cdef unsigned char* result
-        if self._pos + length > self._len:
-            raise ValueError("Buffer underrun reading bytes")
-        result = <unsigned char*>&self._buf_view[self._pos]
-        self._pos += length
-        return result

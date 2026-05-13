@@ -2,12 +2,15 @@
 
 Covers ``BaseLogHandler`` lifecycle (open/close), error handling (stderr +
 custom callback), and concrete subclasses: ``FileLogHandler`` (creation,
-append, multi-flush), ``DiscordLogHandler`` (webhook URL validation), and
-``TelegramLogHandler`` (config storage).
+append, multi-flush), ``DiscordLogHandler`` (webhook URL validation),
+chunking, push delivery, and error handling), and
+``TelegramLogHandler`` (config storage, chunking, push delivery, and
+error handling).
 """
 
 import os
 import tempfile
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -196,6 +199,155 @@ class TestDiscordLogHandler:
         assert handler.url == "https://discord.com/api/webhooks/123/abc"
 
 
+class TestDiscordChunking:
+    """Layer 1 — ``DiscordLogHandler._chunk_messages`` primitive tests."""
+
+    @pytest.fixture
+    def discord_handler(self):
+        """Return a configured DiscordLogHandler.
+
+        Returns:
+            DiscordLogHandler: Handler instance for chunking tests.
+        """
+        return DiscordLogHandler("https://discord.com/api/webhooks/123/abc")
+
+    def test_chunk_empty_input(self, discord_handler):
+        """Given an empty list, ``_chunk_messages`` returns an empty list."""
+        chunks = discord_handler._chunk_messages([], max_chars=2000)
+        assert chunks == []
+
+    def test_chunk_single_message(self, discord_handler):
+        """Given a single message, it is returned as one chunk."""
+        chunks = discord_handler._chunk_messages(["hello"], max_chars=2000)
+        assert chunks == ["hello"]
+
+    def test_chunk_exact_boundary(self, discord_handler):
+        """Given messages that exactly fit the limit, they form a single chunk."""
+        msg1 = "a" * 999
+        msg2 = "b" * 1000
+        # 999 + 1 (newline) + 1000 = 2000
+        chunks = discord_handler._chunk_messages([msg1, msg2], max_chars=2000)
+        assert len(chunks) == 1
+        assert chunks[0] == f"{msg1}\n{msg2}"
+
+    def test_chunk_boundary_plus_one(self, discord_handler):
+        """Given messages that exceed the limit by one char, they split into two chunks."""
+        msg1 = "a" * 999
+        msg2 = "b" * 1001
+        # 999 + 1 + 1001 = 2001 > 2000
+        chunks = discord_handler._chunk_messages([msg1, msg2], max_chars=2000)
+        assert len(chunks) == 2
+        assert chunks[0] == msg1
+        assert chunks[1] == msg2
+
+    def test_chunk_multi_chunk(self, discord_handler):
+        """Given many messages, they are grouped into multiple chunks."""
+        messages = [f"message_number_{i}_with_some_padding" for i in range(100)]
+        chunks = discord_handler._chunk_messages(messages, max_chars=2000)
+        assert len(chunks) > 1
+        # Reconstruct and verify all messages are preserved
+        reconstructed = []
+        for chunk in chunks:
+            reconstructed.extend(chunk.split("\n"))
+        assert reconstructed == messages
+
+    def test_chunk_single_message_over_max(self, discord_handler):
+        """Given a single message exceeding max_chars, it still forms its own chunk."""
+        msg = "x" * 3000
+        chunks = discord_handler._chunk_messages([msg], max_chars=2000)
+        assert chunks == [msg]
+
+
+class TestDiscordPush:
+    """Layer 2 — ``DiscordLogHandler.push`` and ``_push_chunks`` composite tests."""
+
+    @pytest.fixture
+    def mock_session(self):
+        """Return a mocked aiohttp ClientSession for push tests.
+
+        Returns:
+            MagicMock: Configured mock session context manager.
+        """
+        mock_response = MagicMock()
+        mock_response.status = 200
+
+        mock_post_cm = AsyncMock()
+        mock_post_cm.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_post_cm.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.post = MagicMock(return_value=mock_post_cm)
+
+        mock_session_cm = AsyncMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
+
+        return mock_session_cm
+
+    def test_push_success(self, mock_session, capsys):
+        """Given valid messages, ``push`` sends each chunk successfully."""
+        with patch(
+            "mm_toolbox.logging.standard.handlers.discord.aiohttp.ClientSession",
+            return_value=mock_session,
+        ):
+            handler = DiscordLogHandler("https://discord.com/api/webhooks/123/abc")
+            handler.open()
+            handler.push(["test message"])
+            handler.close()
+
+        captured = capsys.readouterr()
+        assert "Discord webhook returned" not in captured.err
+
+    def test_push_http_error(self, capsys):
+        """Given a 500 response, ``push`` logs the error via ``_handle_exception``."""
+        mock_response = MagicMock()
+        mock_response.status = 500
+
+        mock_post_cm = AsyncMock()
+        mock_post_cm.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_post_cm.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.post = MagicMock(return_value=mock_post_cm)
+
+        mock_session_cm = AsyncMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "mm_toolbox.logging.standard.handlers.discord.aiohttp.ClientSession",
+            return_value=mock_session_cm,
+        ):
+            handler = DiscordLogHandler("https://discord.com/api/webhooks/123/abc")
+            handler.open()
+            handler.push(["test message"])
+            handler.close()
+
+        captured = capsys.readouterr()
+        assert "Discord webhook returned 500" in captured.err
+
+    def test_push_exception(self, capsys):
+        """Given a connection exception, ``push`` logs the error via ``_handle_exception``."""
+        mock_session = MagicMock()
+        mock_session.post = MagicMock(side_effect=Exception("connection failed"))
+
+        mock_session_cm = AsyncMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "mm_toolbox.logging.standard.handlers.discord.aiohttp.ClientSession",
+            return_value=mock_session_cm,
+        ):
+            handler = DiscordLogHandler("https://discord.com/api/webhooks/123/abc")
+            handler.open()
+            handler.push(["test message"])
+            handler.close()
+
+        captured = capsys.readouterr()
+        assert "connection failed" in captured.err
+
+
 class TestTelegramLogHandler:
     """Layer 1 — ``TelegramLogHandler`` primitive storage tests."""
 
@@ -204,3 +356,151 @@ class TestTelegramLogHandler:
         handler = TelegramLogHandler("my-token", "my-chat-id")
         assert handler.chat_id == "my-chat-id"
         assert "my-token" in handler.url
+
+
+class TestTelegramChunking:
+    """Layer 1 — ``TelegramLogHandler._chunk_messages`` primitive tests."""
+
+    @pytest.fixture
+    def telegram_handler(self):
+        """Return a configured TelegramLogHandler.
+
+        Returns:
+            TelegramLogHandler: Handler instance for chunking tests.
+        """
+        return TelegramLogHandler("my-token", "my-chat-id")
+
+    def test_chunk_empty_input(self, telegram_handler):
+        """Given an empty list, ``_chunk_messages`` returns an empty list."""
+        chunks = telegram_handler._chunk_messages([], max_chars=4096)
+        assert chunks == []
+
+    def test_chunk_single_message(self, telegram_handler):
+        """Given a single message, it is returned as one chunk."""
+        chunks = telegram_handler._chunk_messages(["hello"], max_chars=4096)
+        assert chunks == ["hello"]
+
+    def test_chunk_exact_boundary(self, telegram_handler):
+        """Given messages that exactly fit the limit, they form a single chunk."""
+        msg1 = "a" * 2047
+        msg2 = "b" * 2048
+        # 2047 + 1 + 2048 = 4096
+        chunks = telegram_handler._chunk_messages([msg1, msg2], max_chars=4096)
+        assert len(chunks) == 1
+        assert chunks[0] == f"{msg1}\n{msg2}"
+
+    def test_chunk_boundary_plus_one(self, telegram_handler):
+        """Given messages that exceed the limit by one char, they split into two chunks."""
+        msg1 = "a" * 2047
+        msg2 = "b" * 2049
+        # 2047 + 1 + 2049 = 4097 > 4096
+        chunks = telegram_handler._chunk_messages([msg1, msg2], max_chars=4096)
+        assert len(chunks) == 2
+        assert chunks[0] == msg1
+        assert chunks[1] == msg2
+
+    def test_chunk_multi_chunk(self, telegram_handler):
+        """Given many messages, they are grouped into multiple chunks."""
+        messages = [f"message_number_{i}_with_some_padding" for i in range(200)]
+        chunks = telegram_handler._chunk_messages(messages, max_chars=4096)
+        assert len(chunks) > 1
+        reconstructed = []
+        for chunk in chunks:
+            reconstructed.extend(chunk.split("\n"))
+        assert reconstructed == messages
+
+    def test_chunk_single_message_over_max(self, telegram_handler):
+        """Given a single message exceeding max_chars, it still forms its own chunk."""
+        msg = "x" * 5000
+        chunks = telegram_handler._chunk_messages([msg], max_chars=4096)
+        assert chunks == [msg]
+
+
+class TestTelegramPush:
+    """Layer 2 — ``TelegramLogHandler.push`` and ``_push_chunks`` composite tests."""
+
+    @pytest.fixture
+    def mock_session(self):
+        """Return a mocked aiohttp ClientSession for push tests.
+
+        Returns:
+            MagicMock: Configured mock session context manager.
+        """
+        mock_response = MagicMock()
+        mock_response.status = 200
+
+        mock_post_cm = AsyncMock()
+        mock_post_cm.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_post_cm.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.post = MagicMock(return_value=mock_post_cm)
+
+        mock_session_cm = AsyncMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
+
+        return mock_session_cm
+
+    def test_push_success(self, mock_session, capsys):
+        """Given valid messages, ``push`` sends each chunk successfully."""
+        with patch(
+            "mm_toolbox.logging.standard.handlers.telegram.aiohttp.ClientSession",
+            return_value=mock_session,
+        ):
+            handler = TelegramLogHandler("my-token", "my-chat-id")
+            handler.open()
+            handler.push(["test message"])
+            handler.close()
+
+        captured = capsys.readouterr()
+        assert "Telegram API returned" not in captured.err
+
+    def test_push_http_error(self, capsys):
+        """Given a 500 response, ``push`` logs the error via ``_handle_exception``."""
+        mock_response = MagicMock()
+        mock_response.status = 500
+
+        mock_post_cm = AsyncMock()
+        mock_post_cm.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_post_cm.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.post = MagicMock(return_value=mock_post_cm)
+
+        mock_session_cm = AsyncMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "mm_toolbox.logging.standard.handlers.telegram.aiohttp.ClientSession",
+            return_value=mock_session_cm,
+        ):
+            handler = TelegramLogHandler("my-token", "my-chat-id")
+            handler.open()
+            handler.push(["test message"])
+            handler.close()
+
+        captured = capsys.readouterr()
+        assert "Telegram API returned 500" in captured.err
+
+    def test_push_exception(self, capsys):
+        """Given a connection exception, ``push`` logs the error via ``_handle_exception``."""
+        mock_session = MagicMock()
+        mock_session.post = MagicMock(side_effect=Exception("connection failed"))
+
+        mock_session_cm = AsyncMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "mm_toolbox.logging.standard.handlers.telegram.aiohttp.ClientSession",
+            return_value=mock_session_cm,
+        ):
+            handler = TelegramLogHandler("my-token", "my-chat-id")
+            handler.open()
+            handler.push(["test message"])
+            handler.close()
+
+        captured = capsys.readouterr()
+        assert "connection failed" in captured.err

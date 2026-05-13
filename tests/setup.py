@@ -83,9 +83,27 @@ websocket_extensions = [
     ),
 ]
 
+RINGBUFFER_INCLUDE_DIRS = [
+    np.get_include(),
+    "../src",
+    ".",
+    "ringbuffer",
+]
+
+ringbuffer_extensions = [
+    Extension(
+        name="cython_test_memory",
+        sources=["ringbuffer/test_memory.pyx"],
+        include_dirs=RINGBUFFER_INCLUDE_DIRS,
+        extra_compile_args=EXTRA_COMPILE_ARGS,
+        extra_link_args=EXTRA_LINK_ARGS,
+    ),
+]
+
 all_extensions: list[Extension] = []
 all_extensions.extend(orderbook_advanced_extensions)
 all_extensions.extend(websocket_extensions)
+all_extensions.extend(ringbuffer_extensions)
 
 # Collect all .pyx source files from extensions before cythonization
 pyx_files: list[str] = []

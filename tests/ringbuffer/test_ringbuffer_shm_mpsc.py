@@ -1035,3 +1035,200 @@ class TestMpscSharedBytesRingBuffer:
             assert prod.is_full()
         finally:
             prod.close()
+
+
+class TestMpscMapCreateErrorPaths:
+    """Layer 2 — _map_create error paths for MPSC producer creation."""
+
+    def test_map_create_file_already_exists(self, shm_path: str) -> None:
+        """Given existing file, When creating MPSC producer, Then OSError raised."""
+        with open(shm_path, "wb") as f:
+            f.write(b"\x00")
+        with pytest.raises(OSError, match="open failed"):
+            ShmMpscProducer(shm_path, 1 << 12, num_rings=2, create=True)
+
+
+class TestMpscMapAttachValidation:
+    """Layer 2 — _map_attach validation paths for MPSC consumer attachment."""
+
+    def test_map_attach_non_regular_file(self, shm_path: str) -> None:
+        """Given FIFO path, When MPSC producer attaches, Then RuntimeError raised.
+
+        A FIFO can be opened but is not a regular file, so the S_ISREG check
+        in producer _map_attach is exercised.
+        """
+        os.mkfifo(shm_path)
+        try:
+            with pytest.raises(RuntimeError, match="not a regular file"):
+                ShmMpscProducer(shm_path, 1 << 12, num_rings=2, create=False)
+        finally:
+            os.unlink(shm_path)
+
+    def test_map_attach_bad_permissions(self, shm_path: str) -> None:
+        """Given file with wrong permissions, When MPSC producer attaches, Then RuntimeError raised."""
+        with open(shm_path, "wb") as f:
+            f.write(b"\x00" * 64)
+        os.chmod(shm_path, 0o644)
+        try:
+            with pytest.raises(RuntimeError, match="incorrect permissions"):
+                ShmMpscProducer(shm_path, 1 << 12, num_rings=2, create=False)
+        finally:
+            os.chmod(shm_path, 0o600)
+
+    def test_map_attach_invalid_num_rings_zero(self, shm_path: str) -> None:
+        """Given global header with num_rings=0, When consumer attaches, Then RuntimeError raised."""
+        _MPSC_MAGIC = 0x53484D50
+        fd = os.open(shm_path, os.O_CREAT | os.O_WRONLY, 0o600)
+        try:
+            header = struct.pack("QQQQQQQQ", _MPSC_MAGIC, 0, 1024, 0, 0, 0, 0, 0)
+            os.write(fd, header + b"\x00" * (64 - len(header)))
+        finally:
+            os.close(fd)
+        with pytest.raises(RuntimeError, match="invalid"):
+            ShmMpscConsumer(shm_path)
+
+    def test_map_attach_invalid_ring_capacity(self, shm_path: str) -> None:
+        """Given global header with ring_capacity=0, When consumer attaches, Then RuntimeError raised."""
+        _MPSC_MAGIC = 0x53484D50
+        fd = os.open(shm_path, os.O_CREAT | os.O_WRONLY, 0o600)
+        try:
+            header = struct.pack("QQQQQQQQ", _MPSC_MAGIC, 2, 0, 0, 0, 0, 0, 0)
+            os.write(fd, header + b"\x00" * (64 - len(header)))
+        finally:
+            os.close(fd)
+        with pytest.raises(RuntimeError, match="invalid"):
+            ShmMpscConsumer(shm_path)
+
+    def test_map_attach_non_power_of_two_ring_capacity(self, shm_path: str) -> None:
+        """Given global header with non-power-of-two ring_capacity, When consumer attaches, Then RuntimeError raised."""
+        _MPSC_MAGIC = 0x53484D50
+        fd = os.open(shm_path, os.O_CREAT | os.O_WRONLY, 0o600)
+        try:
+            header = struct.pack("QQQQQQQQ", _MPSC_MAGIC, 2, 100, 0, 0, 0, 0, 0)
+            os.write(fd, header + b"\x00" * (64 - len(header)))
+        finally:
+            os.close(fd)
+        with pytest.raises(RuntimeError, match="invalid"):
+            ShmMpscConsumer(shm_path)
+
+    def test_map_attach_truncated_after_global_header(self, shm_path: str) -> None:
+        """Given file with valid global header but too small for sub-rings, When consumer attaches, Then RuntimeError raised."""
+        _MPSC_MAGIC = 0x53484D50
+        fd = os.open(shm_path, os.O_CREAT | os.O_WRONLY, 0o600)
+        try:
+            header = struct.pack("QQQQQQQQ", _MPSC_MAGIC, 4, 1024, 0, 0, 0, 0, 0)
+            os.write(fd, header + b"\x00" * (64 - len(header)))
+        finally:
+            os.close(fd)
+        # File is only 64 bytes but needs 64 + 4 * stride (much larger)
+        with pytest.raises(RuntimeError, match="too small for capacity"):
+            ShmMpscConsumer(shm_path)
+
+    def test_map_attach_bad_magic(self, shm_path: str) -> None:
+        """Given file with wrong magic, When MPSC consumer attaches, Then RuntimeError raised."""
+        fd = os.open(shm_path, os.O_CREAT | os.O_WRONLY, 0o600)
+        try:
+            header = struct.pack("QQQQQQQQ", 0xDEADBEEF, 2, 1024, 0, 0, 0, 0, 0)
+            os.write(fd, header + b"\x00" * (64 - len(header)))
+        finally:
+            os.close(fd)
+        with pytest.raises(RuntimeError, match="header mismatch"):
+            ShmMpscConsumer(shm_path)
+
+
+class TestMpscPerRingCapacity:
+    """Layer 2 — MPSC per-ring capacity clamping behaviour."""
+
+    def test_per_ring_capacity_clamped_to_one(self, shm_path: str) -> None:
+        """Given capacity_bytes < num_rings, When creating producer, Then per_ring=1.
+
+        pow2_at_least(0) returns 1, so when capacity_bytes // num_rings is 0
+        the per-ring capacity is clamped to 1 byte.
+        """
+        prod = ShmMpscProducer(
+            shm_path, 1, num_rings=2, create=True, unlink_on_close=False
+        )
+        try:
+            prod.close()
+            # global header (64) + 2 * align_up(64 + 1, 64) = 64 + 2*128 = 320
+            assert os.path.getsize(shm_path) == 320
+        finally:
+            if os.path.exists(shm_path):
+                os.unlink(shm_path)
+
+
+class TestMpscConsumerPeekEdgeCases:
+    """Layer 2 — MPSC consumer peekleft/peekright edge cases with corrupted data."""
+
+    def test_peekright_corrupted_message_length(self, shm_path: str) -> None:
+        """Given corrupted msg_len > capacity, When peekright called, Then returns None."""
+        prod = ShmMpscProducer(
+            shm_path, 1 << 12, num_rings=1, create=True, unlink_on_close=False
+        )
+        try:
+            prod.insert(b"x")
+            # MPSC global header = 64 bytes, sub-ring header = 64 bytes, data starts at 128
+            with open(shm_path, "r+b") as f:
+                f.seek(128)
+                f.write(struct.pack("Q", 0xFFFFFFFFFFFFFFFF))
+            cons = ShmMpscConsumer(shm_path)
+            try:
+                assert cons.peekright() is None
+            finally:
+                cons.close()
+        finally:
+            if os.path.exists(shm_path):
+                os.unlink(shm_path)
+
+    def test_peekright_next_pos_exceeds_write(self, shm_path: str) -> None:
+        """Given corrupted msg_len making next_pos > write_pos, When peekright called, Then returns None."""
+        prod = ShmMpscProducer(
+            shm_path, 1 << 12, num_rings=1, create=True, unlink_on_close=False
+        )
+        try:
+            prod.insert(b"x")  # actual total = 9 bytes in sub-ring
+            with open(shm_path, "r+b") as f:
+                f.seek(128)
+                f.write(struct.pack("Q", 100))
+            cons = ShmMpscConsumer(shm_path)
+            try:
+                assert cons.peekright() is None
+            finally:
+                cons.close()
+        finally:
+            if os.path.exists(shm_path):
+                os.unlink(shm_path)
+
+    def test_peekleft_empty_after_consume(self, shm_path: str) -> None:
+        """Given all messages consumed, When peekleft called, Then returns None."""
+        prod = ShmMpscProducer(
+            shm_path, 1 << 12, num_rings=1, create=True, unlink_on_close=False
+        )
+        try:
+            prod.insert(b"x")
+            cons = ShmMpscConsumer(shm_path)
+            try:
+                cons.consume()
+                assert cons.peekleft() is None
+            finally:
+                cons.close()
+        finally:
+            if os.path.exists(shm_path):
+                os.unlink(shm_path)
+
+    def test_peekright_empty_after_consume(self, shm_path: str) -> None:
+        """Given all messages consumed, When peekright called, Then returns None."""
+        prod = ShmMpscProducer(
+            shm_path, 1 << 12, num_rings=1, create=True, unlink_on_close=False
+        )
+        try:
+            prod.insert(b"x")
+            cons = ShmMpscConsumer(shm_path)
+            try:
+                cons.consume()
+                assert cons.peekright() is None
+            finally:
+                cons.close()
+        finally:
+            if os.path.exists(shm_path):
+                os.unlink(shm_path)
