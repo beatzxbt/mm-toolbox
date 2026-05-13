@@ -1,4 +1,12 @@
 # MM Toolbox
+
+[![PyPI version](https://img.shields.io/pypi/v/mm-toolbox)](https://pypi.org/project/mm-toolbox/)
+[![Python versions](https://img.shields.io/pypi/pyversions/mm-toolbox)](https://pypi.org/project/mm-toolbox/)
+[![License](https://img.shields.io/pypi/l/mm-toolbox)](https://github.com/beatzxbt/mm-toolbox/blob/main/LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/beatzxbt/mm-toolbox/ci.yml?label=tests)](https://github.com/beatzxbt/mm-toolbox/actions/workflows/ci.yml)
+[![Downloads](https://img.shields.io/pypi/dm/mm-toolbox)](https://pypi.org/project/mm-toolbox/)
+[![Coverage](https://img.shields.io/codecov/c/github/beatzxbt/mm-toolbox)](https://codecov.io/gh/beatzxbt/mm-toolbox)
+
 **MM Toolbox** is a Python library designed to provide high-performance tools for market making strategies.
 
 ## Contents
