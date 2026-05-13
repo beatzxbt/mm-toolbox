@@ -9,7 +9,10 @@ multiprocess delivery, empty messages, 1 MB messages, and unicode worker names.
 from __future__ import annotations
 
 import multiprocessing
+import struct
 import time
+
+import pytest
 
 from mm_toolbox.logging.advanced.config import LoggerConfig
 from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
@@ -202,3 +205,173 @@ class TestProtocolIndirect:
 
         assert len(handler.logs) >= 1
         assert handler.logs[0].name == name.encode("utf-8")
+
+
+class TestProtocolDecodeErrors:
+    """Layer 1 — ``MasterLogger._decode_worker_message`` malformed-input tests.
+
+    Exercises the ``BinaryReader`` underrun checks (``read_u8``, ``read_u64``,
+    ``read_u32``) and the master's own boundary validation indirectly.
+    """
+
+    @pytest.fixture
+    def master(self):
+        """Yield a running MasterLogger with no handlers.
+
+        Yields:
+            MasterLogger: Configured master instance.
+        """
+        config = LoggerConfig(path="/tmp/test_decode_errors.shm")
+        master = MasterLogger(config=config, log_handlers=[])
+        yield master
+        master.shutdown()
+
+    def test_empty_bytes(self, master):
+        """Given empty bytes, ``_decode_worker_message`` raises on missing u8."""
+        with pytest.raises(ValueError, match="Buffer underrun reading u8"):
+            master._decode_worker_message(b"")
+
+    def test_truncated_timestamp(self, master):
+        """Given 1 byte, ``_decode_worker_message`` raises on missing u64."""
+        with pytest.raises(ValueError, match="Buffer underrun reading u64"):
+            master._decode_worker_message(b"\x00")
+
+    def test_truncated_data_len(self, master):
+        """Given 9 bytes, ``_decode_worker_message`` raises on missing u32."""
+        with pytest.raises(ValueError, match="Buffer underrun reading u32"):
+            master._decode_worker_message(b"\x00" * 9)
+
+    def test_zero_data_len(self, master):
+        """Given a valid header with data_len=0, decoding fails at worker name length."""
+        msg = struct.pack("<BQI", 0, 0, 0)  # 13 bytes
+        with pytest.raises(
+            ValueError, match="Buffer underrun reading worker name length"
+        ):
+            master._decode_worker_message(msg)
+
+    def test_data_len_overflow(self, master):
+        """Given a data_len larger than the remaining buffer, decoding raises."""
+        msg = struct.pack("<BQI", 0, 0, 0xFFFFFFFF)
+        with pytest.raises(
+            ValueError, match="Message data_len exceeds available buffer"
+        ):
+            master._decode_worker_message(msg)
+
+    def test_truncated_worker_name(self, master):
+        """Given a name_len larger than available data, decoding raises."""
+        msg = struct.pack("<BQI", 0, 0, 4) + struct.pack("<I", 10) + b"\x00" * 3
+        with pytest.raises(ValueError, match="Buffer underrun reading worker name"):
+            master._decode_worker_message(msg)
+
+    def test_truncated_log_count(self, master):
+        """Given data_len=4 (only name_len), decoding fails at log count."""
+        msg = struct.pack("<BQI", 0, 0, 4) + struct.pack("<I", 0)
+        with pytest.raises(ValueError, match="Buffer underrun reading log count"):
+            master._decode_worker_message(msg)
+
+    def test_impossibly_large_num_logs(self, master):
+        """Given num_logs larger than the payload allows, decoding raises."""
+        # Header (13) + name_len(4)=0 + num_logs(4)=1 → total 21, data_len=8
+        msg = struct.pack("<BQI", 0, 0, 8) + struct.pack("<II", 0, 1)
+        with pytest.raises(ValueError, match="num_logs impossibly large for payload"):
+            master._decode_worker_message(msg)
+
+    def test_truncated_log_message(self, master):
+        """Given a log with a message_len exceeding remaining bytes, decoding raises."""
+        # Header (13) + name_len(4)=0 + num_logs(4)=1 + ts(8) + level(1) + msg_len(4)=10 + 5 bytes of msg
+        log_data = (
+            struct.pack("<II", 0, 1)
+            + struct.pack("<QB", 123, 2)
+            + struct.pack("<I", 10)
+            + b"\x00" * 5
+        )
+        data_len = len(log_data)
+        msg = struct.pack("<BQI", 0, 0, data_len) + log_data
+        with pytest.raises(ValueError, match="Buffer underrun reading log message"):
+            master._decode_worker_message(msg)
+
+
+class TestProtocolBufferBoundaries:
+    """Layer 2 — Buffer growth and boundary tests via worker/master integration."""
+
+    def test_very_large_batch(self, tmp_path):
+        """Given 1000 small messages, all are delivered without buffer overflow."""
+        path = str(tmp_path / "test_protocol_batch.shm")
+        config = LoggerConfig(path=path, max_batch_messages=1000)
+        handler = CaptureHandler()
+        master = MasterLogger(config=config, log_handlers=[handler])
+        handler.add_primary_config(config)
+
+        logger = WorkerLogger(config=config, name="BATCH")
+        messages = [f"msg_{i}".encode() for i in range(1000)]
+        for msg in messages:
+            logger.info(msg_bytes=msg)
+        logger.shutdown()
+
+        time.sleep(0.5)
+        master.shutdown()
+
+        received_messages = [log.message for log in handler.logs]
+        for msg in messages:
+            assert msg in received_messages
+
+    def test_exact_batch_boundary(self, tmp_path):
+        """Given messages that exactly hit the batch limit, flushing works correctly."""
+        path = str(tmp_path / "test_protocol_exact.shm")
+        config = LoggerConfig(path=path, max_batch_messages=5)
+        handler = CaptureHandler()
+        master = MasterLogger(config=config, log_handlers=[handler])
+        handler.add_primary_config(config)
+
+        logger = WorkerLogger(config=config, name="EXACT")
+        messages = [f"m{i}".encode() for i in range(15)]
+        for msg in messages:
+            logger.info(msg_bytes=msg)
+        logger.shutdown()
+
+        time.sleep(0.2)
+        master.shutdown()
+
+        received_messages = [log.message for log in handler.logs]
+        assert len(received_messages) == 15
+        for msg in messages:
+            assert msg in received_messages
+
+    def test_5_mb_message(self, tmp_path):
+        """Given a 5 MB payload, the master receives it without truncation."""
+        path = str(tmp_path / "test_protocol_5mb.shm")
+        config = LoggerConfig(path=path)
+        handler = CaptureHandler()
+        master = MasterLogger(config=config, log_handlers=[handler])
+        handler.add_primary_config(config)
+
+        logger = WorkerLogger(config=config, name="HUGE")
+        huge_msg = b"Z" * (5 * 1024 * 1024)
+        logger.info(msg_bytes=huge_msg)
+        logger.shutdown()
+
+        time.sleep(1.0)
+        master.shutdown()
+
+        assert len(handler.logs) >= 1
+        assert handler.logs[0].message == huge_msg
+
+    def test_long_worker_name(self, tmp_path):
+        """Given a very long worker name, encoding and decoding succeed."""
+        path = str(tmp_path / "test_protocol_long_name.shm")
+        config = LoggerConfig(path=path)
+        handler = CaptureHandler()
+        master = MasterLogger(config=config, log_handlers=[handler])
+        handler.add_primary_config(config)
+
+        name = "A" * 4096
+        logger = WorkerLogger(config=config, name=name)
+        logger.info(msg_bytes=b"test")
+        logger.shutdown()
+
+        time.sleep(0.2)
+        master.shutdown()
+
+        assert len(handler.logs) >= 1
+        assert handler.logs[0].name == name.encode("utf-8")
+        assert handler.logs[0].message == b"test"
