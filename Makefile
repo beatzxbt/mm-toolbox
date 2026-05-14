@@ -1,4 +1,4 @@
-.PHONY: help format typecheck fix test-py test-c test-all test-coverage sync build rebuild remove-build \
+.PHONY: help format typecheck fix test-py test-c test-all test-coverage sync build rebuild remove-build clean \
         wheel wheel-pep517 wheel-check sdist dist check-dist clean-dist upload-test \
         macos-wheels linux-wheels-x86_64 linux-wheels-aarch64 linux-wheels wheels %
 
@@ -47,14 +47,15 @@ build-test:
 build: ## Build all Cython extensions
 	$(MAKE) build-lib build-test
 
-clean-caches:
+clean: ## Remove all caches (pycache, pytest, ruff, uv, cibw)
 	find . -type d -name "__pycache__" -delete
-	rm -rf .pytest_cache/ .ruff_cache/
+	rm -rf .pytest_cache/ .ruff_cache/ htmlcov/ .cibw-cache/
+	uv cache clean
 
 remove-build-lib:
 	rm -rf build/ *.egg-info/
 	find ./src -name "*.so" -delete
-	$(MAKE) clean-caches
+	$(MAKE) clean
 
 remove-build-tests:
 	rm -rf build/ *.egg-info/
@@ -66,7 +67,7 @@ remove-build-tests:
 	find ./tests/orderbook/advanced -path "*/wrapper_cython/*.c" -type f -delete
 	find ./tests -name "cython_test_*.so" -delete
 	find ./tests -name "cython_test_*.c" -type f -delete
-	$(MAKE) clean-caches
+	$(MAKE) clean
 
 remove-build: ## Remove build artifacts and compiled extensions
 	$(MAKE) remove-build-lib remove-build-tests
@@ -146,4 +147,4 @@ help: ## Display this help message
 	@grep -E '^(upload-test):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ''
 	@echo 'Other:'
-	@grep -E '^(sync|help):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(sync|clean|help):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
