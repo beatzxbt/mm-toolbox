@@ -44,6 +44,18 @@ jobs:
       run: |
         make test-all
 
+    - name: Generate coverage data
+      run: |
+        make remove-build-lib
+        CYTHON_TRACE=1 uv run python setup.py build_ext --inplace --parallel $(nproc 2>/dev/null || uv run python -c 'import os;print(os.cpu_count())')
+        uv run pytest --cov=src --cov-report=xml --cov-report=term-missing
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: false
+
     - name: Run code quality checks
       run: |
         uv run ruff format --check .
