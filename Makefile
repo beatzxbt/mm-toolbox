@@ -22,7 +22,7 @@ test-py: ## Run tests
 test-c: ## Run C unit tests
 	$(MAKE) -C tests/orderbook/advanced/c test
 
-test-all: ## Run all tests (C + Python)
+test-all: build ## Run all tests (C + Python)
 	$(MAKE) test-c test-py
 
 test-coverage: ## Run tests with Cython-aware coverage (rebuild, test, clean)
