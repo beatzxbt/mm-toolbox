@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.0.0b9 (Unreleased)
+
+### Orderbook
+
+### Benchmarks
+
+### Build / CI
+
 ## 1.0.0b8 (Unreleased)
 
 ## 1.0.0b7 (2026-05-12)
