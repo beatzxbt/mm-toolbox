@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 ### Benchmarks
 
 ### Build / CI
+- Ensure `test-all` depends on `build` so extensions are current before running tests.
 
 ## 1.0.0b8 (Unreleased)
 
