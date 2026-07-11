@@ -761,7 +761,7 @@ wheels = [
 
 [[package]]
 name = "mm-toolbox"
-version = "1.0.0b8"
+version = "1.0.0b9"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
