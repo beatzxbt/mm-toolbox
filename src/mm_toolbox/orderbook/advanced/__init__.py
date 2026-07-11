@@ -1,10 +1,6 @@
 from .level import (
     PyOrderbookLevel,
     PyOrderbookLevels,
-    convert_price_from_tick,
-    convert_price_to_tick,
-    convert_size_from_lot,
-    convert_size_to_lot,
 )
 from .enum import (
     PyOrderbookSortedness,
@@ -26,8 +22,4 @@ __all__ = [
     "PyOrderbookLevel",
     "PyOrderbookLevels",
     "PyOrderbookSortedness",
-    "convert_price_from_tick",
-    "convert_price_to_tick",
-    "convert_size_from_lot",
-    "convert_size_to_lot",
 ]

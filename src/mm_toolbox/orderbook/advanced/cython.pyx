@@ -4,28 +4,27 @@
 # cython: cdivision=True
 
 from libc.stdint cimport uint64_t as u64
+from libc.stdlib cimport free, malloc, realloc
 
 from .core cimport CoreAdvancedOrderbook
 from .enum.enums cimport CyOrderbookSortedness
-from .ladder.ladder cimport OrderbookLadderData
+from .level.helpers cimport (
+    convert_price_to_tick_trusted,
+    convert_size_to_lot_trusted,
+    validate_price,
+    validate_size,
+)
 from .level.level cimport (
+    OrderbookEntry,
     OrderbookLevel,
     OrderbookLevels,
+    create_orderbook_entry,
 )
 
 
-cdef class AdvancedOrderbook:
-    """Cython-facing API for the advanced orderbook with efficient in-place updates.
-    
-    This class provides a Cython API wrapper around CoreAdvancedOrderbook, designed
-    for use in Cython code that needs high-performance orderbook operations. Methods
-    that modify the orderbook (consume_*) are marked noexcept for use in nogil contexts.
-    Methods that query the orderbook may raise RuntimeError if the orderbook is empty.
-    
-    The orderbook maintains separate bid and ask sides, each with a fixed maximum
-    number of levels. Levels are stored internally using integer arithmetic (ticks
-    and lots) for precision and performance.
-    """
+cdef class CyAdvancedOrderbook:
+    """Cython-facing advanced orderbook wrapper."""
+
     def __cinit__(
         self,
         double tick_size,
@@ -34,15 +33,6 @@ cdef class AdvancedOrderbook:
         CyOrderbookSortedness delta_sortedness=CyOrderbookSortedness.UNKNOWN,
         CyOrderbookSortedness snapshot_sortedness=CyOrderbookSortedness.UNKNOWN,
     ):
-        """Initialize a new AdvancedOrderbook instance.
-        
-        Args:
-            tick_size: Minimum price increment (must be > 0)
-            lot_size: Minimum size increment (must be > 0)
-            num_levels: Maximum number of levels per side (must be > 0)
-            delta_sortedness: Expected sort order for delta updates (default: UNKNOWN)
-            snapshot_sortedness: Expected sort order for snapshot updates (default: UNKNOWN)
-        """
         self._core = CoreAdvancedOrderbook(
             tick_size,
             lot_size,
@@ -50,100 +40,159 @@ cdef class AdvancedOrderbook:
             delta_sortedness,
             snapshot_sortedness,
         )
+        self._entry_buffer_capacity = num_levels if num_levels > 0 else 1
+        self._ask_entry_buffer = <OrderbookEntry*>malloc(
+            self._entry_buffer_capacity * sizeof(OrderbookEntry)
+        )
+        if self._ask_entry_buffer == NULL:
+            raise MemoryError("Failed to allocate ask entry buffer")
+        self._bid_entry_buffer = <OrderbookEntry*>malloc(
+            self._entry_buffer_capacity * sizeof(OrderbookEntry)
+        )
+        if self._bid_entry_buffer == NULL:
+            free(self._ask_entry_buffer)
+            self._ask_entry_buffer = NULL
+            raise MemoryError("Failed to allocate bid entry buffer")
+
+    def __dealloc__(self):
+        if self._ask_entry_buffer != NULL:
+            free(self._ask_entry_buffer)
+        if self._bid_entry_buffer != NULL:
+            free(self._bid_entry_buffer)
+        self._ask_entry_buffer = NULL
+        self._bid_entry_buffer = NULL
+
+    cdef void _ensure_entry_capacity(self, u64 required):
+        cdef:
+            u64 new_capacity
+            void* new_asks
+            void* new_bids
+
+        if required <= self._entry_buffer_capacity:
+            return
+
+        new_capacity = self._entry_buffer_capacity
+        while new_capacity < required:
+            new_capacity *= 2
+
+        new_asks = realloc(self._ask_entry_buffer, new_capacity * sizeof(OrderbookEntry))
+        if new_asks == NULL:
+            raise MemoryError("Failed to grow ask entry buffer")
+        self._ask_entry_buffer = <OrderbookEntry*>new_asks
+
+        new_bids = realloc(self._bid_entry_buffer, new_capacity * sizeof(OrderbookEntry))
+        if new_bids == NULL:
+            raise MemoryError("Failed to grow bid entry buffer")
+        self._bid_entry_buffer = <OrderbookEntry*>new_bids
+        self._entry_buffer_capacity = new_capacity
+
+    cdef void _normalize_levels_to_entries(
+        self,
+        OrderbookLevel* levels,
+        u64 count,
+        OrderbookEntry* entries,
+    ):
+        cdef u64 i
+        for i in range(count):
+            validate_price(levels[i].price)
+            validate_size(levels[i].size)
+            entries[i] = create_orderbook_entry(
+                convert_price_to_tick_trusted(levels[i].price, self._core._tick_size_recip),
+                convert_size_to_lot_trusted(levels[i].size, self._core._lot_size_recip),
+                levels[i].norders,
+            )
 
     cdef void clear(self):
-        """Clear all levels from both sides of the orderbook."""
         self._core.clear()
 
     cdef void consume_snapshot(self, OrderbookLevels asks, OrderbookLevels bids):
-        """Replace the entire orderbook state with new snapshot data.
-        
-        Args:
-            asks: OrderbookLevels struct containing ask levels
-            bids: OrderbookLevels struct containing bid levels
-        """
-        self._core.consume_snapshot(asks, bids)
+        cdef u64 required = (
+            asks.num_levels if asks.num_levels >= bids.num_levels else bids.num_levels
+        )
+        self._ensure_entry_capacity(required)
+        self._normalize_levels_to_entries(
+            asks.levels,
+            asks.num_levels,
+            self._ask_entry_buffer,
+        )
+        self._normalize_levels_to_entries(
+            bids.levels,
+            bids.num_levels,
+            self._bid_entry_buffer,
+        )
+        self._core.consume_snapshot_entries(
+            self._ask_entry_buffer,
+            asks.num_levels,
+            self._bid_entry_buffer,
+            bids.num_levels,
+        )
 
     cdef void consume_deltas(self, OrderbookLevels asks, OrderbookLevels bids):
-        """Apply incremental updates to the orderbook.
-        
-        Args:
-            asks: OrderbookLevels struct containing ask level updates
-            bids: OrderbookLevels struct containing bid level updates
-        """
-        self._core.consume_deltas(asks, bids)
+        cdef u64 required = (
+            asks.num_levels if asks.num_levels >= bids.num_levels else bids.num_levels
+        )
+        self._ensure_entry_capacity(required)
+        self._normalize_levels_to_entries(
+            asks.levels,
+            asks.num_levels,
+            self._ask_entry_buffer,
+        )
+        self._normalize_levels_to_entries(
+            bids.levels,
+            bids.num_levels,
+            self._bid_entry_buffer,
+        )
+        self._core.consume_deltas_entries(
+            self._ask_entry_buffer,
+            asks.num_levels,
+            self._bid_entry_buffer,
+            bids.num_levels,
+        )
 
     cdef void consume_bbo(self, OrderbookLevel ask, OrderbookLevel bid):
-        """Update only the best bid and offer (top of book).
-        
-        Args:
-            ask: OrderbookLevel struct for the best ask
-            bid: OrderbookLevel struct for the best bid
-        """
-        self._core.consume_bbo(ask, bid)
+        cdef:
+            u64 ask_ticks
+            u64 ask_lots
+            u64 bid_ticks
+            u64 bid_lots
+            OrderbookEntry ask_entry
+            OrderbookEntry bid_entry
+
+        validate_price(ask.price)
+        validate_size(ask.size)
+        validate_price(bid.price)
+        validate_size(bid.size)
+        ask_ticks = convert_price_to_tick_trusted(ask.price, self._core._tick_size_recip)
+        ask_lots = convert_size_to_lot_trusted(ask.size, self._core._lot_size_recip)
+        bid_ticks = convert_price_to_tick_trusted(bid.price, self._core._tick_size_recip)
+        bid_lots = convert_size_to_lot_trusted(bid.size, self._core._lot_size_recip)
+        if bid_ticks >= ask_ticks:
+            raise ValueError("Crossed BBO; bid price must be below ask price")
+        ask_entry = create_orderbook_entry(
+            ask_ticks,
+            ask_lots,
+            ask.norders,
+        )
+        bid_entry = create_orderbook_entry(
+            bid_ticks,
+            bid_lots,
+            bid.norders,
+        )
+        self._core.consume_bbo_entries(ask_entry, bid_entry)
 
     cdef double get_mid_price(self):
-        """Calculate the mid price (average of best bid and ask).
-        
-        Returns:
-            Mid price, or infinity if orderbook is empty
-        
-        Raises:
-            RuntimeError: If orderbook is empty
-        """
         return self._core.get_mid_price()
 
     cdef double get_bbo_spread(self):
-        """Calculate the spread between best bid and ask.
-        
-        Returns:
-            Spread in price units, or infinity if orderbook is empty
-        
-        Raises:
-            RuntimeError: If orderbook is empty
-        """
         return self._core.get_bbo_spread()
 
     cdef double get_wmid_price(self):
-        """Calculate the weighted mid price (volume-weighted average of best bid and ask).
-        
-        Returns:
-            Weighted mid price, or infinity if orderbook is empty
-        
-        Raises:
-            RuntimeError: If orderbook is empty
-        """
         return self._core.get_wmid_price()
 
     cdef double get_volume_weighted_mid_price(self, double size, bint is_base_currency):
-        """Calculate volume-weighted mid price for a given trade size.
-        
-        Args:
-            size: Trade size to calculate weighted price for
-            is_base_currency: If True, size is in base currency; if False, in quote currency
-        
-        Returns:
-            Volume-weighted mid price, or infinity if orderbook is empty or size cannot be filled
-        
-        Raises:
-            RuntimeError: If orderbook is empty
-        """
         return self._core.get_volume_weighted_mid_price(size, is_base_currency)
 
     cdef double get_price_impact(self, double size, bint is_buy, bint is_base_currency):
-        """Calculate price impact of executing a trade of given size.
-        
-        Args:
-            size: Trade size
-            is_buy: If True, anchor at best ask and consume asks upward; if False, anchor at best bid and consume bids downward
-            is_base_currency: If True, size is in base currency; if False, convert quote size to base using the same touch anchor price
-        
-        Returns:
-            Absolute terminal impact from touch anchor to last consumed level, or infinity if size cannot be filled
-        
-        Raises:
-            RuntimeError: If orderbook is empty
-        """
         return self._core.get_price_impact(size, is_buy, is_base_currency)
 
     cdef double get_size_for_price_impact_bps(
@@ -152,84 +201,29 @@ cdef class AdvancedOrderbook:
         bint is_buy,
         bint is_base_currency,
     ):
-        """Calculate cumulative size available within a basis-point depth band.
-        
-        Args:
-            impact_bps: Price depth in basis points from touch
-            is_buy: If True, aggregate asks up to best_ask * (1 + impact_bps/10000); if False, bids down to best_bid * (1 - impact_bps/10000)
-            is_base_currency: If True, return base size; if False, return quote notional
-        
-        Returns:
-            Cumulative available size within the band
-        
-        Raises:
-            RuntimeError: If orderbook is empty
-        """
-        return self._core.get_size_for_price_impact_bps(
-            impact_bps,
-            is_buy,
-            is_base_currency,
-        )
+        return self._core.get_size_for_price_impact_bps(impact_bps, is_buy, is_base_currency)
 
     cdef bint is_bbo_crossed(self, double other_bid_price, double other_ask_price):
-        """Check if this orderbook's BBO crosses with another orderbook's BBO.
-        
-        Args:
-            other_bid_price: Best bid price from another orderbook
-            other_ask_price: Best ask price from another orderbook
-        
-        Returns:
-            True if the BBOs cross (this bid >= other ask or this ask <= other bid)
-        
-        Raises:
-            RuntimeError: If orderbook is empty
-        """
         return self._core.is_bbo_crossed(other_bid_price, other_ask_price)
 
     cdef bint does_bbo_price_change(self, double bid_price, double ask_price):
-        """Check if the given prices differ from current BBO.
-        
-        Args:
-            bid_price: Bid price to compare
-            ask_price: Ask price to compare
-        
-        Returns:
-            True if either price differs from current BBO
-        
-        Raises:
-            RuntimeError: If orderbook is empty
-        """
         return self._core.does_bbo_price_change(bid_price, ask_price)
 
     cdef tuple get_bbo(self):
-        """Get the best bid and offer (top of book).
-        
-        Returns:
-            Tuple of (best_bid, best_ask) as OrderbookLevel structs
-        
-        Raises:
-            RuntimeError: If orderbook is empty
-        """
-        if self._core._bids.is_empty() or self._core._asks.is_empty():
-            raise RuntimeError("Empty view on one/both sides of orderbook; cannot compute without data")
-        cdef OrderbookLadderData* bids_data = self._core.get_bids_data()
-        cdef OrderbookLadderData* asks_data = self._core.get_asks_data()
-        return (bids_data.levels[0], asks_data.levels[0])
+        self._core._ensure_not_empty()
+        return (
+            self._core._level_from_entry(self._core._bids.top()),
+            self._core._level_from_entry(self._core._asks.top()),
+        )
 
-    cdef OrderbookLevel* get_bids(self):
-        """Get all bid levels."""
-        cdef OrderbookLadderData* v = self._core.get_bids_data()
-        return v.levels
+    cdef OrderbookLevel get_bid(self, u64 index):
+        return self._core._level_from_entry(self._core._bids.at(index))
 
-    cdef OrderbookLevel* get_asks(self):
-        """Get all ask levels."""
-        cdef OrderbookLadderData* v = self._core.get_asks_data()
-        return v.levels
+    cdef OrderbookLevel get_ask(self, u64 index):
+        return self._core._level_from_entry(self._core._asks.at(index))
 
     cdef u64 get_num_bids(self):
-        """Get number of bid levels."""
         return self._core.get_bids_data().num_levels
 
     cdef u64 get_num_asks(self):
-        """Get number of ask levels."""
         return self._core.get_asks_data().num_levels

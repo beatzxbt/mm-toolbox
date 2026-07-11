@@ -10,13 +10,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from mm_toolbox.orderbook.advanced import (
-    OrderbookLevel,
-    OrderbookLevels,
-)
+from mm_toolbox.orderbook.advanced import OrderbookLevels
 from tests.orderbook.advanced.conftest import (
-    TICK_SIZE,
-    LOT_SIZE,
     PyOrderbookLevel,
     _make_levels,
     _mk_book,
@@ -49,21 +44,99 @@ class TestEndToEnd:
         delta_asks, _ = _make_levels(
             prices=[100.01], sizes=[5.0], norders=[5], with_precision=True
         )
-        empty_bids = OrderbookLevels.from_list_with_ticks_and_lots(
-            [1.0], [0.0], [0], TICK_SIZE, LOT_SIZE
-        )
+        empty_bids = OrderbookLevels.from_list([1.0], [0.0], [0])
         book.consume_deltas(delta_asks, empty_bids)
 
         # BBO
-        new_ask = OrderbookLevel.with_ticks_and_lots(
-            100.015, 2.0, TICK_SIZE, LOT_SIZE, 1
+        book.consume_bbo_values(
+            ask_price=100.015,
+            ask_size=2.0,
+            bid_price=100.005,
+            bid_size=2.0,
         )
-        new_bid = OrderbookLevel.with_ticks_and_lots(
-            100.005, 2.0, TICK_SIZE, LOT_SIZE, 1
-        )
-        book.consume_bbo(new_ask, new_bid)
 
         assert book.get_mid_price() > 0
+
+    def test_consume_bbo_values_updates_raw_exports(self):
+        """Given scalar BBO updates, When consumed, Then exported raw levels update."""
+        book = _mk_book(num_levels=64)
+
+        ask_prices = np.array([100.01, 100.02], dtype=np.float64)
+        ask_sizes = np.array([1.5, 2.5], dtype=np.float64)
+        bid_prices = np.array([100.0, 99.99], dtype=np.float64)
+        bid_sizes = np.array([1.0, 2.0], dtype=np.float64)
+        book.consume_snapshot_numpy(ask_prices, ask_sizes, bid_prices, bid_sizes)
+
+        book.consume_bbo_values(
+            ask_price=100.01,
+            ask_size=3.25,
+            bid_price=100.0,
+            bid_size=4.5,
+            ask_norders=7,
+            bid_norders=9,
+        )
+
+        bids = book.get_bids_numpy()
+        asks = book.get_asks_numpy()
+        assert bids["price"][0] == pytest.approx(100.0)
+        assert asks["price"][0] == pytest.approx(100.01)
+        assert bids["size"][0] == pytest.approx(4.5)
+        assert asks["size"][0] == pytest.approx(3.25)
+        assert bids["norders"][0] == 9
+        assert asks["norders"][0] == 7
+
+    def test_consume_bbo_values_and_level_struct_are_equivalent(self):
+        """Given identical BBO inputs, When consumed as values or levels, Then books match."""
+        values_book = _mk_book(num_levels=64)
+        levels_book = _mk_book(num_levels=64)
+        bids, _ = _make_levels(
+            prices=[100.0, 99.99, 99.98],
+            sizes=[1.0, 2.0, 3.0],
+            norders=[1, 2, 3],
+            with_precision=True,
+        )
+        asks, _ = _make_levels(
+            prices=[100.01, 100.02, 100.03],
+            sizes=[1.5, 2.5, 3.5],
+            norders=[1, 2, 3],
+            with_precision=True,
+        )
+        values_book.consume_snapshot(asks, bids)
+        levels_book.consume_snapshot(asks, bids)
+
+        values_book.consume_bbo_values(
+            ask_price=100.005,
+            ask_size=2.25,
+            bid_price=99.995,
+            bid_size=2.75,
+            ask_norders=4,
+            bid_norders=5,
+        )
+        levels_book.consume_bbo(
+            PyOrderbookLevel(100.005, 2.25, 4),
+            PyOrderbookLevel(99.995, 2.75, 5),
+        )
+
+        np.testing.assert_array_equal(
+            np.asarray(values_book.get_asks_numpy()),
+            np.asarray(levels_book.get_asks_numpy()),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(values_book.get_bids_numpy()),
+            np.asarray(levels_book.get_bids_numpy()),
+        )
+
+    def test_crossed_bbo_values_rejected(self):
+        """Given crossed scalar BBO values, When consumed, Then ValueError is raised."""
+        book = _mk_book(num_levels=64)
+
+        with pytest.raises(ValueError, match="Crossed BBO"):
+            book.consume_bbo_values(
+                ask_price=100.00,
+                ask_size=1.0,
+                bid_price=100.01,
+                bid_size=1.0,
+            )
 
     def test_numpy_vs_struct_equivalence(self):
         """Given same data via numpy and struct APIs, When consumed, Then produce identical mid prices."""
@@ -118,32 +191,11 @@ class TestEndToEnd:
         sizes = [1.0] * 100
         norders = [1] * 100
 
-        asks = OrderbookLevels.from_list_with_ticks_and_lots(
-            ask_prices, sizes, norders, TICK_SIZE, LOT_SIZE
-        )
-        bids = OrderbookLevels.from_list_with_ticks_and_lots(
-            bid_prices, sizes, norders, TICK_SIZE, LOT_SIZE
-        )
+        asks = OrderbookLevels.from_list(ask_prices, sizes, norders)
+        bids = OrderbookLevels.from_list(bid_prices, sizes, norders)
         book.consume_snapshot(asks, bids)
 
         assert book.get_mid_price() > 0
-
-    def test_crossed_book_handling(self):
-        """Given crossed snapshot (bid > ask), When consumed, Then negative spread reported."""
-        book = _mk_book(num_levels=64)
-
-        # Crossed snapshot: bid > ask
-        asks, _ = _make_levels(
-            prices=[100.0], sizes=[1.0], norders=[1], with_precision=True
-        )
-        bids, _ = _make_levels(
-            prices=[100.01], sizes=[1.0], norders=[1], with_precision=True
-        )
-        book.consume_snapshot(asks, bids)
-
-        # Crossed books are preserved by snapshot
-        spread = book.get_bbo_spread()
-        assert spread < 0
 
     def test_get_bbo_returns_py_orderbook_levels(self):
         """Given populated book, When get_bbo called, Then returns PyOrderbookLevel instances."""

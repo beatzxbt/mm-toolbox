@@ -227,6 +227,7 @@ def get_orderbook_extensions():
         get_extension(
             name="mm_toolbox.orderbook.advanced.ladder.ladder",
             sources=[
+                "src/mm_toolbox/orderbook/advanced/c/orderbook_helpers.c",
                 "src/mm_toolbox/orderbook/advanced/c/orderbook_ladder.c",
                 "src/mm_toolbox/orderbook/advanced/ladder/ladder.pyx",
             ],
@@ -234,17 +235,27 @@ def get_orderbook_extensions():
         ),
         get_extension(
             name="mm_toolbox.orderbook.advanced.core",
-            sources=["src/mm_toolbox/orderbook/advanced/core.pyx"],
+            sources=[
+                "src/mm_toolbox/orderbook/advanced/c/orderbook_helpers.c",
+                "src/mm_toolbox/orderbook/advanced/core.pyx",
+            ],
             include_dirs=base_include_dirs,
         ),
         get_extension(
             name="mm_toolbox.orderbook.advanced.cython",
-            sources=["src/mm_toolbox/orderbook/advanced/cython.pyx"],
+            sources=[
+                "src/mm_toolbox/orderbook/advanced/c/orderbook_helpers.c",
+                "src/mm_toolbox/orderbook/advanced/cython.pyx",
+            ],
             include_dirs=base_include_dirs,
         ),
         get_extension(
             name="mm_toolbox.orderbook.advanced.python",
-            sources=["src/mm_toolbox/orderbook/advanced/python.pyx"],
+            sources=[
+                "src/mm_toolbox/orderbook/advanced/c/orderbook_helpers.c",
+                "src/mm_toolbox/orderbook/advanced/c/orderbook_ladder.c",
+                "src/mm_toolbox/orderbook/advanced/python.pyx",
+            ],
             include_dirs=base_include_dirs,
         ),
     ]

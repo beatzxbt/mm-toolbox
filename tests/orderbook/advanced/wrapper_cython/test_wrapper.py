@@ -42,6 +42,11 @@ def test_wrapper_consume_bbo_delegation():
     _native.test_wrapper_consume_bbo_delegation()
 
 
+def test_wrapper_consume_bbo_rejects_crossed_input():
+    """Given crossed BBO data, When consumed, Then ValueError is raised."""
+    _native.test_wrapper_consume_bbo_rejects_crossed_input()
+
+
 def test_wrapper_calculation_delegation():
     """Given populated book, When calculations are delegated, Then correct values returned."""
     _native.test_wrapper_calculation_delegation()

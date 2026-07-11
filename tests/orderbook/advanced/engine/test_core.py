@@ -99,17 +99,17 @@ def test_core_snapshot_single_level_each():
 
 
 def test_core_snapshot_sortedness_unknown():
-    """Given unknown sortedness, When snapshot consumed, Then sorts automatically."""
+    """Given unknown sortedness, When snapshot consumed, Then infers stable order."""
     _native.test_core_snapshot_sortedness_unknown()
 
 
 def test_core_snapshot_populates_ticks_and_lots():
-    """Given snapshot without ticks/lots, When consumed, Then computes them."""
+    """Given raw snapshot, When consumed, Then computes internal entries."""
     _native.test_core_snapshot_populates_ticks_and_lots()
 
 
 def test_core_snapshot_overwrites_ticks_and_lots():
-    """Given snapshot with existing ticks/lots, When consumed, Then overwrites."""
+    """Given raw snapshot, When consumed, Then internal entries are normalized."""
     _native.test_core_snapshot_overwrites_ticks_and_lots()
 
 
@@ -233,9 +233,9 @@ def test_core_bbo_insert_tighter_bid():
     _native.test_core_bbo_insert_tighter_bid()
 
 
-def test_core_bbo_crossed_book_resolution():
-    """Given crossed BBO, When consumed, Then resolves by removing crossed levels."""
-    _native.test_core_bbo_crossed_book_resolution()
+def test_core_bbo_crossed_input_raises():
+    """Given crossed BBO, When consumed, Then raises ValueError."""
+    _native.test_core_bbo_crossed_input_raises()
 
 
 def test_core_bbo_on_empty_book():
@@ -244,7 +244,7 @@ def test_core_bbo_on_empty_book():
 
 
 def test_core_bbo_populates_ticks_and_lots():
-    """Given BBO without ticks/lots, When consumed, Then computes them."""
+    """Given raw BBO, When consumed, Then computes internal entries."""
     _native.test_core_bbo_populates_ticks_and_lots()
 
 
@@ -366,6 +366,11 @@ def test_core_is_crossed_bid_crosses_ask():
 def test_core_is_crossed_ask_crosses_bid():
     """Given ask < bid, When is_crossed checked, Then returns True."""
     _native.test_core_is_crossed_ask_crosses_bid()
+
+
+def test_core_is_crossed_equal_touch_prices():
+    """Given equal touch prices, When is_crossed checked, Then returns True."""
+    _native.test_core_is_crossed_equal_touch_prices()
 
 
 def test_core_is_crossed_empty_raises():

@@ -17,11 +17,11 @@ from mm_toolbox.orderbook.advanced.level.level cimport (
     OrderbookLevel,
     OrderbookLevels,
     create_orderbook_level,
-    create_orderbook_level_with_ticks_and_lots,
 )
 from mm_toolbox.orderbook.advanced.ladder.ladder cimport (
     OrderbookLadder,
     OrderbookLadderData,
+    c_ladder_at,
 )
 from mm_toolbox.orderbook.advanced.core cimport CoreAdvancedOrderbook
 from mm_toolbox.orderbook.advanced.enum.enums cimport CyOrderbookSortedness
@@ -54,6 +54,17 @@ cdef OrderbookLevels _alloc_levels(u64 count):
     return levels
 
 
+cdef OrderbookLevel _make_raw_level(
+    double price,
+    double size,
+    double tick_size,
+    double lot_size,
+    u64 norders=1,
+):
+    """Create a raw test level while preserving legacy helper call shape."""
+    return create_orderbook_level(price, size, norders)
+
+
 cdef void _free_levels(OrderbookLevels* levels):
     """Free OrderbookLevels memory.
 
@@ -83,12 +94,12 @@ cdef OrderbookLevels _make_levels(
         lot_size: Lot size for conversion.
 
     Returns:
-        OrderbookLevels populated with converted tick/lot values.
+        OrderbookLevels populated with raw price/size values.
     """
     cdef OrderbookLevels levels = _alloc_levels(count)
     cdef u64 i
     for i in range(count):
-        levels.levels[i] = create_orderbook_level_with_ticks_and_lots(
+        levels.levels[i] = _make_raw_level(
             prices[i], sizes[i], tick_size, lot_size, 1
         )
     return levels
@@ -106,6 +117,18 @@ cdef bint _approx_eq(double a, double b, double tol=1e-9):
         True if |a - b| < tol.
     """
     return fabs(a - b) < tol
+
+
+cdef u64 _entry_ticks(OrderbookLadderData* data, u64 index):
+    return c_ladder_at(data, index).ticks
+
+
+cdef double _entry_price(OrderbookLadderData* data, u64 index):
+    return _entry_ticks(data, index) * TICK_SIZE
+
+
+cdef double _entry_size(OrderbookLadderData* data, u64 index):
+    return c_ladder_at(data, index).lots * LOT_SIZE
 
 
 # LAYER 3: CoreAdvancedOrderbook (RIGOROUS ENGINE TESTING)
@@ -164,6 +187,40 @@ cdef void _populate_standard_book(CoreAdvancedOrderbook core):
     
     core.consume_snapshot(asks, bids)
     
+    _free_levels(&bids)
+    _free_levels(&asks)
+
+
+cdef void _populate_wide_spread_book(CoreAdvancedOrderbook core):
+    """Populate core with a wider spread for valid inside-spread BBO tests."""
+    cdef double bid_prices[3]
+    cdef double bid_sizes[3]
+    cdef double ask_prices[3]
+    cdef double ask_sizes[3]
+
+    bid_prices[0] = 100.00; bid_prices[1] = 99.99; bid_prices[2] = 99.98
+    bid_sizes[0] = 1.0; bid_sizes[1] = 2.0; bid_sizes[2] = 3.0
+
+    ask_prices[0] = 100.03; ask_prices[1] = 100.04; ask_prices[2] = 100.05
+    ask_sizes[0] = 1.5; ask_sizes[1] = 2.5; ask_sizes[2] = 3.5
+
+    cdef OrderbookLevels bids = _make_levels(
+        bid_prices,
+        bid_sizes,
+        3,
+        TICK_SIZE,
+        LOT_SIZE,
+    )
+    cdef OrderbookLevels asks = _make_levels(
+        ask_prices,
+        ask_sizes,
+        3,
+        TICK_SIZE,
+        LOT_SIZE,
+    )
+
+    core.consume_snapshot(asks, bids)
+
     _free_levels(&bids)
     _free_levels(&asks)
 
@@ -324,8 +381,8 @@ def test_core_snapshot_basic():
     
     assert bids.num_levels == 3
     assert asks.num_levels == 3
-    assert bids.levels[0].price == 100.00  # Best bid
-    assert asks.levels[0].price == 100.01  # Best ask
+    assert _entry_price(bids, 0) == 100.00  # Best bid
+    assert _entry_price(asks, 0) == 100.01  # Best ask
 
 
 def test_core_snapshot_replaces_existing():
@@ -354,8 +411,8 @@ def test_core_snapshot_replaces_existing():
     
     assert bids_view.num_levels == 2
     assert asks_view.num_levels == 2
-    assert bids_view.levels[0].price == 200.00
-    assert asks_view.levels[0].price == 200.01
+    assert _entry_price(bids_view, 0) == 200.00
+    assert _entry_price(asks_view, 0) == 200.01
     
     _free_levels(&bids)
     _free_levels(&asks)
@@ -386,8 +443,8 @@ def test_core_snapshot_more_levels_than_max():
 
     assert bids_view.num_levels == 64  # Truncated to max
     assert asks_view.num_levels == 64  # Truncated to max
-    assert bids_view.levels[0].price == 100.00  # Best bid preserved
-    assert asks_view.levels[0].price == 100.01  # Best ask preserved
+    assert _entry_price(bids_view, 0) == 100.00  # Best bid preserved
+    assert _entry_price(asks_view, 0) == 100.01  # Best ask preserved
 
     _free_levels(&bids)
     _free_levels(&asks)
@@ -448,8 +505,12 @@ def test_core_snapshot_single_level_each():
 
 
 def test_core_snapshot_sortedness_unknown():
-    """Test UNKNOWN sortedness triggers internal sort."""
-    cdef CoreAdvancedOrderbook core = _create_core(DEFAULT_LEVELS, CyOrderbookSortedness.UNKNOWN, CyOrderbookSortedness.UNKNOWN)
+    """Test UNKNOWN sortedness rejects unstable input order."""
+    cdef CoreAdvancedOrderbook core = _create_core(
+        DEFAULT_LEVELS,
+        CyOrderbookSortedness.UNKNOWN,
+        CyOrderbookSortedness.UNKNOWN,
+    )
     
     # Provide unsorted data
     cdef double bid_prices[3]
@@ -465,21 +526,18 @@ def test_core_snapshot_sortedness_unknown():
     cdef OrderbookLevels bids = _make_levels(bid_prices, bid_sizes, 3, TICK_SIZE, LOT_SIZE)
     cdef OrderbookLevels asks = _make_levels(ask_prices, ask_sizes, 3, TICK_SIZE, LOT_SIZE)
     
-    core.consume_snapshot(asks, bids)
-    
-    cdef OrderbookLadderData* bids_view = core.get_bids_data()
-    cdef OrderbookLadderData* asks_view = core.get_asks_data()
-    
-    # Should be sorted correctly
-    assert bids_view.levels[0].price == 100.00  # Best bid (highest)
-    assert asks_view.levels[0].price == 100.01  # Best ask (lowest)
+    try:
+        core.consume_snapshot(asks, bids)
+        assert False
+    except ValueError:
+        pass
     
     _free_levels(&bids)
     _free_levels(&asks)
 
 
 def test_core_snapshot_populates_ticks_and_lots():
-    """Snapshot normalization always computes ticks/lots."""
+    """Snapshot normalization always computes internal entries."""
     cdef CoreAdvancedOrderbook core = _create_core()
 
     cdef OrderbookLevels bids = _alloc_levels(1)
@@ -492,33 +550,29 @@ def test_core_snapshot_populates_ticks_and_lots():
 
     cdef OrderbookLadderData* bids_view = core.get_bids_data()
     cdef OrderbookLadderData* asks_view = core.get_asks_data()
-    assert bids_view.levels[0].ticks == 10000
-    assert asks_view.levels[0].ticks == 10001
+    assert _entry_ticks(bids_view, 0) == 10000
+    assert _entry_ticks(asks_view, 0) == 10001
 
     _free_levels(&bids)
     _free_levels(&asks)
 
 
 def test_core_snapshot_overwrites_ticks_and_lots():
-    """Snapshot normalization overwrites mismatched ticks/lots."""
+    """Snapshot normalization always derives entries from raw values."""
     cdef CoreAdvancedOrderbook core = _create_core()
 
     cdef OrderbookLevels bids = _alloc_levels(1)
     cdef OrderbookLevels asks = _alloc_levels(1)
 
     bids.levels[0] = create_orderbook_level(100.00, 1.0, 1)
-    bids.levels[0].ticks = 1
-    bids.levels[0].lots = 1
     asks.levels[0] = create_orderbook_level(100.01, 1.0, 1)
-    asks.levels[0].ticks = 2
-    asks.levels[0].lots = 2
 
     core.consume_snapshot(asks, bids)
 
     cdef OrderbookLadderData* bids_view = core.get_bids_data()
     cdef OrderbookLadderData* asks_view = core.get_asks_data()
-    assert bids_view.levels[0].ticks == 10000
-    assert asks_view.levels[0].ticks == 10001
+    assert _entry_ticks(bids_view, 0) == 10000
+    assert _entry_ticks(asks_view, 0) == 10001
 
     _free_levels(&bids)
     _free_levels(&asks)
@@ -546,8 +600,8 @@ def test_core_delta_ask_consume_bbo_size():
     core.consume_deltas(delta_asks, delta_bids)
     
     cdef OrderbookLadderData* asks = core.get_asks_data()
-    assert asks.levels[0].size == 5.0
-    assert asks.levels[0].price == 100.01  # Price unchanged
+    assert _entry_size(asks, 0) == 5.0
+    assert _entry_price(asks, 0) == 100.01  # Price unchanged
     
     _free_levels(&delta_asks)
 
@@ -571,7 +625,7 @@ def test_core_delta_ask_delete_bbo():
     
     cdef OrderbookLadderData* asks = core.get_asks_data()
     assert asks.num_levels == 2
-    assert asks.levels[0].price == 100.02  # New BBO
+    assert _entry_price(asks, 0) == 100.02  # New BBO
     
     _free_levels(&delta_asks)
 
@@ -596,9 +650,9 @@ def test_core_delta_ask_insert_new_bbo():
     cdef OrderbookLadderData* asks = core.get_asks_data()
     cdef OrderbookLadderData* bids = core.get_bids_data()
     # Ask at 100.00 (10000 ticks) should be new BBO
-    assert asks.levels[0].ticks == 10000
+    assert _entry_ticks(asks, 0) == 10000
     # Overlapping bid at 100.00 should be removed
-    assert bids.num_levels == 0 or bids.levels[0].ticks < 10000
+    assert bids.num_levels == 0 or _entry_ticks(bids, 0) < 10000
     
     _free_levels(&delta_asks)
 
@@ -625,10 +679,10 @@ def test_core_delta_ask_insert_new_bbo_removes_overlapping_bids():
     cdef OrderbookLadderData* bids = core.get_bids_data()
     
     # New ask should be BBO
-    assert asks.levels[0].price == 99.99
+    assert _approx_eq(_entry_price(asks, 0), 99.99)
     # Overlapping bids should be removed
     assert bids.num_levels < 3
-    assert bids.levels[0].ticks < 9999
+    assert _entry_ticks(bids, 0) < 9999
     
     _free_levels(&delta_asks)
 
@@ -676,8 +730,8 @@ def test_core_delta_ask_update_middle():
     core.consume_deltas(delta_asks, delta_bids)
     
     cdef OrderbookLadderData* asks = core.get_asks_data()
-    assert asks.levels[1].price == 100.02
-    assert asks.levels[1].size == 10.0
+    assert _entry_price(asks, 1) == 100.02
+    assert _entry_size(asks, 1) == 10.0
     
     _free_levels(&delta_asks)
 
@@ -701,8 +755,8 @@ def test_core_delta_ask_delete_middle():
     
     cdef OrderbookLadderData* asks = core.get_asks_data()
     assert asks.num_levels == 2
-    assert asks.levels[0].price == 100.01
-    assert asks.levels[1].price == 100.03  # 100.02 removed
+    assert _entry_price(asks, 0) == 100.01
+    assert _entry_price(asks, 1) == 100.03  # 100.02 removed
     
     _free_levels(&delta_asks)
 
@@ -736,7 +790,13 @@ def test_core_delta_ask_beyond_worst_full_book():
     delta_ask_prices[0] = 100.80  # Beyond worst
     delta_ask_sizes[0] = 1.0
 
-    cdef OrderbookLevels delta_asks = _make_levels(delta_ask_prices, delta_ask_sizes, 1, TICK_SIZE, LOT_SIZE)
+    cdef OrderbookLevels delta_asks = _make_levels(
+        delta_ask_prices,
+        delta_ask_sizes,
+        1,
+        TICK_SIZE,
+        LOT_SIZE,
+    )
     cdef OrderbookLevels delta_bids = _alloc_levels(0)
     delta_bids.num_levels = 0
 
@@ -744,7 +804,7 @@ def test_core_delta_ask_beyond_worst_full_book():
 
     asks_view = core.get_asks_data()
     assert asks_view.num_levels == 64  # Still 64
-    assert _approx_eq(asks_view.levels[63].price, 100.64)  # Still worst ask
+    assert _approx_eq(_entry_price(asks_view, 63), 100.64)  # Still worst ask
 
     _free_levels(&bids)
     _free_levels(&asks_snap)
@@ -785,9 +845,9 @@ def test_core_delta_ask_multiple_sequential():
     # Multiple deltas: delete BBO, update second, insert new
     cdef double ask_prices[3]
     cdef double ask_sizes[3]
-    ask_prices[0] = 100.01; ask_sizes[0] = 0.0   # Delete BBO
-    ask_prices[1] = 100.02; ask_sizes[1] = 5.0  # Update
-    ask_prices[2] = 100.005; ask_sizes[2] = 1.0 # New BBO
+    ask_prices[0] = 100.005; ask_sizes[0] = 1.0 # New BBO
+    ask_prices[1] = 100.01; ask_sizes[1] = 0.0  # Delete BBO
+    ask_prices[2] = 100.02; ask_sizes[2] = 5.0  # Update
     
     cdef OrderbookLevels delta_asks = _make_levels(ask_prices, ask_sizes, 3, TICK_SIZE, LOT_SIZE)
     cdef OrderbookLevels delta_bids = _alloc_levels(0)
@@ -823,7 +883,7 @@ def test_core_delta_bid_consume_bbo_size():
     core.consume_deltas(delta_asks, delta_bids)
     
     cdef OrderbookLadderData* bids = core.get_bids_data()
-    assert bids.levels[0].size == 5.0
+    assert _entry_size(bids, 0) == 5.0
     
     _free_levels(&delta_bids)
 
@@ -846,7 +906,7 @@ def test_core_delta_bid_delete_bbo():
     
     cdef OrderbookLadderData* bids = core.get_bids_data()
     assert bids.num_levels == 2
-    assert bids.levels[0].price == 99.99  # New BBO
+    assert _approx_eq(_entry_price(bids, 0), 99.99)  # New BBO
     
     _free_levels(&delta_bids)
 
@@ -894,10 +954,10 @@ def test_core_delta_bid_insert_new_bbo_removes_overlapping_asks():
     cdef OrderbookLadderData* bids = core.get_bids_data()
     cdef OrderbookLadderData* asks = core.get_asks_data()
     
-    assert bids.levels[0].price == 100.02
+    assert _entry_price(bids, 0) == 100.02
     # Overlapping asks removed
     assert asks.num_levels < 3
-    assert asks.levels[0].ticks > 10002
+    assert _entry_ticks(asks, 0) > 10002
     
     _free_levels(&delta_bids)
 
@@ -919,7 +979,7 @@ def test_core_delta_bid_update_middle():
     core.consume_deltas(delta_asks, delta_bids)
     
     cdef OrderbookLadderData* bids = core.get_bids_data()
-    assert bids.levels[1].size == 10.0
+    assert _entry_size(bids, 1) == 10.0
     
     _free_levels(&delta_bids)
 
@@ -942,7 +1002,7 @@ def test_core_delta_bid_delete_middle():
     
     cdef OrderbookLadderData* bids = core.get_bids_data()
     assert bids.num_levels == 2
-    assert bids.levels[1].price == 99.98
+    assert _entry_price(bids, 1) == 99.98
     
     _free_levels(&delta_bids)
 
@@ -972,8 +1032,8 @@ def test_core_delta_both_sides():
     cdef OrderbookLadderData* asks = core.get_asks_data()
     cdef OrderbookLadderData* bids = core.get_bids_data()
     
-    assert asks.levels[0].size == 5.0
-    assert bids.levels[0].size == 5.0
+    assert _entry_size(asks, 0) == 5.0
+    assert _entry_size(bids, 0) == 5.0
     
     _free_levels(&delta_asks)
     _free_levels(&delta_bids)
@@ -1055,10 +1115,10 @@ def test_core_bbo_update_same_tick():
     cdef CoreAdvancedOrderbook core = _create_core()
     _populate_standard_book(core)
     
-    cdef OrderbookLevel new_ask = create_orderbook_level_with_ticks_and_lots(
+    cdef OrderbookLevel new_ask = _make_raw_level(
         100.01, 5.0, TICK_SIZE, LOT_SIZE, 10
     )
-    cdef OrderbookLevel new_bid = create_orderbook_level_with_ticks_and_lots(
+    cdef OrderbookLevel new_bid = _make_raw_level(
         100.00, 5.0, TICK_SIZE, LOT_SIZE, 10
     )
     
@@ -1067,8 +1127,8 @@ def test_core_bbo_update_same_tick():
     cdef OrderbookLadderData* asks = core.get_asks_data()
     cdef OrderbookLadderData* bids = core.get_bids_data()
     
-    assert asks.levels[0].size == 5.0
-    assert bids.levels[0].size == 5.0
+    assert _entry_size(asks, 0) == 5.0
+    assert _entry_size(bids, 0) == 5.0
 
 
 def test_core_bbo_delete_matching():
@@ -1077,10 +1137,10 @@ def test_core_bbo_delete_matching():
     _populate_standard_book(core)
     
     # Delete BBO ask
-    cdef OrderbookLevel del_ask = create_orderbook_level_with_ticks_and_lots(
+    cdef OrderbookLevel del_ask = _make_raw_level(
         100.01, 0.0, TICK_SIZE, LOT_SIZE, 0
     )
-    cdef OrderbookLevel same_bid = create_orderbook_level_with_ticks_and_lots(
+    cdef OrderbookLevel same_bid = _make_raw_level(
         100.00, 1.0, TICK_SIZE, LOT_SIZE, 1
     )
     
@@ -1088,18 +1148,18 @@ def test_core_bbo_delete_matching():
     
     cdef OrderbookLadderData* asks = core.get_asks_data()
     assert asks.num_levels == 2
-    assert asks.levels[0].price == 100.02
+    assert _entry_price(asks, 0) == 100.02
 
 
 def test_core_bbo_insert_tighter_ask():
     """Test inserting tighter (better) ask."""
     cdef CoreAdvancedOrderbook core = _create_core()
-    _populate_standard_book(core)
+    _populate_wide_spread_book(core)
     
-    cdef OrderbookLevel tighter_ask = create_orderbook_level_with_ticks_and_lots(
-        100.005, 1.0, TICK_SIZE, LOT_SIZE, 1  # Better than 100.01
+    cdef OrderbookLevel tighter_ask = _make_raw_level(
+        100.02, 1.0, TICK_SIZE, LOT_SIZE, 1  # Better than 100.03
     )
-    cdef OrderbookLevel same_bid = create_orderbook_level_with_ticks_and_lots(
+    cdef OrderbookLevel same_bid = _make_raw_level(
         100.00, 1.0, TICK_SIZE, LOT_SIZE, 1
     )
     
@@ -1115,10 +1175,10 @@ def test_core_bbo_insert_tighter_bid():
     cdef CoreAdvancedOrderbook core = _create_core()
     _populate_standard_book(core)
     
-    cdef OrderbookLevel same_ask = create_orderbook_level_with_ticks_and_lots(
+    cdef OrderbookLevel same_ask = _make_raw_level(
         100.01, 1.0, TICK_SIZE, LOT_SIZE, 1
     )
-    cdef OrderbookLevel tighter_bid = create_orderbook_level_with_ticks_and_lots(
+    cdef OrderbookLevel tighter_bid = _make_raw_level(
         100.005, 1.0, TICK_SIZE, LOT_SIZE, 1  # Better than 100.00
     )
     
@@ -1128,28 +1188,24 @@ def test_core_bbo_insert_tighter_bid():
     assert bids.num_levels >= 3
 
 
-def test_core_bbo_crossed_book_resolution():
-    """Test BBO that causes crossing removes overlapping asks."""
+def test_core_bbo_crossed_input_raises():
+    """Test crossed BBO input is rejected before mutating the book."""
     cdef CoreAdvancedOrderbook core = _create_core()
     _populate_standard_book(core)
     
     # Bid at 100.02 crosses ask at 100.01
-    cdef OrderbookLevel same_ask = create_orderbook_level_with_ticks_and_lots(
+    cdef OrderbookLevel same_ask = _make_raw_level(
         100.01, 1.0, TICK_SIZE, LOT_SIZE, 1
     )
-    cdef OrderbookLevel crossing_bid = create_orderbook_level_with_ticks_and_lots(
+    cdef OrderbookLevel crossing_bid = _make_raw_level(
         100.02, 1.0, TICK_SIZE, LOT_SIZE, 1
     )
-    
-    core.consume_bbo(same_ask, crossing_bid)
-    
-    cdef OrderbookLadderData* asks = core.get_asks_data()
-    cdef OrderbookLadderData* bids = core.get_bids_data()
-    
-    # Book should resolve crossing - both sides should remain and not be crossed
-    assert bids.num_levels > 0
-    assert asks.num_levels > 0
-    assert bids.levels[0].ticks < asks.levels[0].ticks
+
+    try:
+        core.consume_bbo(same_ask, crossing_bid)
+        assert False, "Expected ValueError"
+    except ValueError:
+        pass
 
 
 def test_core_bbo_on_empty_book():
@@ -1157,10 +1213,10 @@ def test_core_bbo_on_empty_book():
     cdef CoreAdvancedOrderbook core = _create_core()
     # Don't populate
     
-    cdef OrderbookLevel ask = create_orderbook_level_with_ticks_and_lots(
+    cdef OrderbookLevel ask = _make_raw_level(
         100.01, 1.0, TICK_SIZE, LOT_SIZE, 1
     )
-    cdef OrderbookLevel bid = create_orderbook_level_with_ticks_and_lots(
+    cdef OrderbookLevel bid = _make_raw_level(
         100.00, 1.0, TICK_SIZE, LOT_SIZE, 1
     )
     
@@ -1174,23 +1230,18 @@ def test_core_bbo_on_empty_book():
 
 
 def test_core_bbo_populates_ticks_and_lots():
-    """BBO ingestion always computes ticks/lots from price/size."""
+    """BBO ingestion always derives internal entries from raw values."""
     cdef CoreAdvancedOrderbook core = _create_core()
     _populate_standard_book(core)
 
     cdef OrderbookLevel ask = create_orderbook_level(100.01, 2.0, 1)
     cdef OrderbookLevel bid = create_orderbook_level(100.00, 2.0, 1)
-    ask.ticks = 1
-    ask.lots = 1
-    bid.ticks = 2
-    bid.lots = 2
-
     core.consume_bbo(ask, bid)
 
     cdef OrderbookLadderData* asks = core.get_asks_data()
     cdef OrderbookLadderData* bids = core.get_bids_data()
-    assert asks.levels[0].ticks == 10001
-    assert bids.levels[0].ticks == 10000
+    assert _entry_ticks(asks, 0) == 10001
+    assert _entry_ticks(bids, 0) == 10000
 
 
 # -----------------------------------------------------------------------------
@@ -1530,6 +1581,15 @@ def test_core_is_crossed_ask_crosses_bid():
     assert crossed == True
 
 
+def test_core_is_crossed_equal_touch_prices():
+    """Test equality at either touch is treated as crossed."""
+    cdef CoreAdvancedOrderbook core = _create_core()
+    _populate_standard_book(core)
+
+    assert core.is_bbo_crossed(100.01, 100.05) == True
+    assert core.is_bbo_crossed(99.95, 100.00) == True
+
+
 def test_core_is_crossed_empty_raises():
     """Test crossing check on empty raises."""
     cdef CoreAdvancedOrderbook core = _create_core()
@@ -1736,7 +1796,13 @@ def test_core_fill_to_max_then_insert():
     delta_ask_prices[0] = 100.80  # Beyond worst ask
     delta_ask_sizes[0] = 1.0
 
-    cdef OrderbookLevels delta_asks = _make_levels(delta_ask_prices, delta_ask_sizes, 1, TICK_SIZE, LOT_SIZE)
+    cdef OrderbookLevels delta_asks = _make_levels(
+        delta_ask_prices,
+        delta_ask_sizes,
+        1,
+        TICK_SIZE,
+        LOT_SIZE,
+    )
     cdef OrderbookLevels delta_bids = _alloc_levels(0)
     delta_bids.num_levels = 0
 
