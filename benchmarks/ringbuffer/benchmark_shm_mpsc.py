@@ -70,17 +70,15 @@ class MPSCSHMBenchmarkConfig(BaseBenchmarkConfig):
 
     capacity_bytes: int = 2**20
     num_rings: int = 0
-    payload_sizes: list[int] = field(default_factory=lambda: [32, 128, 512, 2048, 8192])
-    latency_iterations: int = 100_000
-    throughput_duration_sec: float = 3.0
+    payload_sizes: list[int] = field(default_factory=lambda: [128, 512, 1024])
+    latency_iterations: int = 4_096
+    throughput_duration_sec: float = 1.0
     run_latency: bool = True
     run_throughput: bool = True
     run_scalability: bool = True
     run_fairness: bool = True
-    throughput_producer_counts: list[int] = field(default_factory=lambda: [1, 2, 4, 8])
-    scalability_producer_counts: list[int] = field(
-        default_factory=lambda: [1, 2, 4, 8, 16]
-    )
+    throughput_producer_counts: list[int] = field(default_factory=lambda: [1, 2, 4])
+    scalability_producer_counts: list[int] = field(default_factory=lambda: [1, 4])
 
 
 def latency_benchmark_insert(
@@ -370,7 +368,7 @@ def fairness_benchmark(
     return cons_ns, cons_count, per_producer_counts, producer_results
 
 
-class MPSCSHMRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
+class ShmMpscRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
     """Benchmark runner for MPSC SHM ring buffer."""
 
     def _create_subject(self) -> None:
@@ -418,6 +416,12 @@ class MPSCSHMRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
 
         for payload_size in config.payload_sizes:
             if config.run_latency:
+                # Latency benchmarks run without a concurrent consumer, so keep
+                # the sample count below ring capacity for larger payloads.
+                latency_iterations = min(
+                    config.latency_iterations,
+                    max(1, config.capacity_bytes // (payload_size + 256)),
+                )
                 lat_path = f"{base_path}_lat_{payload_size}"
                 _register_shm_cleanup(lat_path)
                 self._cleanup_path(lat_path)
@@ -426,7 +430,7 @@ class MPSCSHMRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
                     insert_latencies = latency_benchmark_insert(
                         config.capacity_bytes,
                         payload_size,
-                        config.latency_iterations,
+                        latency_iterations,
                         lat_path,
                     )
                     self._record_latency_series(
@@ -441,7 +445,7 @@ class MPSCSHMRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
                     consume_latencies = latency_benchmark_consume(
                         config.capacity_bytes,
                         payload_size,
-                        config.latency_iterations,
+                        latency_iterations,
                         lat_path,
                     )
                     self._record_latency_series(
@@ -491,12 +495,12 @@ class MPSCSHMRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
                         self._cleanup_path(tp_path)
 
         if config.run_scalability:
-            scal_path = f"{base_path}_scal"
-            _register_shm_cleanup(scal_path)
-            self._cleanup_path(scal_path)
             payload_size = 128
-            try:
-                for num_producers in config.scalability_producer_counts:
+            for num_producers in config.scalability_producer_counts:
+                scal_path = f"{base_path}_scal_p{num_producers}"
+                _register_shm_cleanup(scal_path)
+                self._cleanup_path(scal_path)
+                try:
                     cons_ns, cons_count, prod_results = throughput_benchmark(
                         config.capacity_bytes,
                         config.num_rings,
@@ -518,8 +522,8 @@ class MPSCSHMRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
                         cons_ns,
                         cons_count,
                     )
-            finally:
-                self._cleanup_path(scal_path)
+                finally:
+                    self._cleanup_path(scal_path)
 
         if config.run_fairness:
             fair_path = f"{base_path}_fair"
@@ -593,10 +597,10 @@ def main() -> None:
     )
     cli.parser.add_argument(
         "--payload-sizes",
-        default="32,128,512,2048,8192",
+        default="128,512,1024",
         help=(
             "Comma-separated payload sizes used with --multi-size "
-            "(default: 32,128,512,2048,8192)"
+            "(default: 128,512,1024)"
         ),
     )
     cli.parser.add_argument(
@@ -614,14 +618,14 @@ def main() -> None:
     cli.parser.add_argument(
         "--latency-iterations",
         type=int,
-        default=100_000,
-        help="Number of iterations per latency test (default: 100000)",
+        default=4_096,
+        help="Number of iterations per latency test (default: 4096)",
     )
     cli.parser.add_argument(
         "--duration",
         type=float,
-        default=3.0,
-        help="Throughput benchmark duration in seconds (default: 3.0)",
+        default=1.0,
+        help="Throughput benchmark duration in seconds (default: 1.0)",
     )
     cli.parser.add_argument(
         "--producers",
@@ -631,13 +635,13 @@ def main() -> None:
     )
     cli.parser.add_argument(
         "--throughput-producer-counts",
-        default="1,2,4,8",
-        help="Comma-separated producer counts for throughput benchmark (default: 1,2,4,8)",
+        default="1,2,4",
+        help="Comma-separated producer counts for throughput benchmark (default: 1,2,4)",
     )
     cli.parser.add_argument(
         "--scalability-producer-counts",
-        default="1,2,4,8,16",
-        help="Comma-separated producer counts for scalability benchmark (default: 1,2,4,8,16)",
+        default="1,4",
+        help="Comma-separated producer counts for scalability benchmark (default: 1,4)",
     )
     cli.parser.add_argument(
         "--latency-only",
@@ -698,7 +702,7 @@ def main() -> None:
         scalability_producer_counts=_parse_int_list(args.scalability_producer_counts),
     )
 
-    benchmark = MPSCSHMRingBufferBenchmark(config)
+    benchmark = ShmMpscRingBufferBenchmark(config)
     stats = benchmark.run()
 
     reporter = BenchmarkReporter(

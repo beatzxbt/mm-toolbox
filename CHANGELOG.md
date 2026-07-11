@@ -7,8 +7,8 @@ All notable changes to this project will be documented in this file.
 ### Orderbook
 
 ### Benchmarks
-
-### Build / CI
+- Rename SPSC SHM benchmark file to `benchmark_shm_spsc.py` and tune MPSC benchmark parameters.
+- Rename the advanced orderbook benchmark to match its public class.
 
 ## 1.0.0b8 (Unreleased)
 

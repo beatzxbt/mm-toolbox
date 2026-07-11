@@ -1,8 +1,8 @@
 """Performance benchmark for SHM ring buffer.
 
 Usage:
-    uv run python benchmarks/ringbuffer/benchmark_shm.py [--size SIZE]
-    uv run python benchmarks/ringbuffer/benchmark_shm.py --multi-size
+    uv run python benchmarks/ringbuffer/benchmark_shm_spsc.py [--size SIZE]
+    uv run python benchmarks/ringbuffer/benchmark_shm_spsc.py --multi-size
 
 Measures insert/consume latency and producer/consumer throughput for the
 shared memory ring buffer implementation.
@@ -236,7 +236,7 @@ def throughput_benchmark(
     return prod_ns, cons_ns, prod_count, cons_count
 
 
-class SHMRingBufferBenchmark(BenchmarkRunner[SHMBenchmarkConfig]):
+class ShmSpscRingBufferBenchmark(BenchmarkRunner[SHMBenchmarkConfig]):
     """Benchmark runner for SHM ring buffer."""
 
     def _create_subject(self) -> None:
@@ -423,7 +423,7 @@ def main() -> None:
         run_throughput=not args.latency_only,
     )
 
-    benchmark = SHMRingBufferBenchmark(config)
+    benchmark = ShmSpscRingBufferBenchmark(config)
     stats = benchmark.run()
 
     reporter = BenchmarkReporter(
