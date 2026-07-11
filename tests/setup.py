@@ -21,7 +21,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 # Compiler flags (match main library for consistency)
-EXTRA_COMPILE_ARGS = ["-O3", "-march=native", "-ffast-math"]
+EXTRA_COMPILE_ARGS = ["-O3", "-march=native"]
 EXTRA_LINK_ARGS = []
 
 ORDERBOOK_ADVANCED_INCLUDE_DIRS = [

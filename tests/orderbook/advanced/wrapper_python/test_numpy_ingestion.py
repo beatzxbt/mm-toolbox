@@ -32,8 +32,8 @@ class TestNumpyIngestion:
         ob.consume_snapshot_numpy(ask_prices, ask_sizes, bid_prices, bid_sizes)
 
         bid_arr, ask_arr = _bids_asks_arrays(ob)
-        assert list(bid_arr["price"]) == [100.0, 99.99, 99.98]
-        assert list(ask_arr["price"]) == [100.01, 100.02, 100.03]
+        assert list(bid_arr["price"]) == pytest.approx([100.0, 99.99, 99.98])
+        assert list(ask_arr["price"]) == pytest.approx([100.01, 100.02, 100.03])
         assert list(bid_arr["size"]) == pytest.approx([1.0, 2.0, 3.0])
         assert list(ask_arr["size"]) == pytest.approx([1.5, 2.5, 3.5])
         assert ob.get_bbo_spread() == pytest.approx(0.01)
@@ -85,6 +85,23 @@ class TestNumpyIngestion:
         assert list(bid_arr["norders"]) == [5, 10]
         assert list(ask_arr["norders"]) == [3, 7]
 
+    def test_numpy_export_uses_raw_public_fields(self):
+        """Given numpy arrays, When exported, Then public fields are price/size/norders."""
+        ob = _mk_book(num_levels=64)
+
+        bid_prices = np.array([100.0, 99.99], dtype=np.float64)
+        bid_sizes = np.array([1.0, 2.0], dtype=np.float64)
+        ask_prices = np.array([100.01, 100.02], dtype=np.float64)
+        ask_sizes = np.array([1.5, 2.5], dtype=np.float64)
+
+        ob.consume_snapshot_numpy(ask_prices, ask_sizes, bid_prices, bid_sizes)
+
+        bid_arr, ask_arr = _bids_asks_arrays(ob)
+        assert bid_arr.dtype.names == ("price", "size", "norders")
+        assert ask_arr.dtype.names == ("price", "size", "norders")
+        assert bid_arr.dtype.itemsize == 24
+        assert ask_arr.dtype.itemsize == 24
+
     def test_snapshot_without_norders_defaults_to_one(self):
         """Given no norders arrays, When consume_snapshot_numpy called, Then defaults to 1."""
         ob = _mk_book(num_levels=64)
@@ -123,7 +140,7 @@ class TestNumpyIngestion:
         )
 
         _, ask_arr = _bids_asks_arrays(ob)
-        assert list(ask_arr["price"]) == [100.01, 100.02, 100.03, 100.04]
+        assert list(ask_arr["price"]) == pytest.approx([100.01, 100.02, 100.03, 100.04])
 
     def test_deltas_mismatched_lengths_raise(self):
         """Given mismatched numpy delta array lengths, When consume_deltas_numpy called, Then raises ValueError."""
@@ -207,7 +224,7 @@ class TestNumpyIngestion:
         )
 
         bid_arr, _ = _bids_asks_arrays(ob)
-        assert list(bid_arr["price"]) == [99.99, 99.98]
+        assert list(bid_arr["price"]) == pytest.approx([99.99, 99.98])
 
     def test_numpy_vs_pyorderbooklevels_equivalence(self):
         """Given same data via numpy and PyOrderbookLevels, When consumed, Then produce identical results."""
@@ -245,8 +262,8 @@ class TestNumpyIngestion:
         bid_arr_numpy, ask_arr_numpy = _bids_asks_arrays(ob_numpy)
         bid_arr_py, ask_arr_py = _bids_asks_arrays(ob_py)
 
-        assert list(bid_arr_numpy["price"]) == list(bid_arr_py["price"])
-        assert list(ask_arr_numpy["price"]) == list(ask_arr_py["price"])
+        assert list(bid_arr_numpy["price"]) == pytest.approx(list(bid_arr_py["price"]))
+        assert list(ask_arr_numpy["price"]) == pytest.approx(list(ask_arr_py["price"]))
         assert list(bid_arr_numpy["size"]) == pytest.approx(list(bid_arr_py["size"]))
         assert list(ask_arr_numpy["size"]) == pytest.approx(list(ask_arr_py["size"]))
         assert ob_numpy.get_mid_price() == ob_py.get_mid_price()
@@ -286,5 +303,106 @@ class TestNumpyIngestion:
         bid_arr, ask_arr = _bids_asks_arrays(ob)
         assert len(bid_arr) == 1
         assert len(ask_arr) == 1
-        assert bid_arr["price"][0] == 100.0
-        assert ask_arr["price"][0] == 100.01
+        assert bid_arr["price"][0] == pytest.approx(100.0)
+        assert ask_arr["price"][0] == pytest.approx(100.01)
+
+    def test_repeated_numpy_snapshots_smaller_and_larger_do_not_keep_stale_rows(self):
+        """Given reusable ingestion scratch, When lengths change, Then exported rows match current book."""
+        ob = _mk_book(num_levels=64)
+
+        ob.consume_snapshot_numpy(
+            np.array([100.01, 100.02, 100.03, 100.04], dtype=np.float64),
+            np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64),
+            np.array([100.0, 99.99, 99.98, 99.97], dtype=np.float64),
+            np.array([1.5, 2.5, 3.5, 4.5], dtype=np.float64),
+        )
+        ob.consume_snapshot_numpy(
+            np.array([101.01], dtype=np.float64),
+            np.array([5.0], dtype=np.float64),
+            np.array([101.0], dtype=np.float64),
+            np.array([5.5], dtype=np.float64),
+        )
+        bid_arr, ask_arr = _bids_asks_arrays(ob)
+        assert list(bid_arr["price"]) == pytest.approx([101.0])
+        assert list(ask_arr["price"]) == pytest.approx([101.01])
+
+        ob.consume_snapshot_numpy(
+            np.array([102.01, 102.02, 102.03], dtype=np.float64),
+            np.array([6.0, 7.0, 8.0], dtype=np.float64),
+            np.array([102.0, 101.99, 101.98], dtype=np.float64),
+            np.array([6.5, 7.5, 8.5], dtype=np.float64),
+        )
+        bid_arr, ask_arr = _bids_asks_arrays(ob)
+        assert list(bid_arr["price"]) == pytest.approx([102.0, 101.99, 101.98])
+        assert list(ask_arr["price"]) == pytest.approx([102.01, 102.02, 102.03])
+
+    def test_numpy_export_reuses_same_side_scratch_buffer(self):
+        """Given exported bid view, When bid export runs again, Then prior view reflects scratch rewrite."""
+        ob = _mk_book(num_levels=64)
+        ob.consume_snapshot_numpy(
+            np.array([100.01, 100.02], dtype=np.float64),
+            np.array([1.0, 2.0], dtype=np.float64),
+            np.array([100.0, 99.99], dtype=np.float64),
+            np.array([1.5, 2.5], dtype=np.float64),
+        )
+        first_bid_view = ob.get_bids_numpy()
+
+        ob.consume_snapshot_numpy(
+            np.array([101.01, 101.02], dtype=np.float64),
+            np.array([3.0, 4.0], dtype=np.float64),
+            np.array([101.0, 100.99], dtype=np.float64),
+            np.array([3.5, 4.5], dtype=np.float64),
+        )
+        second_bid_view = ob.get_bids_numpy()
+
+        assert np.shares_memory(first_bid_view, second_bid_view)
+        assert list(first_bid_view["price"]) == pytest.approx([101.0, 100.99])
+        assert list(second_bid_view["price"]) == pytest.approx([101.0, 100.99])
+
+    def test_numpy_export_copy_preserves_previous_values(self):
+        """Given copied export, When scratch is rewritten, Then copy keeps old values."""
+        ob = _mk_book(num_levels=64)
+        ob.consume_snapshot_numpy(
+            np.array([100.01, 100.02], dtype=np.float64),
+            np.array([1.0, 2.0], dtype=np.float64),
+            np.array([100.0, 99.99], dtype=np.float64),
+            np.array([1.5, 2.5], dtype=np.float64),
+        )
+        first_bid_copy = ob.get_bids_numpy().copy()
+
+        ob.consume_snapshot_numpy(
+            np.array([101.01, 101.02], dtype=np.float64),
+            np.array([3.0, 4.0], dtype=np.float64),
+            np.array([101.0, 100.99], dtype=np.float64),
+            np.array([3.5, 4.5], dtype=np.float64),
+        )
+        second_bid_view = ob.get_bids_numpy()
+
+        assert not np.shares_memory(first_bid_copy, second_bid_view)
+        assert list(first_bid_copy["price"]) == pytest.approx([100.0, 99.99])
+        assert list(second_bid_view["price"]) == pytest.approx([101.0, 100.99])
+
+    def test_numpy_export_sides_use_independent_scratch_buffers(self):
+        """Given bid and ask exports, When one side is exported, Then other side view is not rewritten."""
+        ob = _mk_book(num_levels=64)
+        ob.consume_snapshot_numpy(
+            np.array([100.01, 100.02], dtype=np.float64),
+            np.array([1.0, 2.0], dtype=np.float64),
+            np.array([100.0, 99.99], dtype=np.float64),
+            np.array([1.5, 2.5], dtype=np.float64),
+        )
+        ask_view = ob.get_asks_numpy()
+        bid_view = ob.get_bids_numpy()
+
+        ob.consume_snapshot_numpy(
+            np.array([101.01, 101.02], dtype=np.float64),
+            np.array([3.0, 4.0], dtype=np.float64),
+            np.array([101.0, 100.99], dtype=np.float64),
+            np.array([3.5, 4.5], dtype=np.float64),
+        )
+        refreshed_bid_view = ob.get_bids_numpy()
+
+        assert np.shares_memory(bid_view, refreshed_bid_view)
+        assert not np.shares_memory(ask_view, refreshed_bid_view)
+        assert list(ask_view["price"]) == pytest.approx([100.01, 100.02])
+        assert list(refreshed_bid_view["price"]) == pytest.approx([101.0, 100.99])

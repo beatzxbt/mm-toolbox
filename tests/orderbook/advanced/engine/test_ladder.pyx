@@ -5,23 +5,27 @@
 Layer 2: OrderbookLadder tests.
 
 Tests ladder initialization, insert/roll operations, state management,
-and NumPy accessor methods.
+and logical ring behavior.
 """
 from __future__ import annotations
 
 from libc.stdint cimport uint64_t as u64
-from libc.stdlib cimport malloc, free
 from libc.math cimport fabs
 
 from mm_toolbox.orderbook.advanced.level.level cimport (
-    OrderbookLevel,
-    OrderbookLevels,
-    create_orderbook_level,
-    create_orderbook_level_with_ticks_and_lots,
+    OrderbookEntry,
+    create_orderbook_entry,
+)
+from mm_toolbox.orderbook.advanced.level.helpers cimport (
+    convert_price_from_tick,
+    convert_price_to_tick,
+    convert_size_from_lot,
+    convert_size_to_lot,
 )
 from mm_toolbox.orderbook.advanced.ladder.ladder cimport (
     OrderbookLadder,
     OrderbookLadderData,
+    c_ladder_at,
 )
 
 
@@ -47,6 +51,28 @@ cdef bint _approx_eq(double a, double b, double tol=1e-9):
         True if |a - b| < tol.
     """
     return fabs(a - b) < tol
+
+
+cdef OrderbookEntry _make_entry(
+    double price,
+    double size,
+    double tick_size,
+    double lot_size,
+    u64 norders=1,
+):
+    return create_orderbook_entry(
+        convert_price_to_tick(price, 1.0 / tick_size),
+        convert_size_to_lot(size, 1.0 / lot_size),
+        norders,
+    )
+
+
+cdef double _entry_price(OrderbookLadderData* data, u64 index):
+    return convert_price_from_tick(c_ladder_at(data, index).ticks, TICK_SIZE)
+
+
+cdef double _entry_size(OrderbookLadderData* data, u64 index):
+    return convert_size_from_lot(c_ladder_at(data, index).lots, LOT_SIZE)
 
 
 # =============================================================================
@@ -93,42 +119,118 @@ def test_ladder_init_large():
 
 
 # -----------------------------------------------------------------------------
-# insert_level tests
+# insert_entry tests
 # -----------------------------------------------------------------------------
 
-def test_ladder_insert_level():
-    """Test inserting a level."""
+def test_ladder_insert_entry():
+    """Test inserting an entry."""
     cdef OrderbookLadder ladder = OrderbookLadder(max_levels=5, is_price_ascending=True)
-    cdef OrderbookLevel level = create_orderbook_level_with_ticks_and_lots(
+    cdef OrderbookEntry entry = _make_entry(
         100.0, 1.0, TICK_SIZE, LOT_SIZE, 1
     )
 
-    ladder.insert_level(0, level)
+    ladder.insert_entry(0, &entry)
     ladder.increment_count()
 
     cdef OrderbookLadderData* data = ladder.get_data()
     assert data.num_levels == 1
-    assert data.levels[0].price == 100.0
+    assert _entry_price(data, 0) == 100.0
 
 
 def test_ladder_insert_multiple():
     """Test inserting multiple levels."""
     cdef OrderbookLadder ladder = OrderbookLadder(max_levels=5, is_price_ascending=True)
-    cdef OrderbookLevel level
+    cdef OrderbookEntry entry
     cdef u64 i
 
     for i in range(3):
-        level = create_orderbook_level_with_ticks_and_lots(
+        entry = _make_entry(
             100.0 + i * 0.01, 1.0, TICK_SIZE, LOT_SIZE, 1
         )
-        ladder.insert_level(i, level)
+        ladder.insert_entry(i, &entry)
         ladder.increment_count()
 
     cdef OrderbookLadderData* data = ladder.get_data()
     assert data.num_levels == 3
-    assert data.levels[0].price == 100.0
-    assert data.levels[1].price == 100.01
-    assert data.levels[2].price == 100.02
+    assert _entry_price(data, 0) == 100.0
+    assert _entry_price(data, 1) == 100.01
+    assert _entry_price(data, 2) == 100.02
+
+
+def test_ladder_accessor_methods():
+    """Test C-level count, capacity, at, top, and bottom accessors."""
+    cdef OrderbookLadder ladder = OrderbookLadder(max_levels=5, is_price_ascending=True)
+    cdef OrderbookEntry entry
+    cdef OrderbookEntry* entry_ptr
+
+    assert ladder.count() == 0
+    assert ladder.capacity() == 5
+
+    entry = _make_entry(100.0, 1.0, TICK_SIZE, LOT_SIZE, 1)
+    ladder.insert_entry(0, &entry)
+    ladder.increment_count()
+    entry = _make_entry(100.01, 2.0, TICK_SIZE, LOT_SIZE, 2)
+    ladder.insert_entry(1, &entry)
+    ladder.increment_count()
+
+    entry_ptr = ladder.top()
+    assert entry_ptr.ticks == convert_price_to_tick(100.0, 1.0 / TICK_SIZE)
+    assert entry_ptr.norders == 1
+
+    entry_ptr = ladder.at(1)
+    assert entry_ptr.lots == convert_size_to_lot(2.0, 1.0 / LOT_SIZE)
+
+    entry_ptr = ladder.bottom()
+    assert entry_ptr.ticks == convert_price_to_tick(100.01, 1.0 / TICK_SIZE)
+    assert entry_ptr.norders == 2
+
+
+def test_ladder_assign_entry():
+    """Test C-level entry assignment helper."""
+    cdef OrderbookLadder ladder = OrderbookLadder(max_levels=5, is_price_ascending=True)
+    cdef OrderbookEntry entry = _make_entry(100.0, 1.0, TICK_SIZE, LOT_SIZE, 1)
+    cdef OrderbookEntry* entry_ptr
+
+    ladder.assign_entry(0, &entry)
+    ladder.set_count(1)
+
+    entry_ptr = ladder.top()
+    assert entry_ptr.ticks == entry.ticks
+    assert entry_ptr.lots == entry.lots
+    assert entry_ptr.norders == 1
+    assert ladder.count() == 1
+
+
+def test_ladder_seek_start_ascending():
+    """Test ask-side insertion seek uses ascending price order."""
+    cdef OrderbookLadder ladder = OrderbookLadder(max_levels=5, is_price_ascending=True)
+    cdef OrderbookEntry entry
+    cdef u64 i
+
+    for i in range(3):
+        entry = _make_entry(100.0 + i * 0.01, 1.0, TICK_SIZE, LOT_SIZE, 1)
+        ladder.insert_entry(i, &entry)
+        ladder.increment_count()
+
+    assert ladder.seek_start(convert_price_to_tick(99.99, 1.0 / TICK_SIZE)) == 0
+    assert ladder.seek_start(convert_price_to_tick(100.01, 1.0 / TICK_SIZE)) == 1
+    assert ladder.seek_start(convert_price_to_tick(100.03, 1.0 / TICK_SIZE)) == 3
+
+
+def test_ladder_seek_start_descending():
+    """Test bid-side insertion seek uses descending price order."""
+    cdef OrderbookLadder ladder = OrderbookLadder(max_levels=5, is_price_ascending=False)
+    cdef OrderbookEntry entry
+    cdef u64 i
+
+    for i in range(3):
+        entry = _make_entry(100.02 - i * 0.01, 1.0, TICK_SIZE, LOT_SIZE, 1)
+        ladder.insert_entry(i, &entry)
+        ladder.increment_count()
+
+    assert ladder.seek_start(convert_price_to_tick(100.03, 1.0 / TICK_SIZE)) == 0
+    assert ladder.seek_start(convert_price_to_tick(100.01, 1.0 / TICK_SIZE)) == 1
+    assert ladder.seek_start(convert_price_to_tick(99.99, 1.0 / TICK_SIZE)) == 3
 
 
 # -----------------------------------------------------------------------------
@@ -138,85 +240,116 @@ def test_ladder_insert_multiple():
 def test_ladder_roll_right_at_start():
     """Test rolling right from index 0."""
     cdef OrderbookLadder ladder = OrderbookLadder(max_levels=5, is_price_ascending=True)
-    cdef OrderbookLevel level
+    cdef OrderbookEntry entry
 
-    # Add two levels: [100, 101]
-    level = create_orderbook_level_with_ticks_and_lots(100.0, 1.0, TICK_SIZE, LOT_SIZE, 1)
-    ladder.insert_level(0, level)
+    # Add two entries: [100, 101]
+    entry = _make_entry(100.0, 1.0, TICK_SIZE, LOT_SIZE, 1)
+    ladder.insert_entry(0, &entry)
     ladder.increment_count()
 
-    level = create_orderbook_level_with_ticks_and_lots(101.0, 1.0, TICK_SIZE, LOT_SIZE, 1)
-    ladder.insert_level(1, level)
+    entry = _make_entry(101.0, 1.0, TICK_SIZE, LOT_SIZE, 1)
+    ladder.insert_entry(1, &entry)
     ladder.increment_count()
 
     # Roll right at 0: makes room for new level at front
     ladder.roll_right(0)
 
     # Insert new level at 0
-    level = create_orderbook_level_with_ticks_and_lots(99.0, 1.0, TICK_SIZE, LOT_SIZE, 1)
-    ladder.insert_level(0, level)
+    entry = _make_entry(99.0, 1.0, TICK_SIZE, LOT_SIZE, 1)
+    ladder.insert_entry(0, &entry)
     ladder.increment_count()
 
     cdef OrderbookLadderData* data = ladder.get_data()
     assert data.num_levels == 3
-    assert data.levels[0].price == 99.0
-    assert data.levels[1].price == 100.0
-    assert data.levels[2].price == 101.0
+    assert _entry_price(data, 0) == 99.0
+    assert _entry_price(data, 1) == 100.0
+    assert _entry_price(data, 2) == 101.0
 
 
 def test_ladder_roll_right_in_middle():
     """Test rolling right from middle index."""
     cdef OrderbookLadder ladder = OrderbookLadder(max_levels=5, is_price_ascending=True)
-    cdef OrderbookLevel level
+    cdef OrderbookEntry entry
 
-    # Add three levels: [100, 101, 102]
+    # Add three entries: [100, 101, 102]
     for i in range(3):
-        level = create_orderbook_level_with_ticks_and_lots(
+        entry = _make_entry(
             100.0 + i * 0.01, 1.0, TICK_SIZE, LOT_SIZE, 1
         )
-        ladder.insert_level(i, level)
+        ladder.insert_entry(i, &entry)
         ladder.increment_count()
 
     # Roll right at 1
     ladder.roll_right(1)
 
     # Insert at 1
-    level = create_orderbook_level_with_ticks_and_lots(100.005, 2.0, TICK_SIZE, LOT_SIZE, 1)
-    ladder.insert_level(1, level)
+    entry = _make_entry(100.005, 2.0, TICK_SIZE, LOT_SIZE, 1)
+    ladder.insert_entry(1, &entry)
     ladder.increment_count()
 
     cdef OrderbookLadderData* data = ladder.get_data()
     assert data.num_levels == 4
-    assert data.levels[0].price == 100.0
-    assert data.levels[1].size == 2.0  # New level
+    assert _entry_price(data, 0) == 100.0
+    assert _entry_size(data, 1) == 2.0  # New level
+    assert data.head == 4
+
+
+def test_ladder_roll_right_uses_prefix_shift():
+    """Test rolling right from a front-side middle index."""
+    cdef OrderbookLadder ladder = OrderbookLadder(max_levels=8, is_price_ascending=True)
+    cdef OrderbookEntry entry
+    cdef OrderbookLadderData* data = ladder.get_data()
+    data.head = 6
+
+    for i in range(5):
+        entry = _make_entry(
+            100.0 + i * 0.01, 1.0, TICK_SIZE, LOT_SIZE, 1
+        )
+        ladder.insert_entry(i, &entry)
+        ladder.increment_count()
+
+    ladder.roll_right(2)
+
+    entry = _make_entry(150.0, 2.0, TICK_SIZE, LOT_SIZE, 1)
+    ladder.insert_entry(2, &entry)
+    ladder.increment_count()
+
+    assert data.num_levels == 6
+    assert data.head == 5
+    assert _entry_price(data, 0) == 100.0
+    assert _entry_price(data, 1) == 100.01
+    assert _entry_size(data, 2) == 2.0
+    assert _entry_price(data, 3) == 100.02
+    assert _entry_price(data, 4) == 100.03
+    assert _entry_price(data, 5) == 100.04
 
 
 def test_ladder_roll_right_at_max_capacity():
     """Test rolling right when at max capacity drops last element."""
     cdef OrderbookLadder ladder = OrderbookLadder(max_levels=3, is_price_ascending=True)
-    cdef OrderbookLevel level
+    cdef OrderbookEntry entry
 
     # Fill to capacity: [100.0, 100.01, 100.02]
     for i in range(3):
-        level = create_orderbook_level_with_ticks_and_lots(
+        entry = _make_entry(
             100.0 + i * 0.01, 1.0, TICK_SIZE, LOT_SIZE, 1
         )
-        ladder.insert_level(i, level)
+        ladder.insert_entry(i, &entry)
         ladder.increment_count()
 
     assert ladder.is_full()
 
     # Roll right at 0 (should drop 100.02)
     ladder.roll_right(0)
-    level = create_orderbook_level_with_ticks_and_lots(99.0, 2.0, TICK_SIZE, LOT_SIZE, 1)
-    ladder.insert_level(0, level)
+    entry = _make_entry(99.0, 2.0, TICK_SIZE, LOT_SIZE, 1)
+    ladder.insert_entry(0, &entry)
     # Don't increment - we're replacing dropped element
 
     cdef OrderbookLadderData* data = ladder.get_data()
     assert data.num_levels == 3
-    assert data.levels[0].price == 99.0
-    assert data.levels[1].price == 100.0
-    assert _approx_eq(data.levels[2].price, 100.01)  # 100.02 was dropped
+    assert _entry_price(data, 0) == 99.0
+    assert _entry_price(data, 1) == 100.0
+    assert _approx_eq(_entry_price(data, 2), 100.01)  # 100.02 was dropped
 
 
 # -----------------------------------------------------------------------------
@@ -226,14 +359,14 @@ def test_ladder_roll_right_at_max_capacity():
 def test_ladder_roll_left_at_start():
     """Test rolling left from index 0 (removes first element)."""
     cdef OrderbookLadder ladder = OrderbookLadder(max_levels=5, is_price_ascending=True)
-    cdef OrderbookLevel level
+    cdef OrderbookEntry entry
 
-    # Add three levels: [100, 101, 102]
+    # Add three entries: [100, 101, 102]
     for i in range(3):
-        level = create_orderbook_level_with_ticks_and_lots(
+        entry = _make_entry(
             100.0 + i * 0.01, 1.0, TICK_SIZE, LOT_SIZE, 1
         )
-        ladder.insert_level(i, level)
+        ladder.insert_entry(i, &entry)
         ladder.increment_count()
 
     # Roll left at 0 removes first element
@@ -242,21 +375,21 @@ def test_ladder_roll_left_at_start():
 
     cdef OrderbookLadderData* data = ladder.get_data()
     assert data.num_levels == 2
-    assert data.levels[0].price == 100.01
-    assert data.levels[1].price == 100.02
+    assert _entry_price(data, 0) == 100.01
+    assert _entry_price(data, 1) == 100.02
 
 
 def test_ladder_roll_left_in_middle():
     """Test rolling left from middle index."""
     cdef OrderbookLadder ladder = OrderbookLadder(max_levels=5, is_price_ascending=True)
-    cdef OrderbookLevel level
+    cdef OrderbookEntry entry
 
-    # Add three levels: [100, 101, 102]
+    # Add three entries: [100, 101, 102]
     for i in range(3):
-        level = create_orderbook_level_with_ticks_and_lots(
+        entry = _make_entry(
             100.0 + i * 0.01, 1.0, TICK_SIZE, LOT_SIZE, 1
         )
-        ladder.insert_level(i, level)
+        ladder.insert_entry(i, &entry)
         ladder.increment_count()
 
     # Roll left at 1 removes middle element
@@ -265,21 +398,46 @@ def test_ladder_roll_left_in_middle():
 
     cdef OrderbookLadderData* data = ladder.get_data()
     assert data.num_levels == 2
-    assert data.levels[0].price == 100.0
-    assert data.levels[1].price == 100.02
+    assert _entry_price(data, 0) == 100.0
+    assert _entry_price(data, 1) == 100.02
+
+
+def test_ladder_roll_left_uses_prefix_shift():
+    """Test rolling left from a front-side middle index."""
+    cdef OrderbookLadder ladder = OrderbookLadder(max_levels=8, is_price_ascending=True)
+    cdef OrderbookEntry entry
+    cdef OrderbookLadderData* data = ladder.get_data()
+    data.head = 6
+
+    for i in range(5):
+        entry = _make_entry(
+            100.0 + i * 0.01, 1.0, TICK_SIZE, LOT_SIZE, 1
+        )
+        ladder.insert_entry(i, &entry)
+        ladder.increment_count()
+
+    ladder.roll_left(1)
+    ladder.decrement_count()
+
+    assert data.num_levels == 4
+    assert data.head == 7
+    assert _entry_price(data, 0) == 100.0
+    assert _entry_price(data, 1) == 100.02
+    assert _entry_price(data, 2) == 100.03
+    assert _entry_price(data, 3) == 100.04
 
 
 def test_ladder_roll_left_at_end():
     """Test rolling left from last index."""
     cdef OrderbookLadder ladder = OrderbookLadder(max_levels=5, is_price_ascending=True)
-    cdef OrderbookLevel level
+    cdef OrderbookEntry entry
 
     # Add three levels
     for i in range(3):
-        level = create_orderbook_level_with_ticks_and_lots(
+        entry = _make_entry(
             100.0 + i * 0.01, 1.0, TICK_SIZE, LOT_SIZE, 1
         )
-        ladder.insert_level(i, level)
+        ladder.insert_entry(i, &entry)
         ladder.increment_count()
 
     # Roll left at last index
@@ -288,8 +446,8 @@ def test_ladder_roll_left_at_end():
 
     cdef OrderbookLadderData* data = ladder.get_data()
     assert data.num_levels == 2
-    assert data.levels[0].price == 100.0
-    assert data.levels[1].price == 100.01
+    assert _entry_price(data, 0) == 100.0
+    assert _entry_price(data, 1) == 100.01
 
 
 # -----------------------------------------------------------------------------
@@ -299,12 +457,12 @@ def test_ladder_roll_left_at_end():
 def test_ladder_reset():
     """Test resetting ladder to empty."""
     cdef OrderbookLadder ladder = OrderbookLadder(max_levels=5, is_price_ascending=True)
-    cdef OrderbookLevel level
+    cdef OrderbookEntry entry
 
     # Add levels
     for i in range(3):
-        level = create_orderbook_level(100.0 + i, 1.0)
-        ladder.insert_level(i, level)
+        entry = _make_entry(100.0 + i, 1.0, TICK_SIZE, LOT_SIZE, 1)
+        ladder.insert_entry(i, &entry)
         ladder.increment_count()
 
     assert not ladder.is_empty()
@@ -329,8 +487,8 @@ def test_ladder_is_empty():
 def test_ladder_not_empty_after_insert():
     """Test is_empty after insert."""
     cdef OrderbookLadder ladder = OrderbookLadder(max_levels=5, is_price_ascending=True)
-    cdef OrderbookLevel level = create_orderbook_level(100.0, 1.0)
-    ladder.insert_level(0, level)
+    cdef OrderbookEntry entry = _make_entry(100.0, 1.0, TICK_SIZE, LOT_SIZE, 1)
+    ladder.insert_entry(0, &entry)
     ladder.increment_count()
     assert not ladder.is_empty()
 
@@ -338,15 +496,15 @@ def test_ladder_not_empty_after_insert():
 def test_ladder_is_full():
     """Test is_full at capacity."""
     cdef OrderbookLadder ladder = OrderbookLadder(max_levels=2, is_price_ascending=True)
-    cdef OrderbookLevel level
+    cdef OrderbookEntry entry
 
-    level = create_orderbook_level(100.0, 1.0)
-    ladder.insert_level(0, level)
+    entry = _make_entry(100.0, 1.0, TICK_SIZE, LOT_SIZE, 1)
+    ladder.insert_entry(0, &entry)
     ladder.increment_count()
     assert not ladder.is_full()
 
-    level = create_orderbook_level(101.0, 1.0)
-    ladder.insert_level(1, level)
+    entry = _make_entry(101.0, 1.0, TICK_SIZE, LOT_SIZE, 1)
+    ladder.insert_entry(1, &entry)
     ladder.increment_count()
     assert ladder.is_full()
 
@@ -379,7 +537,7 @@ def test_ladder_decrement_count_respects_zero():
 
 
 # -----------------------------------------------------------------------------
-# get_data tests (replacing get_view)
+# get_data tests
 # -----------------------------------------------------------------------------
 
 def test_ladder_get_data():
@@ -399,73 +557,10 @@ def test_ladder_data_reflects_changes():
 
     assert data.num_levels == 0
 
-    cdef OrderbookLevel level = create_orderbook_level(100.0, 1.0)
-    ladder.insert_level(0, level)
+    cdef OrderbookEntry entry = _make_entry(100.0, 1.0, TICK_SIZE, LOT_SIZE, 1)
+    ladder.insert_entry(0, &entry)
     ladder.increment_count()
 
     # Data should reflect change
     data = ladder.get_data()
     assert data.num_levels == 1
-
-
-# -----------------------------------------------------------------------------
-# NumPy accessor tests (cpdef methods)
-# -----------------------------------------------------------------------------
-
-def test_ladder_get_levels():
-    """Test get_levels returns NumPy view."""
-    cdef OrderbookLadder ladder = OrderbookLadder(max_levels=5, is_price_ascending=True)
-    cdef OrderbookLevel level
-
-    for i in range(3):
-        level = create_orderbook_level_with_ticks_and_lots(
-            100.0 + i * 0.01, float(i + 1), TICK_SIZE, LOT_SIZE, 1
-        )
-        ladder.insert_level(i, level)
-        ladder.increment_count()
-
-    levels = ladder.get_levels()
-    assert len(levels) == 3
-
-
-def test_ladder_get_prices():
-    """Test get_prices returns price array."""
-    cdef OrderbookLadder ladder = OrderbookLadder(max_levels=5, is_price_ascending=True)
-    cdef OrderbookLevel level
-
-    level = create_orderbook_level_with_ticks_and_lots(100.0, 1.0, TICK_SIZE, LOT_SIZE, 1)
-    ladder.insert_level(0, level)
-    ladder.increment_count()
-
-    level = create_orderbook_level_with_ticks_and_lots(101.0, 2.0, TICK_SIZE, LOT_SIZE, 1)
-    ladder.insert_level(1, level)
-    ladder.increment_count()
-
-    prices = ladder.get_prices()
-    assert len(prices) == 2
-    assert prices[0] == 100.0
-    assert prices[1] == 101.0
-
-
-def test_ladder_get_sizes():
-    """Test get_sizes returns size array."""
-    cdef OrderbookLadder ladder = OrderbookLadder(max_levels=5, is_price_ascending=True)
-    cdef OrderbookLevel level
-
-    level = create_orderbook_level_with_ticks_and_lots(100.0, 1.5, TICK_SIZE, LOT_SIZE, 1)
-    ladder.insert_level(0, level)
-    ladder.increment_count()
-
-    sizes = ladder.get_sizes()
-    assert len(sizes) == 1
-    assert sizes[0] == 1.5
-
-
-def test_ladder_empty_accessors():
-    """Test accessors on empty ladder."""
-    cdef OrderbookLadder ladder = OrderbookLadder(max_levels=5, is_price_ascending=True)
-
-    assert len(ladder.get_levels()) == 0
-    assert len(ladder.get_prices()) == 0
-    assert len(ladder.get_sizes()) == 0
-    assert len(ladder.get_norders()) == 0

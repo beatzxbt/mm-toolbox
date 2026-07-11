@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## 1.0.0b9 (Unreleased)
 
 ### Orderbook
+- Centralize advanced orderbook raw-value normalization; cleans up the raw-entry API and adds crossed-BBO validation.
 
 ### Benchmarks
 - Rename SPSC SHM benchmark file to `benchmark_shm_spsc.py` and tune MPSC benchmark parameters.

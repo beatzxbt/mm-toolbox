@@ -1,134 +1,171 @@
 /**
  * @file orderbook_ladder.c
- * @brief Implementation of ladder operations for orderbook level arrays.
- *
- * Provides efficient memory shifting and level insertion for managing
- * ordered price levels in the orderbook, with optimized fast paths for
- * common cases (index 0, small moves).
+ * @brief Ring-backed normalized orderbook ladder operations.
  */
 
 #include "orderbook_ladder.h"
-#include <string.h>
 
-/**
- * @brief Shift levels right starting from start_index to make room for insertion.
- *
- * When at max capacity, the last element is dropped. This only shifts data;
- * the caller must update num_levels separately.
- *
- * @param data        Pointer to the ladder data containing levels and metadata.
- * @param start_index Index from which to start shifting right.
- * @note Fast paths for start_index == 0 with small move counts (most common case).
- */
+static inline uint64_t physical_index(OrderbookLadderData* data, uint64_t index) {
+    return (data->head + index) % data->max_levels;
+}
+
+static inline int entry_before(uint64_t left_ticks, uint64_t right_ticks, int ascending) {
+    return ascending ? (left_ticks < right_ticks) : (left_ticks > right_ticks);
+}
+
+OrderbookEntry* c_ladder_at(OrderbookLadderData* data, uint64_t index) {
+    return &data->levels[physical_index(data, index)];
+}
+
+OrderbookEntry* c_ladder_top(OrderbookLadderData* data) {
+    return c_ladder_at(data, 0);
+}
+
+OrderbookEntry* c_ladder_bottom(OrderbookLadderData* data) {
+    return c_ladder_at(data, data->num_levels - 1);
+}
+
+void c_ladder_insert_entry(OrderbookLadderData* data, uint64_t index, const OrderbookEntry* entry) {
+    *c_ladder_at(data, index) = *entry;
+}
+
 void c_ladder_roll_right(OrderbookLadderData* data, uint64_t start_index) {
     uint64_t count = data->num_levels;
-    uint64_t max_levels = data->max_levels;
-    OrderbookLevel* levels = data->levels;
-
-    if (start_index > count) {
+    if (data->max_levels == 0 || start_index > count) {
+        return;
+    }
+    if (count == 0) {
         return;
     }
 
-    uint64_t num_move = count - start_index;
+    uint64_t limit = count < data->max_levels ? count : data->max_levels - 1;
 
-    /* At max capacity: drop last element, reduce move count */
-    if (count >= max_levels && num_move > 0) {
-        num_move--;
-    }
-
-    if (num_move == 0) {
-        return;
-    }
-
-    /* Fast path: start_index == 0 with small moves (most common) */
-    if (start_index == 0 && num_move <= 4) {
-        if (num_move >= 4) levels[4] = levels[3];
-        if (num_move >= 3) levels[3] = levels[2];
-        if (num_move >= 2) levels[2] = levels[1];
-        levels[1] = levels[0];
-        return;
-    }
-
-    if (start_index == 0 && num_move <= 8) {
-        uint64_t i = num_move;
-        while (i > 4) {
-            levels[i] = levels[i - 1];
-            i--;
+    if (start_index <= count - start_index) {
+        data->head = (data->head + data->max_levels - 1) % data->max_levels;
+        for (uint64_t i = 0; i < start_index; i++) {
+            *c_ladder_at(data, i) = *c_ladder_at(data, i + 1);
         }
-        levels[4] = levels[3];
-        levels[3] = levels[2];
-        levels[2] = levels[1];
-        levels[1] = levels[0];
-        return;
+    } else {
+        for (uint64_t i = limit; i > start_index; i--) {
+            *c_ladder_at(data, i) = *c_ladder_at(data, i - 1);
+        }
     }
-
-    /* General case: use memmove */
-    memmove(
-        &levels[start_index + 1],
-        &levels[start_index],
-        num_move * sizeof(OrderbookLevel)
-    );
 }
 
-/**
- * @brief Shift levels left starting from start_index to remove a level.
- *
- * This only shifts data; the caller must update num_levels separately.
- *
- * @param data        Pointer to the ladder data containing levels and metadata.
- * @param start_index Index from which to start shifting left.
- * @note Fast paths for start_index == 0 with small move counts (most common case).
- */
 void c_ladder_roll_left(OrderbookLadderData* data, uint64_t start_index) {
     uint64_t count = data->num_levels;
-    OrderbookLevel* levels = data->levels;
-
-    if (start_index >= count) {
+    if (data->max_levels == 0 || start_index >= count) {
+        return;
+    }
+    if (count <= 1) {
         return;
     }
 
-    uint64_t num_move = count - start_index - 1;
-
-    if (num_move == 0) {
-        return;
-    }
-
-    /* Fast path: start_index == 0 with small moves (most common) */
-    if (start_index == 0 && num_move <= 4) {
-        levels[0] = levels[1];
-        if (num_move >= 2) levels[1] = levels[2];
-        if (num_move >= 3) levels[2] = levels[3];
-        if (num_move >= 4) levels[3] = levels[4];
-        return;
-    }
-
-    if (start_index == 0 && num_move <= 8) {
-        levels[0] = levels[1];
-        levels[1] = levels[2];
-        levels[2] = levels[3];
-        levels[3] = levels[4];
-        uint64_t i = 4;
-        while (i < num_move) {
-            levels[i] = levels[i + 1];
-            i++;
+    if (start_index <= count - start_index - 1) {
+        for (uint64_t i = start_index; i > 0; i--) {
+            *c_ladder_at(data, i) = *c_ladder_at(data, i - 1);
         }
-        return;
+        data->head = (data->head + 1) % data->max_levels;
+    } else {
+        for (uint64_t i = start_index; i < count - 1; i++) {
+            *c_ladder_at(data, i) = *c_ladder_at(data, i + 1);
+        }
     }
-
-    /* General case: use memmove */
-    memmove(
-        &levels[start_index],
-        &levels[start_index + 1],
-        num_move * sizeof(OrderbookLevel)
-    );
 }
 
-/**
- * @brief Insert a level directly at the specified index.
- * @param levels Pointer to the levels array.
- * @param index  Index at which to insert the level.
- * @param level  Pointer to the OrderbookLevel to insert.
- */
-void c_ladder_insert_level(OrderbookLevel* levels, uint64_t index, const OrderbookLevel* level) {
-    levels[index] = *level;
+void c_ladder_export_levels(OrderbookLevel* out, OrderbookLadderData* data, double tick_size, double lot_size) {
+    for (uint64_t i = 0; i < data->num_levels; i++) {
+        OrderbookEntry* entry = c_ladder_at(data, i);
+        out[i].price = tick_to_price(entry->ticks, tick_size);
+        out[i].size = lot_to_size(entry->lots, lot_size);
+        out[i].norders = entry->norders;
+    }
+}
+
+uint64_t c_ladder_ask_lower_bound(OrderbookLadderData* data, uint64_t ticks, uint64_t start, uint64_t end) {
+    uint64_t lo = start;
+    uint64_t hi = end;
+    while (lo < hi) {
+        uint64_t mid = lo + ((hi - lo) / 2);
+        if (c_ladder_at(data, mid)->ticks < ticks) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo;
+}
+
+uint64_t c_ladder_bid_lower_bound(OrderbookLadderData* data, uint64_t ticks, uint64_t start, uint64_t end) {
+    uint64_t lo = start;
+    uint64_t hi = end;
+    while (lo < hi) {
+        uint64_t mid = lo + ((hi - lo) / 2);
+        if (c_ladder_at(data, mid)->ticks > ticks) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo;
+}
+
+uint64_t c_ladder_ask_seek_start(OrderbookLadderData* data, uint64_t ticks) {
+    return c_ladder_ask_lower_bound(data, ticks, 0, data->num_levels);
+}
+
+uint64_t c_ladder_bid_seek_start(OrderbookLadderData* data, uint64_t ticks) {
+    return c_ladder_bid_lower_bound(data, ticks, 0, data->num_levels);
+}
+
+void c_ladder_apply_sorted_deltas(
+    OrderbookLadderData* data,
+    OrderbookEntry* updates,
+    uint64_t update_count,
+    OrderbookEntry* scratch
+) {
+    uint64_t i = 0;
+    uint64_t j = 0;
+    uint64_t out = 0;
+    uint64_t count = data->num_levels;
+    uint64_t max_levels = data->max_levels;
+    int ascending = data->is_price_ascending;
+
+    while (out < max_levels && (i < count || j < update_count)) {
+        if (i >= count) {
+            if (updates[j].lots != 0) {
+                scratch[out++] = updates[j];
+            }
+            j++;
+            continue;
+        }
+        if (j >= update_count) {
+            scratch[out++] = *c_ladder_at(data, i++);
+            continue;
+        }
+
+        OrderbookEntry current = *c_ladder_at(data, i);
+        OrderbookEntry update = updates[j];
+        if (current.ticks == update.ticks) {
+            if (update.lots != 0) {
+                scratch[out++] = update;
+            }
+            i++;
+            j++;
+        } else if (entry_before(update.ticks, current.ticks, ascending)) {
+            if (update.lots != 0) {
+                scratch[out++] = update;
+            }
+            j++;
+        } else {
+            scratch[out++] = current;
+            i++;
+        }
+    }
+
+    data->head = 0;
+    data->num_levels = out;
+    for (uint64_t k = 0; k < out; k++) {
+        data->levels[k] = scratch[k];
+    }
 }

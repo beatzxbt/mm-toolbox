@@ -3,36 +3,101 @@
 # cython: wraparound=False
 # cython: cdivision=True
 
-"""
-Core orderbook engine for managing bids and asks with tick-based pricing.
+"""Core advanced orderbook engine using compact normalized entries."""
 
-Implements CoreAdvancedOrderbook class which handles orderbook state management,
-level normalization, snapshot/delta ingestion, and price calculations. Uses
-fixed-size pre-allocated ladders with in-place updates for optimal performance.
-"""
 from __future__ import annotations
 
-from libc.math cimport floor
 from libc.float cimport DBL_MAX as INFINITY_DOUBLE
+from libc.math cimport fabs, isfinite
 from libc.stdint cimport uint64_t as u64
+from libc.stdlib cimport free, malloc
 
-from .level.level cimport OrderbookLevel, OrderbookLevels
+from .enum.enums cimport CyOrderbookSortedness
+from .ladder.ladder cimport OrderbookLadder, OrderbookLadderData
 from .level.helpers cimport (
     convert_price_from_tick,
     convert_price_to_tick,
-    convert_price_to_tick_fast,
+    convert_price_to_tick_trusted,
     convert_size_from_lot,
     convert_size_to_lot,
-    convert_size_to_lot_fast,
-    inplace_sort_levels_by_ticks,
-    reverse_levels,
+    convert_size_to_lot_trusted,
+    reverse_entries,
+    validate_price,
+    validate_size,
 )
-from .ladder.ladder cimport OrderbookLadder, OrderbookLadderData
-from .enum.enums cimport CyOrderbookSortedness
+from .level.level cimport (
+    OrderbookEntry,
+    OrderbookLevel,
+    OrderbookLevels,
+    create_orderbook_entry,
+    create_orderbook_level,
+)
+
+cdef enum:
+    SMALL_DELTA_LIMIT = 8
+    ORDER_UNKNOWN = 0
+    ORDER_ASCENDING = 1
+    ORDER_DESCENDING = 2
+
+
+cdef inline int _ask_order_from_sortedness(CyOrderbookSortedness sortedness) noexcept:
+    if (
+        sortedness == CyOrderbookSortedness.ASCENDING
+        or sortedness == CyOrderbookSortedness.BIDS_DESCENDING_ASKS_ASCENDING
+    ):
+        return ORDER_ASCENDING
+    if (
+        sortedness == CyOrderbookSortedness.DESCENDING
+        or sortedness == CyOrderbookSortedness.BIDS_ASCENDING_ASKS_DESCENDING
+    ):
+        return ORDER_DESCENDING
+    return ORDER_UNKNOWN
+
+
+cdef inline int _bid_order_from_sortedness(CyOrderbookSortedness sortedness) noexcept:
+    if (
+        sortedness == CyOrderbookSortedness.ASCENDING
+        or sortedness == CyOrderbookSortedness.BIDS_ASCENDING_ASKS_DESCENDING
+    ):
+        return ORDER_ASCENDING
+    if (
+        sortedness == CyOrderbookSortedness.DESCENDING
+        or sortedness == CyOrderbookSortedness.BIDS_DESCENDING_ASKS_ASCENDING
+    ):
+        return ORDER_DESCENDING
+    return ORDER_UNKNOWN
+
+
+cdef int _infer_entries_order(OrderbookEntry* entries, u64 count):
+    cdef:
+        u64 i
+        bint ascending = True
+        bint descending = True
+        u64 previous
+        u64 ticks
+
+    if count < 2:
+        return ORDER_UNKNOWN
+
+    previous = entries[0].ticks
+    for i in range(1, count):
+        ticks = entries[i].ticks
+        if previous > ticks:
+            ascending = False
+        if previous < ticks:
+            descending = False
+        previous = ticks
+
+    if ascending:
+        return ORDER_ASCENDING
+    if descending:
+        return ORDER_DESCENDING
+    raise ValueError("Unsorted orderbook levels; expected stable per-side sorted input")
 
 
 cdef class CoreAdvancedOrderbook:
-    """Core orderbook engine managing bids and asks with efficient in-place updates."""
+    """Core orderbook engine managing normalized bid and ask ladders."""
+
     def __cinit__(
         self,
         double tick_size,
@@ -41,12 +106,13 @@ cdef class CoreAdvancedOrderbook:
         CyOrderbookSortedness delta_sortedness,
         CyOrderbookSortedness snapshot_sortedness,
     ):
-        if tick_size <= 0.0:
-            raise ValueError(f"Invalid tick_size; expected >0 but got {tick_size}")
-        if lot_size <= 0.0:
-            raise ValueError(f"Invalid lot_size; expected >0 but got {lot_size}")
+        if tick_size <= 0.0 or not isfinite(tick_size):
+            raise ValueError(f"Invalid tick_size; expected finite >0 but got {tick_size}")
+        if lot_size <= 0.0 or not isfinite(lot_size):
+            raise ValueError(f"Invalid lot_size; expected finite >0 but got {lot_size}")
         if num_levels < 4:
             raise ValueError(f"Invalid num_levels; expected >=4 but got {num_levels}")
+
         self._tick_size = tick_size
         self._lot_size = lot_size
         self._tick_size_recip = 1.0 / tick_size
@@ -54,806 +120,692 @@ cdef class CoreAdvancedOrderbook:
         self._max_levels = num_levels
         self._delta_sortedness = delta_sortedness
         self._snapshot_sortedness = snapshot_sortedness
-        self._bids = OrderbookLadder(max_levels=self._max_levels, is_price_ascending=False)
-        self._asks = OrderbookLadder(max_levels=self._max_levels, is_price_ascending=True)
+        self._snapshot_ask_order = _ask_order_from_sortedness(snapshot_sortedness)
+        self._snapshot_bid_order = _bid_order_from_sortedness(snapshot_sortedness)
+        self._delta_ask_order = _ask_order_from_sortedness(delta_sortedness)
+        self._delta_bid_order = _bid_order_from_sortedness(delta_sortedness)
+        self._bids = OrderbookLadder(max_levels=num_levels, is_price_ascending=False)
+        self._asks = OrderbookLadder(max_levels=num_levels, is_price_ascending=True)
         self._bids_data = self._bids.get_data()
         self._asks_data = self._asks.get_data()
 
     cdef inline void _ensure_not_empty(self):
-        """Ensure the orderbook has been populated.
-
-        Raises:
-            RuntimeError: If either side of the orderbook is empty.
-        """
         if self._bids.is_empty() or self._asks.is_empty():
-            raise RuntimeError("Empty view on one/both sides of orderbook; cannot compute without data")
+            raise RuntimeError(
+                "Empty view on one/both sides of orderbook; cannot compute without data"
+            )
 
     cdef inline bint _check_if_empty(self):
-        """Check if the orderbook has data on both sides.
-
-        Returns:
-            True if both bid and ask sides are non-empty.
-        """
         return not self._bids.is_empty() and not self._asks.is_empty()
 
-    cdef void _normalize_incoming_levels(
+    cdef inline OrderbookLevel _level_from_entry(self, OrderbookEntry* entry):
+        return create_orderbook_level(
+            convert_price_from_tick(entry.ticks, self._tick_size),
+            convert_size_from_lot(entry.lots, self._lot_size),
+            entry.norders,
+        )
+
+    cdef inline OrderbookEntry* _ordered_entry(
         self,
-        OrderbookLevels asks,
-        OrderbookLevels bids,
-        bint is_snapshot,
-    ):
-        """Normalize incoming levels to the orderbook's internal representation.
+        OrderbookEntry* entries,
+        u64 count,
+        int source_order,
+        int target_order,
+        u64 index,
+    ) noexcept:
+        if source_order == target_order:
+            return &entries[index]
+        return &entries[count - 1 - index]
 
-        Converts prices to ticks and sizes to lots, then applies sorting
-        based on the configured sortedness for snapshots or deltas.
-
-        Args:
-            asks: Incoming ask levels to normalize.
-            bids: Incoming bid levels to normalize.
-            is_snapshot: If True, use snapshot sortedness; else use delta sortedness.
-        """
+    cdef u64 _fill_snapshot_entries(
+        self,
+        OrderbookEntry* entries,
+        u64 count,
+        OrderbookLadderData* data,
+        int source_order,
+        int target_order,
+    ) noexcept:
         cdef:
-            CyOrderbookSortedness sortedness_code = (
-                self._snapshot_sortedness 
-                if is_snapshot else 
-                self._delta_sortedness
+            u64 copy_n = count if count <= data.max_levels else data.max_levels
+            u64 i
+
+        for i in range(copy_n):
+            data.levels[i] = self._ordered_entry(entries, count, source_order, target_order, i)[0]
+        data.num_levels = copy_n
+        return copy_n
+
+    cdef void _normalize_levels(self, OrderbookLevels levels, OrderbookEntry* entries):
+        cdef u64 i
+        for i in range(levels.num_levels):
+            validate_price(levels.levels[i].price)
+            validate_size(levels.levels[i].size)
+            entries[i] = create_orderbook_entry(
+                convert_price_to_tick_trusted(levels.levels[i].price, self._tick_size_recip),
+                convert_size_to_lot_trusted(levels.levels[i].size, self._lot_size_recip),
+                levels.levels[i].norders,
             )
-            OrderbookLevel* ask_level
-            OrderbookLevel* bid_level
-            u64 i
 
-        for i in range(asks.num_levels):
-            ask_level = &asks.levels[i]
-            ask_level.ticks = convert_price_to_tick_fast(ask_level.price, self._tick_size_recip)
-            ask_level.lots = convert_size_to_lot_fast(ask_level.size, self._lot_size_recip)
-        for i in range(bids.num_levels):
-            bid_level = &bids.levels[i]
-            bid_level.ticks = convert_price_to_tick_fast(bid_level.price, self._tick_size_recip)
-            bid_level.lots = convert_size_to_lot_fast(bid_level.size, self._lot_size_recip)
+    cdef bint _has_nonzero_entries(self, OrderbookEntry* entries, u64 count) noexcept:
+        cdef u64 i
+        for i in range(count):
+            if entries[i].lots != 0:
+                return True
+        return False
 
-        # Likely most common user choice due to sortedness being unspecified
-        if sortedness_code == CyOrderbookSortedness.UNKNOWN:
-            inplace_sort_levels_by_ticks(levels=asks, ascending=True)
-            inplace_sort_levels_by_ticks(levels=bids, ascending=False)
-        
-        # Used by most exchanges for delta updates, preferred path internally
-        elif sortedness_code == CyOrderbookSortedness.BIDS_DESCENDING_ASKS_ASCENDING:
-            pass
-
-        # Used by most exchanges for snapshot updates
-        elif sortedness_code == CyOrderbookSortedness.ASCENDING:
-            reverse_levels(levels=bids)
-        
-        # Unlikely, should never really happen.
-        elif sortedness_code == CyOrderbookSortedness.DESCENDING:
-            reverse_levels(levels=asks)
-
-        # Unlikely, should never really happen.
-        elif sortedness_code == CyOrderbookSortedness.BIDS_ASCENDING_ASKS_DESCENDING:
-            reverse_levels(levels=asks)
-            reverse_levels(levels=bids)
-
-    cdef void _process_matching_ask_ticks(self, OrderbookLevel* ask):
-        """Process an ask level at the current best ask price.
-
-        Rolls the ask level array left (removing the top-of-book ask) if
-        lots=0, otherwise updates size/lots/norders.
-
-        Args:
-            ask: Pointer to the ask level to process.
-        """
-        cdef:
-            OrderbookLadderData* asks = self._asks_data
-            OrderbookLevel* top_of_book_ask = &asks.levels[0]
-        if ask.lots == 0:
-            self._asks.roll_left(0)
-            self._asks.decrement_count()
-        else:
-            top_of_book_ask.size = ask.size
-            top_of_book_ask.lots = ask.lots
-            top_of_book_ask.norders = ask.norders
-
-    cdef void _process_matching_bid_ticks(self, OrderbookLevel* bid):
-        """Process a bid level at the current best bid price.
-
-        Rolls the bid level array left (removing the top-of-book bid) if
-        lots=0, otherwise updates size/lots/norders.
-
-        Args:
-            bid: Pointer to the bid level to process.
-        """
-        cdef:
-            OrderbookLadderData* bids = self._bids_data
-            OrderbookLevel* top_of_book_bid = &bids.levels[0]
-        if bid.lots == 0:
-            self._bids.roll_left(0)
-            self._bids.decrement_count()
-        else:
-            top_of_book_bid.size = bid.size
-            top_of_book_bid.lots = bid.lots
-            top_of_book_bid.norders = bid.norders
-
-    cdef void _process_lower_ask_ticks(self, OrderbookLevel* ask):
-        """Process an ask level better than the current best ask.
-
-        Rolls the ask level array right (adding a new ask level) then
-        corrects for any overlapping bids by removing them.
-
-        Args:
-            ask: Pointer to the ask level to process.
-        """
-        cdef:
-            OrderbookLadderData* bids = self._bids_data
-            OrderbookLadderData* asks = self._asks_data
-            OrderbookLevel* top_of_book_bid
-            OrderbookLevel* top_of_book_ask
-
-        if ask.lots == 0:
-            return
-
-        self._asks.roll_right(0)
-        self._asks.increment_count()
-
-        top_of_book_ask = &asks.levels[0]
-        top_of_book_ask.price = ask.price
-        top_of_book_ask.ticks = ask.ticks
-        top_of_book_ask.size = ask.size
-        top_of_book_ask.lots = ask.lots
-        top_of_book_ask.norders = ask.norders
-
-        # Remove overlapping bids (fix: check num_levels before dereferencing)
-        while bids.num_levels > 0:
-            top_of_book_bid = &bids.levels[0]
-            if ask.ticks > top_of_book_bid.ticks:
-                break
-            self._bids.roll_left(0)
-            self._bids.decrement_count()
-
-    cdef void _process_higher_bid_ticks(self, OrderbookLevel* bid):
-        """Process a bid level better than the current best bid.
-
-        Rolls the bid level array right (adding a new bid level) then
-        corrects for any overlapping asks by removing them.
-
-        Args:
-            bid: Pointer to the bid level to process.
-        """
-        cdef:
-            OrderbookLadderData* bids = self._bids_data
-            OrderbookLadderData* asks = self._asks_data
-            OrderbookLevel* top_of_book_bid
-            OrderbookLevel* top_of_book_ask
-
-        if bid.lots == 0:
-            return
-
-        self._bids.roll_right(0)
-        self._bids.increment_count()
-
-        top_of_book_bid = &bids.levels[0]
-        top_of_book_bid.price = bid.price
-        top_of_book_bid.ticks = bid.ticks
-        top_of_book_bid.size = bid.size
-        top_of_book_bid.lots = bid.lots
-        top_of_book_bid.norders = bid.norders
-
-        # Remove overlapping asks (fix: check num_levels before dereferencing)
-        while asks.num_levels > 0:
-            top_of_book_ask = &asks.levels[0]
-            if bid.ticks < top_of_book_ask.ticks:
-                break
-            self._asks.roll_left(0)
-            self._asks.decrement_count()
-
-    cdef void _process_middle_ask_ticks(self, OrderbookLevel* ask):
-        """Process an ask level that falls in the middle of the existing ask levels.
-
-        Args:
-            ask: Pointer to the ask level to process.
-        """
-        cdef:
-            OrderbookLadderData* bids = self._bids_data
-            OrderbookLadderData* asks = self._asks_data
-            OrderbookLevel* ask_insertion_level
-            u64 i
-            u64 current_ask_ticks
-            u64 last_idx = asks.num_levels
-            u64 insert_idx = last_idx
-            bint is_matching = False
-
-        for i in range(1, last_idx):
-            current_ask_ticks = asks.levels[i].ticks
-            if current_ask_ticks >= ask.ticks:
-                insert_idx = i
-                if current_ask_ticks == ask.ticks:
-                    is_matching = True
-                break
-
-        if is_matching:
-            if ask.lots == 0:
-                self._asks.roll_left(insert_idx)
-                self._asks.decrement_count()
-            else:
-                ask_insertion_level = &asks.levels[insert_idx]
-                ask_insertion_level.size = ask.size
-                ask_insertion_level.lots = ask.lots
-                ask_insertion_level.norders = ask.norders
-        else:
-            if ask.lots == 0:
-                return
-            self._asks.roll_right(insert_idx)
-            self._asks.increment_count()
-            ask_insertion_level = &asks.levels[insert_idx]
-            ask_insertion_level.price = ask.price
-            ask_insertion_level.ticks = ask.ticks
-            ask_insertion_level.size = ask.size
-            ask_insertion_level.lots = ask.lots
-            ask_insertion_level.norders = ask.norders
-
-    cdef void _process_middle_bid_ticks(self, OrderbookLevel* bid):
-        """Process a bid level that falls in the middle of the existing bid levels.
-
-        Args:
-            bid: Pointer to the bid level to process.
-        """
-        cdef:
-            OrderbookLadderData* bids = self._bids_data
-            OrderbookLadderData* asks = self._asks_data
-            OrderbookLevel* bid_insertion_level
-            u64 i
-            u64 current_bid_ticks
-            u64 last_idx = bids.num_levels
-            u64 insert_idx = last_idx
-            bint is_matching = False
-
-        for i in range(1, last_idx):
-            current_bid_ticks = bids.levels[i].ticks
-            if current_bid_ticks <= bid.ticks:
-                insert_idx = i
-                if current_bid_ticks == bid.ticks:
-                    is_matching = True
-                break
-
-        if is_matching:
-            if bid.lots == 0:
-                self._bids.roll_left(insert_idx)
-                self._bids.decrement_count()
-            else:
-                bid_insertion_level = &bids.levels[insert_idx]
-                bid_insertion_level.size = bid.size
-                bid_insertion_level.lots = bid.lots
-                bid_insertion_level.norders = bid.norders
-        else:
-            if bid.lots == 0:
-                return
-                
-            self._bids.roll_right(insert_idx)
-            self._bids.increment_count()
-            bid_insertion_level = &bids.levels[insert_idx]
-            bid_insertion_level.price = bid.price
-            bid_insertion_level.ticks = bid.ticks
-            bid_insertion_level.size = bid.size
-            bid_insertion_level.lots = bid.lots
-            bid_insertion_level.norders = bid.norders
-
-    cdef inline void clear(self):
-        """Clear all levels from both sides of the orderbook.
-
-        Resets both bid and ask ladders to empty state.
-        """
-        self._bids.reset()
-        self._asks.reset()
-
-    cdef inline void consume_snapshot(self, OrderbookLevels new_asks, OrderbookLevels new_bids):
-        """Replace the entire orderbook state with new snapshot data.
-
-        Args:
-            new_asks: New ask levels to set.
-            new_bids: New bid levels to set.
-        """
-        cdef:
-            OrderbookLadderData* bids_data = self._bids.get_data()
-            OrderbookLadderData* asks_data = self._asks.get_data()
-            u64 i, copy_n
-
-        self._normalize_incoming_levels(new_asks, new_bids, True)
-
-        # Asks: direct assignment without intermediate copies, set count once
-        copy_n = new_asks.num_levels if new_asks.num_levels <= asks_data.max_levels else asks_data.max_levels
-        for i in range(copy_n):
-            asks_data.levels[i] = new_asks.levels[i]
-        asks_data.num_levels = copy_n
-
-        # Bids: direct assignment without intermediate copies, set count once
-        copy_n = new_bids.num_levels if new_bids.num_levels <= bids_data.max_levels else bids_data.max_levels
-        for i in range(copy_n):
-            bids_data.levels[i] = new_bids.levels[i]
-        bids_data.num_levels = copy_n
-
-    cdef inline void consume_deltas(self, OrderbookLevels asks, OrderbookLevels bids):
-        """Apply incremental delta updates to the orderbook.
-
-        Args:
-            asks: Ask level deltas to apply.
-            bids: Bid level deltas to apply.
-        """
-        if not self._check_if_empty():
-            return
-
-        cdef:
-            OrderbookLadderData* bids_data = self._bids.get_data()
-            OrderbookLadderData* asks_data = self._asks.get_data()
-            OrderbookLevel* ask_level
-            OrderbookLevel* bid_level
-            OrderbookLevel* target  # Cached pointer for multi-field updates
-            u64 best_bid_ticks, best_ask_ticks
-            u64 worst_bid_ticks, worst_ask_ticks
-            u64 ask_count, bid_count  # Cached counts for inner loops
-            bint has_bid_replacements = False
-            bint has_ask_replacements = False
-            u64 j
-            u64 insert_idx
-            u64 ask_idx
-            u64 i
-
-        self._normalize_incoming_levels(asks, bids, False)
-
-        best_bid_ticks = bids_data.levels[0].ticks
-        best_ask_ticks = asks_data.levels[0].ticks
-        worst_bid_ticks = bids_data.levels[bids_data.num_levels - 1].ticks
-        worst_ask_ticks = asks_data.levels[asks_data.num_levels - 1].ticks
-
-        for j in range(bids.num_levels):
-            if bids.levels[j].lots != 0:
-                has_bid_replacements = True
-                break
-        for j in range(asks.num_levels):
-            if asks.levels[j].lots != 0:
-                has_ask_replacements = True
-                break
-
-        # Reject deltas that would wipe the opposite side without replacements.
-        if asks.num_levels > 0:
-            if asks.levels[0].ticks < best_ask_ticks and asks.levels[0].ticks <= worst_bid_ticks:
-                if not has_bid_replacements:
-                    return
-
-        if bids.num_levels > 0:
-            if bids.levels[0].ticks > best_bid_ticks and bids.levels[0].ticks >= worst_ask_ticks:
-                if not has_ask_replacements:
-                    return
-
-        i = 0
-        while i < asks.num_levels:
-            ask_level = &asks.levels[i]
-            if ask_level.ticks < best_ask_ticks:
-                self._process_lower_ask_ticks(ask_level)
-                best_ask_ticks = ask_level.ticks
-                i += 1
-            else:
-                break
-
-        if i < asks.num_levels:
-            ask_level = &asks.levels[i]
-            if ask_level.ticks == best_ask_ticks:
-                self._process_matching_ask_ticks(ask_level)
-                if asks_data.num_levels > 0:
-                    best_ask_ticks = asks_data.levels[0].ticks
-                i += 1
-
-        ask_count = asks_data.num_levels
-        if ask_count == 0:
-            if i < asks.num_levels:
-                insert_idx = 0
-                for j in range(i, asks.num_levels):
-                    ask_level = &asks.levels[j]
-                    if ask_level.lots == 0:
-                        continue
-                    asks_data.levels[insert_idx] = ask_level[0]
-                    insert_idx += 1
-                    if insert_idx == asks_data.max_levels:
-                        break
-                asks_data.num_levels = insert_idx
-
-                while bids_data.num_levels > 0 and asks_data.num_levels > 0:
-                    if asks_data.levels[0].ticks > bids_data.levels[0].ticks:
-                        break
-                    self._bids.roll_left(0)
-                    self._bids.decrement_count()
-            i = asks.num_levels
-        else:
-            worst_ask_ticks = asks_data.levels[ask_count - 1].ticks
-
-            ask_idx = 0
-            while i < asks.num_levels:
-                ask_level = &asks.levels[i]
-                ask_count = asks_data.num_levels
-                if ask_level.ticks > worst_ask_ticks and ask_count == asks_data.max_levels:
-                    break
-                while ask_idx < ask_count and asks_data.levels[ask_idx].ticks < ask_level.ticks:
-                    ask_idx += 1
-                if ask_idx >= asks_data.max_levels:
-                    break
-                if ask_idx < ask_count and asks_data.levels[ask_idx].ticks == ask_level.ticks:
-                    if ask_level.lots == 0:
-                        self._asks.roll_left(ask_idx)
-                        self._asks.decrement_count()
-                    else:
-                        target = &asks_data.levels[ask_idx]
-                        target.size = ask_level.size
-                        target.lots = ask_level.lots
-                        target.norders = ask_level.norders
-                else:
-                    if ask_level.lots != 0:
-                        self._asks.roll_right(ask_idx)
-                        self._asks.increment_count()
-                        target = &asks_data.levels[ask_idx]
-                        target.price = ask_level.price
-                        target.ticks = ask_level.ticks
-                        target.size = ask_level.size
-                        target.lots = ask_level.lots
-                        target.norders = ask_level.norders
-                        ask_idx += 1
-                ask_count = asks_data.num_levels
-                if ask_count > 0:
-                    worst_ask_ticks = asks_data.levels[ask_count - 1].ticks
-                i += 1
-
-        bid_count = bids_data.num_levels
-        if bid_count == 0:
-            if bids.num_levels == 0:
-                return
-            insert_idx = 0
-            for i in range(bids.num_levels):
-                bid_level = &bids.levels[i]
-                if bid_level.lots == 0:
-                    continue
-                bids_data.levels[insert_idx] = bid_level[0]
-                insert_idx += 1
-                if insert_idx == bids_data.max_levels:
-                    break
-            bids_data.num_levels = insert_idx
-            while bids_data.num_levels > 0 and asks_data.num_levels > 0:
-                if bids_data.levels[0].ticks < asks_data.levels[0].ticks:
-                    break
-                self._asks.roll_left(0)
-                self._asks.decrement_count()
-            return
-
-        best_bid_ticks = bids_data.levels[0].ticks
-        worst_bid_ticks = bids_data.levels[bid_count - 1].ticks
-
-        i = 0
-        while i < bids.num_levels:
-            bid_level = &bids.levels[i]
-            if bid_level.ticks > best_bid_ticks:
-                self._process_higher_bid_ticks(bid_level)
-                best_bid_ticks = bid_level.ticks
-                i += 1
-            else:
-                break
-        while i < bids.num_levels:
-            bid_level = &bids.levels[i]
-            if bid_level.ticks == best_bid_ticks:
-                self._process_matching_bid_ticks(bid_level)
-                if bids_data.num_levels > 0:
-                    best_bid_ticks = bids_data.levels[0].ticks
-                i += 1
-            else:
-                break
-
-        bid_count = bids_data.num_levels
-        if bid_count == 0:
-            if i < bids.num_levels:
-                insert_idx = 0
-                for j in range(i, bids.num_levels):
-                    bid_level = &bids.levels[j]
-                    if bid_level.lots == 0:
-                        continue
-                    bids_data.levels[insert_idx] = bid_level[0]
-                    insert_idx += 1
-                    if insert_idx == bids_data.max_levels:
-                        break
-                bids_data.num_levels = insert_idx
-
-                while bids_data.num_levels > 0 and asks_data.num_levels > 0:
-                    if bids_data.levels[0].ticks < asks_data.levels[0].ticks:
-                        break
-                    self._asks.roll_left(0)
-                    self._asks.decrement_count()
-            return
-        if bid_count > 0:
-            worst_bid_ticks = bids_data.levels[bid_count - 1].ticks
-
-        cdef u64 bid_idx = 0
-        while i < bids.num_levels:
-            bid_level = &bids.levels[i]
-            bid_count = bids_data.num_levels
-            if bid_level.ticks < worst_bid_ticks and bid_count == bids_data.max_levels:
-                break
-            while bid_idx < bid_count and bids_data.levels[bid_idx].ticks > bid_level.ticks:
-                bid_idx += 1
-            if bid_idx >= bids_data.max_levels:
-                break
-            if bid_idx < bid_count and bids_data.levels[bid_idx].ticks == bid_level.ticks:
-                if bid_level.lots == 0:
-                    self._bids.roll_left(bid_idx)
-                    self._bids.decrement_count()
-                else:
-                    target = &bids_data.levels[bid_idx]
-                    target.size = bid_level.size
-                    target.lots = bid_level.lots
-                    target.norders = bid_level.norders
-            else:
-                if bid_level.lots != 0:
-                    self._bids.roll_right(bid_idx)
-                    self._bids.increment_count()
-                    target = &bids_data.levels[bid_idx]
-                    target.price = bid_level.price
-                    target.ticks = bid_level.ticks
-                    target.size = bid_level.size
-                    target.lots = bid_level.lots
-                    target.norders = bid_level.norders
-                    bid_idx += 1
-            bid_count = bids_data.num_levels
-            if bid_count > 0:
-                worst_bid_ticks = bids_data.levels[bid_count - 1].ticks
-            i += 1
-
-    cdef inline void _assign_bbo_level(
+    cdef inline bint _should_ignore_crossed_deltas(
         self,
-        OrderbookLevel* target,
-        OrderbookLevel* source,
-        u64 ticks,
-        u64 lots,
-    ) noexcept nogil:
-        """Assign BBO level fields from source to target with converted ticks/lots."""
-        target.price = source.price
-        target.ticks = ticks
-        target.size = source.size
-        target.lots = lots
-        target.norders = source.norders
+        OrderbookEntry* asks,
+        u64 ask_count,
+        int ask_order,
+        OrderbookEntry* bids,
+        u64 bid_count,
+        int bid_order,
+    ) noexcept:
+        cdef:
+            bint has_ask_replacements = self._has_nonzero_entries(asks, ask_count)
+            bint has_bid_replacements = self._has_nonzero_entries(bids, bid_count)
+            u64 best_ask_ticks = self._asks.top().ticks
+            u64 worst_ask_ticks = self._asks.bottom().ticks
+            u64 best_bid_ticks = self._bids.top().ticks
+            u64 worst_bid_ticks = self._bids.bottom().ticks
+            OrderbookEntry* incoming_ask = NULL
+            OrderbookEntry* incoming_bid = NULL
 
-    cdef inline void consume_bbo(self, OrderbookLevel ask, OrderbookLevel bid):
-        """Update only the best bid and offer (top of book)."""
-        if not self._check_if_empty():
+        if ask_count > 0:
+            incoming_ask = self._ordered_entry(
+                asks,
+                ask_count,
+                ask_order,
+                ORDER_ASCENDING,
+                0,
+            )
+        if bid_count > 0:
+            incoming_bid = self._ordered_entry(
+                bids,
+                bid_count,
+                bid_order,
+                ORDER_DESCENDING,
+                0,
+            )
+
+        if (
+            ask_count > 0
+            and incoming_ask[0].lots != 0
+            and incoming_ask[0].ticks < best_ask_ticks
+            and incoming_ask[0].ticks <= worst_bid_ticks
+            and not has_bid_replacements
+        ):
+            return True
+
+        if (
+            bid_count > 0
+            and incoming_bid[0].lots != 0
+            and incoming_bid[0].ticks > best_bid_ticks
+            and incoming_bid[0].ticks >= worst_ask_ticks
+            and not has_ask_replacements
+        ):
+            return True
+
+        return False
+
+    cdef bint _can_apply_replacement_side(
+        self,
+        OrderbookLadder ladder,
+        OrderbookLadderData* data,
+        OrderbookEntry* entries,
+        u64 count,
+        int source_order,
+        int target_order,
+    ) noexcept:
+        cdef:
+            u64 update_i
+            u64 ladder_i = 0
+            OrderbookEntry* entry
+            u64 current_ticks
+
+        if count == 0:
+            return True
+        if data.num_levels == 0:
+            return False
+
+        for update_i in range(count):
+            entry = self._ordered_entry(entries, count, source_order, target_order, update_i)
+            if entry.lots == 0:
+                return False
+            if update_i == 0:
+                ladder_i = ladder.seek_start(entry.ticks)
+            while ladder_i < data.num_levels:
+                current_ticks = ladder.at(ladder_i).ticks
+                if current_ticks == entry.ticks:
+                    break
+                if data.is_price_ascending:
+                    if current_ticks > entry.ticks:
+                        return False
+                else:
+                    if current_ticks < entry.ticks:
+                        return False
+                ladder_i += 1
+            if ladder_i >= data.num_levels or ladder.at(ladder_i).ticks != entry.ticks:
+                return False
+            ladder_i += 1
+
+        return True
+
+    cdef void _apply_replacement_side(
+        self,
+        OrderbookLadder ladder,
+        OrderbookLadderData* data,
+        OrderbookEntry* entries,
+        u64 count,
+        int source_order,
+        int target_order,
+    ) noexcept:
+        cdef:
+            u64 update_i
+            u64 ladder_i = 0
+            OrderbookEntry* entry
+
+        for update_i in range(count):
+            entry = self._ordered_entry(entries, count, source_order, target_order, update_i)
+            if update_i == 0:
+                ladder_i = ladder.seek_start(entry.ticks)
+            while ladder.at(ladder_i).ticks != entry.ticks:
+                ladder_i += 1
+            ladder.assign_entry(ladder_i, entry)
+            ladder_i += 1
+
+    cdef bint _try_apply_replacement_deltas(
+        self,
+        OrderbookEntry* asks,
+        u64 ask_count,
+        int ask_order,
+        OrderbookEntry* bids,
+        u64 bid_count,
+        int bid_order,
+    ) noexcept:
+        if not self._can_apply_replacement_side(
+            self._asks,
+            self._asks_data,
+            asks,
+            ask_count,
+            ask_order,
+            ORDER_ASCENDING,
+        ):
+            return False
+        if not self._can_apply_replacement_side(
+            self._bids,
+            self._bids_data,
+            bids,
+            bid_count,
+            bid_order,
+            ORDER_DESCENDING,
+        ):
+            return False
+
+        self._apply_replacement_side(
+            self._asks,
+            self._asks_data,
+            asks,
+            ask_count,
+            ask_order,
+            ORDER_ASCENDING,
+        )
+        self._apply_replacement_side(
+            self._bids,
+            self._bids_data,
+            bids,
+            bid_count,
+            bid_order,
+            ORDER_DESCENDING,
+        )
+        if ask_count > 0:
+            self._remove_crossed_bids()
+        if bid_count > 0:
+            self._remove_crossed_asks()
+        return True
+
+    cdef inline void _apply_entry_delta(
+        self,
+        OrderbookLadder ladder,
+        OrderbookLadderData* data,
+        OrderbookEntry* entry,
+    ) noexcept:
+        cdef u64 index
+
+        if data.num_levels == 0:
+            if entry.lots != 0:
+                ladder.insert_entry(0, entry)
+                ladder.increment_count()
             return
 
-        cdef:
-            OrderbookLadderData* asks_data = self._asks.get_data()
-            OrderbookLadderData* bids_data = self._bids.get_data()
-            OrderbookLevel* top
-            u64 ask_ticks, bid_ticks, ask_lots, bid_lots
-
-        ask_ticks = convert_price_to_tick_fast(ask.price, self._tick_size_recip)
-        bid_ticks = convert_price_to_tick_fast(bid.price, self._tick_size_recip)
-        ask_lots = convert_size_to_lot_fast(ask.size, self._lot_size_recip)
-        bid_lots = convert_size_to_lot_fast(bid.size, self._lot_size_recip)
-
-        # Process ask side
-        if asks_data.num_levels > 0:
-            top = &asks_data.levels[0]
-            if ask_lots == 0 and ask_ticks == top.ticks:
-                self._asks.roll_left(0)
-                self._asks.decrement_count()
-            elif top.ticks == ask_ticks:
-                top.size = ask.size
-                top.lots = ask_lots
-                top.norders = ask.norders
-            elif ask_ticks < top.ticks:
-                self._asks.roll_right(0)
-                self._asks.increment_count()
-                self._assign_bbo_level(&asks_data.levels[0], &ask, ask_ticks, ask_lots)
+        index = ladder.seek_start(entry.ticks)
+        if index < data.num_levels and ladder.at(index).ticks == entry.ticks:
+            if entry.lots == 0:
+                ladder.roll_left(index)
+                ladder.decrement_count()
             else:
-                # Worse price: old BBO was consumed, remove it. New BBO is next level.
-                self._asks.roll_left(0)
-                self._asks.decrement_count()
-        elif ask_lots != 0:
-            self._asks.roll_right(0)
-            self._asks.increment_count()
-            self._assign_bbo_level(&asks_data.levels[0], &ask, ask_ticks, ask_lots)
+                ladder.assign_entry(index, entry)
+        elif entry.lots != 0 and index < data.max_levels:
+            ladder.roll_right(index)
+            ladder.insert_entry(index, entry)
+            ladder.increment_count()
 
-        # Process bid side
-        if bids_data.num_levels > 0:
-            top = &bids_data.levels[0]
-            if bid_lots == 0 and bid_ticks == top.ticks:
-                self._bids.roll_left(0)
-                self._bids.decrement_count()
-            elif top.ticks == bid_ticks:
-                top.size = bid.size
-                top.lots = bid_lots
-                top.norders = bid.norders
-            elif bid_ticks > top.ticks:
-                self._bids.roll_right(0)
-                self._bids.increment_count()
-                self._assign_bbo_level(&bids_data.levels[0], &bid, bid_ticks, bid_lots)
-            else:
-                # Worse price: old BBO was consumed, remove it. New BBO is next level.
-                self._bids.roll_left(0)
-                self._bids.decrement_count()
-        elif bid_lots != 0:
-            self._bids.roll_right(0)
-            self._bids.increment_count()
-            self._assign_bbo_level(&bids_data.levels[0], &bid, bid_ticks, bid_lots)
+    cdef inline void _apply_small_deltas(
+        self,
+        OrderbookEntry* asks,
+        u64 ask_count,
+        OrderbookEntry* bids,
+        u64 bid_count,
+    ) noexcept:
+        cdef u64 i
 
-        # Remove crossed bids/asks, but preserve at least the incoming BBO
+        for i in range(ask_count):
+            self._apply_entry_delta(self._asks, self._asks_data, &asks[i])
+        for i in range(bid_count):
+            self._apply_entry_delta(self._bids, self._bids_data, &bids[i])
+        if ask_count > 0:
+            self._remove_crossed_bids()
+        if bid_count > 0:
+            self._remove_crossed_asks()
+
+    cdef void _remove_crossed_bids(self):
         while (
-            bids_data.num_levels > 0
-            and asks_data.num_levels > 0
-            and bids_data.levels[0].ticks >= asks_data.levels[0].ticks
+            self._bids_data.num_levels > 0
+            and self._asks_data.num_levels > 0
+            and self._bids.top().ticks >= self._asks.top().ticks
+        ):
+            self._bids.roll_left(0)
+            self._bids.decrement_count()
+
+    cdef void _remove_crossed_asks(self):
+        while (
+            self._bids_data.num_levels > 0
+            and self._asks_data.num_levels > 0
+            and self._bids.top().ticks >= self._asks.top().ticks
         ):
             self._asks.roll_left(0)
             self._asks.decrement_count()
 
-        # If ask side was emptied by cross-removal, restore with incoming ask BBO
-        if asks_data.num_levels == 0 and ask_lots != 0:
-            self._asks.increment_count()
-            self._assign_bbo_level(&asks_data.levels[0], &ask, ask_ticks, ask_lots)
+    cdef inline void _assign_top(self, OrderbookLadder ladder, OrderbookEntry* entry):
+        ladder.roll_right(0)
+        ladder.insert_entry(0, entry)
+        ladder.increment_count()
 
-        # If bid side was emptied by cross-removal, restore with incoming bid BBO
-        if bids_data.num_levels == 0 and bid_lots != 0:
-            self._bids.increment_count()
-            self._assign_bbo_level(&bids_data.levels[0], &bid, bid_ticks, bid_lots)
+    cdef inline void clear(self):
+        self._bids.reset()
+        self._asks.reset()
+
+    cdef void consume_snapshot_entries(
+        self,
+        OrderbookEntry* asks,
+        u64 ask_count,
+        OrderbookEntry* bids,
+        u64 bid_count,
+    ):
+        cdef:
+            int inferred
+            int ask_order = self._snapshot_ask_order
+            int bid_order = self._snapshot_bid_order
+            OrderbookEntry* best_ask = NULL
+            OrderbookEntry* best_bid = NULL
+
+        if ask_order == ORDER_UNKNOWN:
+            inferred = _infer_entries_order(asks, ask_count)
+            if inferred != ORDER_UNKNOWN:
+                self._snapshot_ask_order = inferred
+                ask_order = inferred
+        if ask_order == ORDER_UNKNOWN:
+            ask_order = ORDER_ASCENDING
+
+        if bid_order == ORDER_UNKNOWN:
+            inferred = _infer_entries_order(bids, bid_count)
+            if inferred != ORDER_UNKNOWN:
+                self._snapshot_bid_order = inferred
+                bid_order = inferred
+        if bid_order == ORDER_UNKNOWN:
+            bid_order = ORDER_DESCENDING
+
+        if ask_count > 0:
+            best_ask = self._ordered_entry(asks, ask_count, ask_order, ORDER_ASCENDING, 0)
+        if bid_count > 0:
+            best_bid = self._ordered_entry(bids, bid_count, bid_order, ORDER_DESCENDING, 0)
+
+        if (
+            ask_count > 0
+            and bid_count > 0
+            and best_bid[0].ticks >= best_ask[0].ticks
+        ):
+            raise ValueError("Crossed snapshot; best bid must be below best ask")
+
+        self._asks.reset()
+        self._bids.reset()
+        self._fill_snapshot_entries(
+            asks,
+            ask_count,
+            self._asks_data,
+            ask_order,
+            ORDER_ASCENDING,
+        )
+        self._fill_snapshot_entries(
+            bids,
+            bid_count,
+            self._bids_data,
+            bid_order,
+            ORDER_DESCENDING,
+        )
+
+    cdef void consume_deltas_entries(
+        self,
+        OrderbookEntry* asks,
+        u64 ask_count,
+        OrderbookEntry* bids,
+        u64 bid_count,
+    ):
+        if not self._check_if_empty():
+            return
+
+        cdef:
+            int inferred
+            int ask_order = self._delta_ask_order
+            int bid_order = self._delta_bid_order
+
+        if ask_order == ORDER_UNKNOWN:
+            inferred = _infer_entries_order(asks, ask_count)
+            if inferred != ORDER_UNKNOWN:
+                self._delta_ask_order = inferred
+                ask_order = inferred
+        if ask_order == ORDER_UNKNOWN:
+            ask_order = ORDER_ASCENDING
+
+        if bid_order == ORDER_UNKNOWN:
+            inferred = _infer_entries_order(bids, bid_count)
+            if inferred != ORDER_UNKNOWN:
+                self._delta_bid_order = inferred
+                bid_order = inferred
+        if bid_order == ORDER_UNKNOWN:
+            bid_order = ORDER_DESCENDING
+
+        if ask_count + bid_count <= SMALL_DELTA_LIMIT:
+            if self._should_ignore_crossed_deltas(
+                asks,
+                ask_count,
+                ask_order,
+                bids,
+                bid_count,
+                bid_order,
+            ):
+                return
+            self._apply_small_deltas(asks, ask_count, bids, bid_count)
+            return
+
+        if self._should_ignore_crossed_deltas(
+            asks,
+            ask_count,
+            ask_order,
+            bids,
+            bid_count,
+            bid_order,
+        ):
+            return
+
+        if self._try_apply_replacement_deltas(
+            asks,
+            ask_count,
+            ask_order,
+            bids,
+            bid_count,
+            bid_order,
+        ):
+            return
+
+        if ask_count > 0:
+            if ask_order != ORDER_ASCENDING:
+                reverse_entries(asks, ask_count)
+            self._asks.apply_sorted_deltas(asks, ask_count)
+        if bid_count > 0:
+            if bid_order != ORDER_DESCENDING:
+                reverse_entries(bids, bid_count)
+            self._bids.apply_sorted_deltas(bids, bid_count)
+        if ask_count > 0:
+            self._remove_crossed_bids()
+        if bid_count > 0:
+            self._remove_crossed_asks()
+
+    cdef void consume_snapshot(self, OrderbookLevels new_asks, OrderbookLevels new_bids):
+        cdef:
+            OrderbookEntry* ask_entries = NULL
+            OrderbookEntry* bid_entries = NULL
+            u64 ask_count = new_asks.num_levels
+            u64 bid_count = new_bids.num_levels
+
+        if new_asks.num_levels > 0:
+            ask_entries = <OrderbookEntry*>malloc(new_asks.num_levels * sizeof(OrderbookEntry))
+            if ask_entries == NULL:
+                raise MemoryError("Failed to allocate normalized ask entries")
+        if new_bids.num_levels > 0:
+            bid_entries = <OrderbookEntry*>malloc(new_bids.num_levels * sizeof(OrderbookEntry))
+            if bid_entries == NULL:
+                if ask_entries != NULL:
+                    free(ask_entries)
+                raise MemoryError("Failed to allocate normalized bid entries")
+
+        try:
+            self._normalize_levels(new_asks, ask_entries)
+            self._normalize_levels(new_bids, bid_entries)
+            self.consume_snapshot_entries(ask_entries, ask_count, bid_entries, bid_count)
+        finally:
+            if ask_entries != NULL:
+                free(ask_entries)
+            if bid_entries != NULL:
+                free(bid_entries)
+
+    cdef void consume_deltas(self, OrderbookLevels asks, OrderbookLevels bids):
+        cdef:
+            OrderbookEntry* ask_entries = NULL
+            OrderbookEntry* bid_entries = NULL
+            u64 ask_count = asks.num_levels
+            u64 bid_count = bids.num_levels
+
+        if asks.num_levels > 0:
+            ask_entries = <OrderbookEntry*>malloc(asks.num_levels * sizeof(OrderbookEntry))
+            if ask_entries == NULL:
+                raise MemoryError("Failed to allocate normalized ask delta entries")
+        if bids.num_levels > 0:
+            bid_entries = <OrderbookEntry*>malloc(bids.num_levels * sizeof(OrderbookEntry))
+            if bid_entries == NULL:
+                if ask_entries != NULL:
+                    free(ask_entries)
+                raise MemoryError("Failed to allocate normalized bid delta entries")
+
+        try:
+            self._normalize_levels(asks, ask_entries)
+            self._normalize_levels(bids, bid_entries)
+            self.consume_deltas_entries(ask_entries, ask_count, bid_entries, bid_count)
+        finally:
+            if ask_entries != NULL:
+                free(ask_entries)
+            if bid_entries != NULL:
+                free(bid_entries)
+
+    cdef void consume_bbo_entries(self, OrderbookEntry ask_entry, OrderbookEntry bid_entry):
+        if not self._check_if_empty():
+            return
+
+        cdef OrderbookEntry* top
+
+        if self._asks_data.num_levels > 0:
+            top = self._asks.top()
+            if ask_entry.lots == 0 and ask_entry.ticks == top.ticks:
+                self._asks.roll_left(0)
+                self._asks.decrement_count()
+            elif ask_entry.ticks == top.ticks:
+                self._asks.assign_entry(0, &ask_entry)
+            elif ask_entry.ticks < top.ticks:
+                if ask_entry.lots != 0:
+                    self._assign_top(self._asks, &ask_entry)
+            else:
+                self._asks.roll_left(0)
+                self._asks.decrement_count()
+                if self._asks_data.num_levels == 0 and ask_entry.lots != 0:
+                    self._assign_top(self._asks, &ask_entry)
+        elif ask_entry.lots != 0:
+            self._assign_top(self._asks, &ask_entry)
+
+        if self._bids_data.num_levels > 0:
+            top = self._bids.top()
+            if bid_entry.lots == 0 and bid_entry.ticks == top.ticks:
+                self._bids.roll_left(0)
+                self._bids.decrement_count()
+            elif bid_entry.ticks == top.ticks:
+                self._bids.assign_entry(0, &bid_entry)
+            elif bid_entry.ticks > top.ticks:
+                if bid_entry.lots != 0:
+                    self._assign_top(self._bids, &bid_entry)
+            else:
+                self._bids.roll_left(0)
+                self._bids.decrement_count()
+                if self._bids_data.num_levels == 0 and bid_entry.lots != 0:
+                    self._assign_top(self._bids, &bid_entry)
+        elif bid_entry.lots != 0:
+            self._assign_top(self._bids, &bid_entry)
+
+        self._remove_crossed_asks()
+        if self._asks_data.num_levels == 0 and ask_entry.lots != 0:
+            self._assign_top(self._asks, &ask_entry)
+        if self._bids_data.num_levels == 0 and bid_entry.lots != 0:
+            self._assign_top(self._bids, &bid_entry)
+
+    cdef void consume_bbo(self, OrderbookLevel ask, OrderbookLevel bid):
+        self.consume_bbo_values(
+            ask.price,
+            ask.size,
+            bid.price,
+            bid.size,
+            ask.norders,
+            bid.norders,
+        )
+
+    cdef void consume_bbo_values(
+        self,
+        double ask_price,
+        double ask_size,
+        double bid_price,
+        double bid_size,
+        u64 ask_norders,
+        u64 bid_norders,
+    ):
+        validate_price(ask_price)
+        validate_size(ask_size)
+        validate_price(bid_price)
+        validate_size(bid_size)
+
+        cdef:
+            u64 ask_ticks = convert_price_to_tick_trusted(ask_price, self._tick_size_recip)
+            u64 bid_ticks = convert_price_to_tick_trusted(bid_price, self._tick_size_recip)
+            OrderbookEntry ask_entry = create_orderbook_entry(
+                ask_ticks,
+                convert_size_to_lot_trusted(ask_size, self._lot_size_recip),
+                ask_norders,
+            )
+            OrderbookEntry bid_entry = create_orderbook_entry(
+                bid_ticks,
+                convert_size_to_lot_trusted(bid_size, self._lot_size_recip),
+                bid_norders,
+            )
+
+        if bid_ticks >= ask_ticks:
+            raise ValueError("Crossed BBO; bid price must be below ask price")
+        if not self._check_if_empty():
+            return
+
+        self.consume_bbo_entries(ask_entry, bid_entry)
 
     cdef inline double get_mid_price(self):
-        """Calculate the mid price from best bid and ask.
-
-        Returns:
-            Mid price as a double.
-
-        Raises:
-            RuntimeError: If orderbook is empty.
-        """
         self._ensure_not_empty()
-        cdef:
-            OrderbookLadderData* bids_data = self._bids_data
-            OrderbookLadderData* asks_data = self._asks_data
-            u64 bid_ticks = bids_data.levels[0].ticks
-            u64 ask_ticks = asks_data.levels[0].ticks
-        return convert_price_from_tick(
-            tick=(bid_ticks + ask_ticks) // 2,
-            tick_size=self._tick_size,
-        )
+        cdef u64 bid_ticks = self._bids.top().ticks
+        cdef u64 ask_ticks = self._asks.top().ticks
+        return convert_price_from_tick((bid_ticks + ask_ticks) // 2, self._tick_size)
 
     cdef inline double get_bbo_spread(self):
-        """Calculate the spread between best bid and ask.
-
-        Returns:
-            Spread in price units.
-
-        Raises:
-            RuntimeError: If orderbook is empty.
-        """
         self._ensure_not_empty()
-        cdef:
-            OrderbookLadderData* bids_data = self._bids_data
-            OrderbookLadderData* asks_data = self._asks_data
-            u64 bid_ticks = bids_data.levels[0].ticks
-            u64 ask_ticks = asks_data.levels[0].ticks
+        cdef u64 bid_ticks = self._bids.top().ticks
+        cdef u64 ask_ticks = self._asks.top().ticks
         if ask_ticks >= bid_ticks:
-            return convert_price_from_tick(
-                tick=ask_ticks - bid_ticks,
-                tick_size=self._tick_size,
-            )
-        else:
-            return -convert_price_from_tick(
-                tick=bid_ticks - ask_ticks,
-                tick_size=self._tick_size,
-            )
+            return convert_price_from_tick(ask_ticks - bid_ticks, self._tick_size)
+        return -convert_price_from_tick(bid_ticks - ask_ticks, self._tick_size)
 
     cdef inline double get_wmid_price(self):
-        """Calculate weighted mid price using best bid/ask volumes.
-
-        Returns:
-            Volume-weighted mid price.
-
-        Raises:
-            RuntimeError: If orderbook is empty.
-        """
         self._ensure_not_empty()
         cdef:
-            OrderbookLadderData* bids_data = self._bids_data
-            OrderbookLadderData* asks_data = self._asks_data
-            u64 bid_ticks = bids_data.levels[0].ticks
-            u64 bid_lots = bids_data.levels[0].lots
-            u64 ask_ticks = asks_data.levels[0].ticks
-            u64 ask_lots = asks_data.levels[0].lots
-            u64 total_lots = bid_lots + ask_lots
+            OrderbookEntry* bid = self._bids.top()
+            OrderbookEntry* ask = self._asks.top()
+            u64 total_lots = bid.lots + ask.lots
+            double weighted_ticks
         if total_lots == 0:
             return 0.0
-        cdef double weighted_ticks = (
-            <double>bid_ticks * <double>bid_lots + <double>ask_ticks * <double>ask_lots
+        weighted_ticks = (
+            <double>bid.ticks * <double>bid.lots + <double>ask.ticks * <double>ask.lots
         ) / <double>total_lots
-        return convert_price_from_tick(
-            tick=<u64>weighted_ticks,
-            tick_size=self._tick_size,
-        )
+        return convert_price_from_tick(<u64>weighted_ticks, self._tick_size)
 
     cdef inline double get_volume_weighted_mid_price(self, double size, bint is_base_currency):
-        """Calculate volume-weighted mid price for a given trade size.
-
-        Args:
-            size: Trade size to calculate weighted price for.
-            is_base_currency: If True, size is in base currency.
-
-        Returns:
-            Volume-weighted mid price, or infinity if size cannot be filled.
-
-        Raises:
-            RuntimeError: If orderbook is empty.
-        """
         self._ensure_not_empty()
         cdef double mid_price = self.get_mid_price()
         if size <= 0.0:
             return mid_price
         cdef:
             double target = size if is_base_currency else (size / mid_price)
-            u64 target_lots = convert_size_to_lot(target, self._lot_size)
-            OrderbookLadderData* asks_data = self._asks_data
-            OrderbookLadderData* bids_data = self._bids_data
+            u64 target_lots = convert_size_to_lot(target, self._lot_size_recip)
             u64 cum_ask_lots = 0
             u64 cum_bid_lots = 0
             u64 final_buy_ticks = 0
             u64 final_sell_ticks = 0
             u64 i
-        for i in range(asks_data.num_levels):
-            cum_ask_lots += asks_data.levels[i].lots
+        for i in range(self._asks_data.num_levels):
+            cum_ask_lots += self._asks.at(i).lots
             if cum_ask_lots >= target_lots:
-                final_buy_ticks = asks_data.levels[i].ticks
+                final_buy_ticks = self._asks.at(i).ticks
                 break
-        for i in range(bids_data.num_levels):
-            cum_bid_lots += bids_data.levels[i].lots
+        for i in range(self._bids_data.num_levels):
+            cum_bid_lots += self._bids.at(i).lots
             if cum_bid_lots >= target_lots:
-                final_sell_ticks = bids_data.levels[i].ticks
+                final_sell_ticks = self._bids.at(i).ticks
                 break
         if final_buy_ticks == 0 or final_sell_ticks == 0:
             return INFINITY_DOUBLE
         return convert_price_from_tick((final_buy_ticks + final_sell_ticks) // 2, self._tick_size)
 
     cdef inline double get_price_impact(self, double size, bint is_buy, bint is_base_currency):
-        """Calculate terminal touch-relative impact for a trade of given size.
-
-        Args:
-            size: Trade size.
-            is_buy: If True, anchor at best ask and consume asks.
-            is_base_currency: If True, size is in base currency.
-
-        Returns:
-            Absolute price impact, or infinity if size cannot be filled.
-
-        Raises:
-            RuntimeError: If orderbook is empty.
-        """
         self._ensure_not_empty()
         if size <= 0.0:
             return 0.0
         cdef:
-            OrderbookLadderData* side_data = self._asks_data if is_buy else self._bids_data
-            u64 touch_anchor_ticks = side_data.levels[0].ticks
-            double touch_anchor_price = convert_price_from_tick(
-                touch_anchor_ticks,
-                self._tick_size,
-            )
+            OrderbookLadder side = self._asks if is_buy else self._bids
+            OrderbookLadderData* side_data = side.get_data()
+            u64 touch_anchor_ticks = side.top().ticks
+            double touch_anchor_price = convert_price_from_tick(touch_anchor_ticks, self._tick_size)
             double target_base = size if is_base_currency else (size / touch_anchor_price)
-            u64 target_lots = convert_size_to_lot(target_base, self._lot_size)
+            u64 target_lots = convert_size_to_lot(target_base, self._lot_size_recip)
             u64 remaining_lots = target_lots
-            u64 consumed_lots, available_lots
+            u64 consumed_lots
+            u64 available_lots
             u64 last_touched_ticks = touch_anchor_ticks
             u64 i
         if target_lots == 0:
             return 0.0
         for i in range(side_data.num_levels):
-            available_lots = side_data.levels[i].lots
+            available_lots = side.at(i).lots
             consumed_lots = available_lots if available_lots < remaining_lots else remaining_lots
             if consumed_lots > 0:
-                last_touched_ticks = side_data.levels[i].ticks
+                last_touched_ticks = side.at(i).ticks
             remaining_lots -= consumed_lots
             if remaining_lots == 0:
                 break
         if remaining_lots > 0:
             return INFINITY_DOUBLE
-        return abs(
-            convert_price_from_tick(last_touched_ticks, self._tick_size) - touch_anchor_price
+        return fabs(
+            convert_price_from_tick(last_touched_ticks, self._tick_size)
+            - touch_anchor_price
         )
 
     cdef inline double get_size_for_price_impact_bps(
@@ -862,26 +814,17 @@ cdef class CoreAdvancedOrderbook:
         bint is_buy,
         bint is_base_currency,
     ):
-        """Get cumulative size available within a touch-anchored impact band.
-
-        Args:
-            impact_bps: Price depth in basis points from touch.
-            is_buy: If True, aggregate asks; if False, aggregate bids.
-            is_base_currency: If True, return base size; if False, quote notional.
-
-        Returns:
-            Cumulative available size within the band.
-
-        Raises:
-            RuntimeError: If orderbook is empty.
-        """
         self._ensure_not_empty()
         if impact_bps <= 0.0:
             return 0.0
         cdef:
-            OrderbookLadderData* side_data = self._asks_data if is_buy else self._bids_data
-            u64 touch_anchor_ticks = side_data.levels[0].ticks
-            double touch_anchor_price = convert_price_from_tick(touch_anchor_ticks, self._tick_size)
+            OrderbookLadder side = self._asks if is_buy else self._bids
+            OrderbookLadderData* side_data = side.get_data()
+            u64 touch_anchor_ticks = side.top().ticks
+            double touch_anchor_price = convert_price_from_tick(
+                touch_anchor_ticks,
+                self._tick_size,
+            )
             double limit_price
             u64 limit_ticks
             u64 ticks
@@ -890,89 +833,71 @@ cdef class CoreAdvancedOrderbook:
             double total_ticks_times_lots = 0.0
             u64 i
         if is_buy:
-            limit_price = touch_anchor_price * (1.0 + impact_bps / 10_000.0)
-            limit_ticks = convert_price_to_tick_fast(limit_price, self._tick_size_recip)
+            limit_price = touch_anchor_price * (1.0 + impact_bps / 10000.0)
+            limit_ticks = convert_price_to_tick(limit_price, self._tick_size_recip)
             for i in range(side_data.num_levels):
-                ticks = side_data.levels[i].ticks
+                ticks = side.at(i).ticks
                 if ticks > limit_ticks:
                     break
-                lots = side_data.levels[i].lots
+                lots = side.at(i).lots
                 total_lots += lots
                 total_ticks_times_lots += <double>ticks * <double>lots
         else:
-            limit_price = touch_anchor_price * (1.0 - impact_bps / 10_000.0)
-            limit_ticks = convert_price_to_tick_fast(limit_price, self._tick_size_recip)
+            limit_price = touch_anchor_price * (1.0 - impact_bps / 10000.0)
+            limit_ticks = convert_price_to_tick(limit_price, self._tick_size_recip)
             if convert_price_from_tick(limit_ticks, self._tick_size) < limit_price:
                 limit_ticks += 1
             for i in range(side_data.num_levels):
-                ticks = side_data.levels[i].ticks
+                ticks = side.at(i).ticks
                 if ticks < limit_ticks:
                     break
-                lots = side_data.levels[i].lots
+                lots = side.at(i).lots
                 total_lots += lots
                 total_ticks_times_lots += <double>ticks * <double>lots
         if is_base_currency:
             return convert_size_from_lot(total_lots, self._lot_size)
         return (self._tick_size * self._lot_size) * total_ticks_times_lots
 
-    cdef inline bint is_bbo_crossed(self, double other_bid_price, double other_ask_price):
-        """Check if this orderbook's BBO crosses with another orderbook's BBO.
-
-        Args:
-            other_bid_price: Best bid price from another orderbook.
-            other_ask_price: Best ask price from another orderbook.
-
-        Returns:
-            True if this bid > other ask or this ask < other bid.
-
-        Raises:
-            RuntimeError: If orderbook is empty.
-        """
+    cdef inline bint is_bbo_crossed(
+        self,
+        double other_bid_price,
+        double other_ask_price,
+    ):
         self._ensure_not_empty()
-        cdef:
-            OrderbookLadderData* bids_data = self._bids_data
-            OrderbookLadderData* asks_data = self._asks_data
-            u64 my_bid_ticks = bids_data.levels[0].ticks
-            u64 my_ask_ticks = asks_data.levels[0].ticks
-            u64 other_bid_ticks = convert_price_to_tick(other_bid_price, self._tick_size)
-            u64 other_ask_ticks = convert_price_to_tick(other_ask_price, self._tick_size)
-        return my_bid_ticks > other_ask_ticks or my_ask_ticks < other_bid_ticks
+        validate_price(other_bid_price)
+        validate_price(other_ask_price)
+        cdef u64 other_bid_ticks = convert_price_to_tick(
+            other_bid_price,
+            self._tick_size_recip,
+        )
+        cdef u64 other_ask_ticks = convert_price_to_tick(
+            other_ask_price,
+            self._tick_size_recip,
+        )
+        return (
+            self._bids.top().ticks >= other_ask_ticks
+            or self._asks.top().ticks <= other_bid_ticks
+        )
 
     cdef inline bint does_bbo_price_change(self, double bid_price, double ask_price):
-        """Check if the given prices differ from current BBO.
-
-        Args:
-            bid_price: Bid price to compare.
-            ask_price: Ask price to compare.
-
-        Returns:
-            True if either price differs from current BBO.
-
-        Raises:
-            RuntimeError: If orderbook is empty.
-        """
         self._ensure_not_empty()
-        cdef:
-            OrderbookLadderData* bids_data = self._bids_data
-            OrderbookLadderData* asks_data = self._asks_data
-            u64 my_bid_ticks = bids_data.levels[0].ticks
-            u64 my_ask_ticks = asks_data.levels[0].ticks
-            u64 other_bid_ticks = convert_price_to_tick(bid_price, self._tick_size)
-            u64 other_ask_ticks = convert_price_to_tick(ask_price, self._tick_size)
-        return my_bid_ticks != other_bid_ticks or my_ask_ticks != other_ask_ticks
+        validate_price(bid_price)
+        validate_price(ask_price)
+        cdef u64 other_bid_ticks = convert_price_to_tick(
+            bid_price,
+            self._tick_size_recip,
+        )
+        cdef u64 other_ask_ticks = convert_price_to_tick(
+            ask_price,
+            self._tick_size_recip,
+        )
+        return (
+            self._bids.top().ticks != other_bid_ticks
+            or self._asks.top().ticks != other_ask_ticks
+        )
 
     cdef inline OrderbookLadderData* get_bids_data(self) noexcept:
-        """Get the bids ladder data.
-
-        Returns:
-            Pointer to OrderbookLadderData for bids
-        """
         return self._bids_data
 
     cdef inline OrderbookLadderData* get_asks_data(self) noexcept:
-        """Get the asks ladder data.
-
-        Returns:
-            Pointer to OrderbookLadderData for asks
-        """
         return self._asks_data

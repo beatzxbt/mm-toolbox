@@ -6,150 +6,48 @@
 # distutils: sources = src/mm_toolbox/orderbook/advanced/c/orderbook_helpers.c
 # distutils: include_dirs = src/mm_toolbox/orderbook/advanced/c
 
-"""
-Orderbook helper functions for price/size conversion and level manipulation.
+"""Cython-only helpers for normalized orderbook entries."""
 
-This module provides Cython wrappers around C implementations for:
-- Price to tick conversion and vice versa
-- Size to lot conversion and vice versa
-- Level swapping, reversing, and sorting operations
-"""
 from __future__ import annotations
 
+from libc.math cimport isfinite
 from libc.stdint cimport uint64_t as u64
 
-from .level cimport OrderbookLevel, OrderbookLevels
+from .level cimport OrderbookEntry
 
-
-# C function declarations from orderbook_helpers.h
 cdef extern from "orderbook_helpers.h":
-    ctypedef struct OrderbookLevel:
-        pass
-
-    u64 price_to_tick(double price, double tick_size) nogil
-    u64 price_to_tick_fast(double price, double tick_size_recip) nogil
-    u64 size_to_lot(double size, double lot_size) nogil
-    u64 size_to_lot_fast(double size, double lot_size_recip) nogil
+    u64 price_to_tick(double price, double tick_size_recip) nogil
+    u64 size_to_lot(double size, double lot_size_recip) nogil
     double tick_to_price(u64 tick, double tick_size) nogil
     double lot_to_size(u64 lot, double lot_size) nogil
-    void swap_levels(OrderbookLevel* a, OrderbookLevel* b) nogil
-    void reverse_levels_inplace(u64 num_levels, OrderbookLevel* levels) nogil
-    void sort_levels_by_tick(u64 num_levels, OrderbookLevel* levels, bint ascending) nogil
+    void reverse_entries_c "reverse_entries"(u64 num_entries, OrderbookEntry* entries) nogil
 
 
-cdef inline u64 convert_price_to_tick(double price, double tick_size) noexcept nogil:
-    """Convert a price to ticks using integer arithmetic.
-
-    Args:
-        price: Price to convert.
-        tick_size: Tick size unit.
-
-    Returns:
-        Number of ticks.
-    """
-    return price_to_tick(price, tick_size)
+cdef inline u64 convert_price_to_tick(double price, double tick_size_recip) noexcept nogil:
+    return price_to_tick(price, tick_size_recip)
 
 
-cdef inline u64 convert_price_to_tick_fast(double price, double tick_size_recip) noexcept nogil:
-    """Convert a price to ticks using multiplication (faster, uses pre-computed reciprocal).
-
-    Args:
-        price: Price to convert.
-        tick_size_recip: Pre-computed reciprocal of tick size.
-
-    Returns:
-        Number of ticks.
-    """
-    return price_to_tick_fast(price, tick_size_recip)
-
-
-cdef inline u64 convert_size_to_lot(double size, double lot_size) noexcept nogil:
-    """Convert a size to lots using integer arithmetic.
-
-    Args:
-        size: Size to convert.
-        lot_size: Lot size unit.
-
-    Returns:
-        Number of lots.
-    """
-    return size_to_lot(size, lot_size)
-
-
-cdef inline u64 convert_size_to_lot_fast(double size, double lot_size_recip) noexcept nogil:
-    """Convert a size to lots using multiplication (faster, uses pre-computed reciprocal).
-
-    Args:
-        size: Size to convert.
-        lot_size_recip: Pre-computed reciprocal of lot size.
-
-    Returns:
-        Number of lots.
-    """
-    return size_to_lot_fast(size, lot_size_recip)
+cdef inline u64 convert_size_to_lot(double size, double lot_size_recip) noexcept nogil:
+    return size_to_lot(size, lot_size_recip)
 
 
 cdef inline double convert_price_from_tick(u64 tick, double tick_size) noexcept nogil:
-    """Convert ticks back to price.
-
-    Args:
-        tick: Number of ticks.
-        tick_size: Tick size unit.
-
-    Returns:
-        Price value.
-    """
     return tick_to_price(tick, tick_size)
 
 
 cdef inline double convert_size_from_lot(u64 lot, double lot_size) noexcept nogil:
-    """Convert lots back to size.
-
-    Args:
-        lot: Number of lots.
-        lot_size: Lot size unit.
-
-    Returns:
-        Size value.
-    """
     return lot_to_size(lot, lot_size)
 
 
-cdef void reverse_levels(OrderbookLevels levels) noexcept nogil:
-    """Reverse the order of levels in-place.
-
-    Args:
-        levels: OrderbookLevels struct to reverse.
-    """
-    reverse_levels_inplace(levels.num_levels, levels.levels)
+cdef void reverse_entries(OrderbookEntry* entries, u64 num_entries) noexcept nogil:
+    reverse_entries_c(num_entries, entries)
 
 
-cdef void inplace_sort_levels_by_ticks(OrderbookLevels levels, bint ascending) noexcept nogil:
-    """Sort levels by tick in-place with smart algorithm.
-
-    Args:
-        levels: OrderbookLevels struct to sort.
-        ascending: If True, sort in ascending order; else descending.
-    """
-    sort_levels_by_tick(levels.num_levels, levels.levels, ascending)
+cdef void validate_price(double price):
+    if price < 0.0 or not isfinite(price):
+        raise ValueError(f"Invalid price; expected finite >=0 but got {price}")
 
 
-# Python-accessible wrappers for conversion functions
-cpdef u64 py_convert_price_to_tick(double price, double tick_size):
-    """Convert a price to ticks using integer arithmetic (Python-accessible)."""
-    return convert_price_to_tick(price, tick_size)
-
-
-cpdef u64 py_convert_size_to_lot(double size, double lot_size):
-    """Convert a size to lots using integer arithmetic (Python-accessible)."""
-    return convert_size_to_lot(size, lot_size)
-
-
-cpdef double py_convert_price_from_tick(u64 tick, double tick_size):
-    """Convert ticks back to price (Python-accessible)."""
-    return convert_price_from_tick(tick, tick_size)
-
-
-cpdef double py_convert_size_from_lot(u64 lot, double lot_size):
-    """Convert lots back to size (Python-accessible)."""
-    return convert_size_from_lot(lot, lot_size)
+cdef void validate_size(double size):
+    if size < 0.0 or not isfinite(size):
+        raise ValueError(f"Invalid size; expected finite >=0 but got {size}")

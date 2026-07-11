@@ -32,7 +32,7 @@ O(n) merges with tight inner loops.
 ```
  bids array (desc)                     asks array (asc)
 ┌─────────────────────────┐    ┌─────────────────────────┐
-│ [tick, price, size, ...]│    │ [tick, price, size, ...]│
+│ [ticks, lots, norders]  │    │ [ticks, lots, norders]  │
 └─────────────────────────┘    └─────────────────────────┘
 ```
 
@@ -70,7 +70,7 @@ query helpers (bbo, spread, iterators)
 snapshot/delta/bbo
         │
         ▼
-normalize (sortedness hints)
+normalize raw values + infer/validate sortedness
         │
         ▼
 contiguous arrays + memmove merges
@@ -108,10 +108,11 @@ Ingestion order (both implementations):
 - `consume_bbo(ask, bid)`
 
 Advanced-only helpers:
-- `get_bids_numpy(depth=None)`, `get_asks_numpy(depth=None)`
+- `get_bids_numpy()`, `get_asks_numpy()`
 - `consume_snapshot_numpy`, `consume_deltas_numpy`
 - `clear()`
-- Buffer constructors: `create_orderbook_level*`, `create_orderbook_levels_from_list/numpy`
+- Raw level constructors: `OrderbookLevel`, `OrderbookLevels.from_list`,
+  `OrderbookLevels.from_numpy`
 
 ## Quick start
 
@@ -129,9 +130,9 @@ best_bid, best_ask = ob.get_bbo()
 ### Advanced
 
 ```python
-from mm_toolbox.orderbook.advanced import Orderbook
+from mm_toolbox.orderbook.advanced import AdvancedOrderbook
 
-ob = Orderbook(tick_size=0.01, lot_size=0.001, num_levels=1000)
+ob = AdvancedOrderbook(tick_size=0.01, lot_size=0.001, num_levels=1000)
 ob.consume_snapshot(asks, bids)
 ob.consume_deltas(asks_delta, bids_delta)
 best_bid, best_ask = ob.get_bbo()
@@ -141,9 +142,10 @@ best_bid, best_ask = ob.get_bbo()
 
 ## Behavior notes
 
-- Ticks/lots are always computed on ingest; pre-filled values are overwritten.
-- Snapshots replace state without validation; callers must supply non-crossed data.
-- BBO updates assume non-crossing inputs; no validation is performed.
+- Public advanced levels are raw `price`, `size`, and `norders` values.
+- Ticks and lots are computed on ingest and stored only in compact internal entries.
+- Snapshots reject crossed books.
+- BBO updates validate raw inputs and reject crossed incoming BBO values.
 - Advanced `get_price_impact(size, is_buy, is_base_currency)` is touch-anchored and
   returns terminal impact: `abs(last_touched_price - touch_anchor_price)`.
 - Advanced `get_size_for_price_impact_bps(impact_bps, is_buy, is_base_currency)`
@@ -156,4 +158,5 @@ best_bid, best_ask = ob.get_bbo()
 
 - Standard: sorting on every update can dominate runtime at high depth.
 - Advanced: linear merges are fast but require stricter input ordering.
-- If you can guarantee sortedness, advanced normalization is a cheap pass.
+- Advanced `UNKNOWN` sortedness lazily infers stable input ordering and rejects
+  unsorted inputs instead of sorting them on every ingest.

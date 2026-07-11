@@ -13,36 +13,38 @@
 
 /**
  * @brief Maximum number of orderbook levels to prevent integer overflow.
- *
- * Rationale: sizeof(OrderbookLevel) = 64 bytes, so:
- *   - 1M levels = 64 MB (reasonable)
- *   - 16M levels = 1 GB (max safe allocation)
- *
- * This limit prevents overflow in: num_levels * sizeof(OrderbookLevel)
  */
 #define ORDERBOOK_MAX_LEVELS (16777216UL)
 
 /**
- * @brief A single price level in the orderbook.
+ * @brief Public/raw price level used at API boundaries.
  *
  * Fields:
- *   price        - The raw price as a floating-point value.
- *   size         - The total size/quantity at this level.
- *   norders      - Number of orders at this level.
- *   ticks        - Price converted to integer tick units.
- *   lots         - Size converted to integer lot units.
- *   __padding1-3 - Reserved for cache line alignment (64 bytes total).
+ *   price   - Raw floating-point price.
+ *   size    - Raw floating-point size.
+ *   norders - Number of orders at this level.
  */
 typedef struct {
     double price;
     double size;
     uint64_t norders;
+} OrderbookLevel;
+
+/**
+ * @brief Compact normalized level used internally by the core and ladders.
+ *
+ * Fields:
+ *   ticks   - Price expressed in integer tick units.
+ *   lots    - Size expressed in integer lot units.
+ *   norders - Number of orders at this level.
+ *   _pad    - Reserved padding for 32-byte alignment and deterministic tests.
+ */
+typedef struct {
     uint64_t ticks;
     uint64_t lots;
-    uint64_t __padding1;
-    uint64_t __padding2;
-    uint64_t __padding3;
-} OrderbookLevel;
+    uint64_t norders;
+    uint64_t _pad;
+} OrderbookEntry;
 
 /**
  * @brief A collection of orderbook levels.
