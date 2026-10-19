@@ -103,7 +103,7 @@ cdef class GenericRingBuffer:
         self._latest_insert_time_ns = <u64>time_monotonic_ns()
         return True
 
-    cpdef bint insert_batch(self, list[object] items):
+    cpdef bint insert_batch(self, list items):
         """Add a batch of elements to the end of the buffer.
 
         Args:

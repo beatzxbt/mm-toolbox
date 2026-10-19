@@ -261,21 +261,20 @@ class TestSharedBytesRingBuffer:
             prod.close()
 
     def test_create_false_attach(self, shm_path: str) -> None:
-        """Given existing buffer, When attaching with create=False, Then works."""
+        """A new writer attaches after the prior writer releases its lease."""
         prod1 = ShmSpscProducer(shm_path, 1 << 12, create=True)
+        assert prod1.insert(b"before-release")
+        with pytest.raises(RuntimeError, match="active producer"):
+            ShmSpscProducer(shm_path, 1 << 12, create=False)
+        prod1.close()
+        prod2 = ShmSpscProducer(shm_path, 1 << 12, create=False)
+        cons = ShmSpscConsumer(shm_path)
         try:
-            prod2 = ShmSpscProducer(shm_path, 1 << 12, create=False)
-            try:
-                assert prod2.insert(b"attached")
-                cons = ShmSpscConsumer(shm_path)
-                try:
-                    assert cons.consume() == b"attached"
-                finally:
-                    cons.close()
-            finally:
-                prod2.close()
+            assert prod2.insert(b"attached")
+            assert cons.consume_all() == [b"before-release", b"attached"]
         finally:
-            prod1.close()
+            cons.close()
+            prod2.close()
 
     def test_context_manager_producer(self, shm_path: str) -> None:
         """Given producer as context manager, When exited, Then auto-closed."""
@@ -521,8 +520,8 @@ class TestSharedBytesRingBuffer:
         prod = ShmSpscProducer(shm_path, 0, create=True, unlink_on_close=False)
         try:
             prod.close()
-            # Header (64 bytes) + 1 byte capacity
-            assert os.path.getsize(shm_path) == 65
+            # Header (128 bytes) + minimum 8-byte capacity
+            assert os.path.getsize(shm_path) == 136
         finally:
             if os.path.exists(shm_path):
                 os.unlink(shm_path)
@@ -728,11 +727,11 @@ class TestSpscMapAttachValidation:
 
     def test_map_attach_invalid_capacity_zero(self, shm_path: str) -> None:
         """Given header with capacity=0, When consumer attaches, Then RuntimeError raised."""
-        _MAGIC = 0x53484252
+        _MAGIC = 0x3253484252
         fd = os.open(shm_path, os.O_CREAT | os.O_WRONLY, 0o600)
         try:
             header = struct.pack("QQQQQQQQ", _MAGIC, 0, 0, 0, 0, 0, 0, 0)
-            os.write(fd, header + b"\x00" * (64 - len(header)))
+            os.write(fd, header + b"\x00" * (128 - len(header)))
         finally:
             os.close(fd)
         with pytest.raises(RuntimeError, match="invalid"):
@@ -740,11 +739,11 @@ class TestSpscMapAttachValidation:
 
     def test_map_attach_invalid_mask(self, shm_path: str) -> None:
         """Given header with mask != capacity-1, When consumer attaches, Then RuntimeError raised."""
-        _MAGIC = 0x53484252
+        _MAGIC = 0x3253484252
         fd = os.open(shm_path, os.O_CREAT | os.O_WRONLY, 0o600)
         try:
             header = struct.pack("QQQQQQQQ", _MAGIC, 16, 7, 0, 0, 0, 0, 0)
-            os.write(fd, header + b"\x00" * (64 - len(header)))
+            os.write(fd, header + b"\x00" * (128 - len(header)))
         finally:
             os.close(fd)
         # mask != capacity - 1 (e.g. capacity=16, mask=7 is correct, so use wrong mask)
@@ -756,11 +755,11 @@ class TestSpscMapAttachValidation:
 
     def test_map_attach_truncated_after_header(self, shm_path: str) -> None:
         """Given file with valid header but too small for capacity, When consumer attaches, Then RuntimeError raised."""
-        _MAGIC = 0x53484252
+        _MAGIC = 0x3253484252
         fd = os.open(shm_path, os.O_CREAT | os.O_WRONLY, 0o600)
         try:
             header = struct.pack("QQQQQQQQ", _MAGIC, 1024, 1023, 0, 0, 0, 0, 0)
-            os.write(fd, header + b"\x00" * (64 - len(header)))
+            os.write(fd, header + b"\x00" * (128 - len(header)))
         finally:
             os.close(fd)
         # File is only 64 bytes but capacity claims 1024 bytes (need 64+1024)
@@ -772,7 +771,7 @@ class TestSpscMapAttachValidation:
         fd = os.open(shm_path, os.O_CREAT | os.O_WRONLY, 0o600)
         try:
             header = struct.pack("QQQQQQQQ", 0xDEADBEEF, 1024, 1023, 0, 0, 0, 0, 0)
-            os.write(fd, header + b"\x00" * (64 - len(header)))
+            os.write(fd, header + b"\x00" * (128 - len(header)))
         finally:
             os.close(fd)
         with pytest.raises(RuntimeError, match="header mismatch"):
@@ -787,9 +786,9 @@ class TestSpscConsumerPeekEdgeCases:
         prod = ShmSpscProducer(shm_path, 1 << 12, create=True, unlink_on_close=False)
         try:
             prod.insert(b"x")
-            # Corrupt the message length at data offset 0 (file offset 64)
+            # Corrupt the message length at data offset 0 (file offset 128)
             with open(shm_path, "r+b") as f:
-                f.seek(64)
+                f.seek(128)
                 f.write(struct.pack("Q", 0xFFFFFFFFFFFFFFFF))
             cons = ShmSpscConsumer(shm_path)
             try:
@@ -807,7 +806,7 @@ class TestSpscConsumerPeekEdgeCases:
             prod.insert(b"x")  # actual total = 9 bytes
             # Corrupt msg_len to 100 so next_pos = 8 + 100 = 108 > write_pos=9
             with open(shm_path, "r+b") as f:
-                f.seek(64)
+                f.seek(128)
                 f.write(struct.pack("Q", 100))
             cons = ShmSpscConsumer(shm_path)
             try:

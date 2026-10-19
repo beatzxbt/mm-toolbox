@@ -102,8 +102,8 @@ cdef class BytesRingBuffer:
         self._latest_insert_time_ns = <u64>time_monotonic_ns()
         return True
 
-    cpdef bint insert_char(self, const char* data, Py_ssize_t n):
-        """Add a new element directly from char* to avoid byte conversion overhead.
+    cdef bint insert_char(self, const char* data, Py_ssize_t n):
+        """Add from a trusted Cython pointer; Python callers should use insert().
 
         Args:
             data: Pointer to raw character data.
@@ -112,7 +112,12 @@ cdef class BytesRingBuffer:
         Returns:
             True if the insert succeeded.
         """
-        cdef bytes item = data[:n]
+        cdef bytes item
+        if n < 0:
+            raise ValueError("Length cannot be negative")
+        if n == 0:
+            return self.insert(b"")
+        item = data[:n]
         return self.insert(item)
 
     cpdef int consume_into(self, bytearray dst):
@@ -183,7 +188,7 @@ cdef class BytesRingBuffer:
         self._latest_consume_time_ns = <u64>time_monotonic_ns()
         return n
 
-    cpdef bint insert_batch(self, list[bytes] items):
+    cpdef bint insert_batch(self, list items):
         """Add a batch of elements to the end of the buffer.
 
         Args:
@@ -560,8 +565,8 @@ cdef class BytesRingBufferFast:
         self._latest_insert_time_ns = <u64>time_monotonic_ns()
         return True
 
-    cpdef bint insert_char(self, const char* item, Py_ssize_t item_len):
-        """Add a new element directly from char* to avoid byte conversion overhead."""
+    cdef bint insert_char(self, const char* item, Py_ssize_t item_len):
+        """Add from a trusted Cython pointer; Python callers should use insert()."""
         cdef:
             u64     head = self._head
             u64     tail = self._tail
@@ -570,11 +575,14 @@ cdef class BytesRingBufferFast:
             char*   dest = self._get_slot_ptr(head)
             Py_ssize_t copy_len
 
+        if item_len < 0:
+            raise ValueError("Item length cannot be negative")
         if item_len > self._slot_size:
             raise ValueError(f"Item length {item_len} exceeds slot size {self._slot_size}")
         copy_len = item_len
 
-        memcpy(dest, item, copy_len)
+        if copy_len:
+            memcpy(dest, item, copy_len)
         self._lengths[head] = copy_len
         
         if is_full:
@@ -641,7 +649,7 @@ cdef class BytesRingBufferFast:
         self._latest_consume_time_ns = <u64>time_monotonic_ns()
         return <int>n
 
-    cpdef bint insert_batch(self, list[bytes] items):
+    cpdef bint insert_batch(self, list items):
         """Add a batch of elements to the end of the buffer."""
         cdef:
             bytes item

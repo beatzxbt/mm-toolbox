@@ -279,47 +279,43 @@ class TestBytesRingBufferFast:
 
 
 class TestBytesRingBufferInsertChar:
-    """Layer 2: Test insert_char on BytesRingBuffer and BytesRingBufferFast."""
+    """Python callers use the length-safe bytes insertion methods."""
 
-    def test_insert_char_roundtrip_bytes_ringbuffer(self):
-        """Given insert_char data, When consumed, Then roundtrip correct."""
-        rb = BytesRingBuffer(4)
-        data = b"hello"
-        rb.insert_char(data, len(data))
-        assert rb.consume() == b"hello"
+    @pytest.mark.parametrize("buffer_type", [BytesRingBuffer, BytesRingBufferFast])
+    @pytest.mark.parametrize(
+        "data, length",
+        [(b"", 0), (b"abc", -1), (b"abc", 4), (b"abc", 128)],
+    )
+    def test_raw_pointer_insertion_is_not_python_callable(
+        self, buffer_type, data: bytes, length: int
+    ) -> None:
+        """Pointer plus length methods are Cython-only, including bad lengths."""
+        rb = buffer_type(4, disable_async=True)
 
-    def test_insert_char_empty_bytes_ringbuffer(self):
-        """Given empty data, When insert_char called, Then empty bytes consumed."""
-        rb = BytesRingBuffer(4)
-        rb.insert_char(b"", 0)
-        assert rb.consume() == b""
+        assert not hasattr(rb, "insert_char")
+        with pytest.raises(AttributeError):
+            rb.insert_char(data, length)
 
-    def test_insert_char_large_data_bytes_ringbuffer(self):
-        """Given large data, When insert_char called, Then stored correctly."""
-        rb = BytesRingBuffer(4)
-        data = b"x" * 1000
-        rb.insert_char(data, len(data))
-        assert rb.consume() == data
+    @pytest.mark.parametrize("buffer_type", [BytesRingBuffer, BytesRingBufferFast])
+    def test_safe_insert_handles_empty_and_nonempty_bytes(self, buffer_type) -> None:
+        """The supported Python API derives copy lengths from bytes objects."""
+        rb = buffer_type(4, disable_async=True)
 
-    def test_insert_char_roundtrip_fast(self):
-        """Given insert_char data in fast buffer, When consumed, Then roundtrip correct."""
-        rb = BytesRingBufferFast(4, expected_item_size=128, disable_async=True)
-        data = b"hello"
-        rb.insert_char(data, len(data))
-        assert rb.consume() == b"hello"
+        assert rb.insert(b"") is True
+        assert rb.insert(b"hello") is True
+        assert rb.consume_all() == [b"", b"hello"]
 
-    def test_insert_char_empty_fast(self):
-        """Given empty data in fast buffer, When insert_char called, Then empty consumed."""
-        rb = BytesRingBufferFast(4, expected_item_size=16, disable_async=True)
-        rb.insert_char(b"", 0)
-        assert rb.consume() == b""
+    def test_fast_safe_insert_rejects_oversized_bytes(self) -> None:
+        """The fast buffer validates actual bytes length against its slot."""
+        rb = BytesRingBufferFast(
+            4,
+            expected_item_size=4,
+            buffer_percent=0.0,
+            disable_async=True,
+        )
 
-    def test_insert_char_large_data_fast(self):
-        """Given large data in fast buffer, When insert_char called, Then stored correctly."""
-        rb = BytesRingBufferFast(4, expected_item_size=1024, disable_async=True)
-        data = b"x" * 1000
-        rb.insert_char(data, len(data))
-        assert rb.consume() == data
+        with pytest.raises(ValueError, match="exceeds slot size"):
+            rb.insert(b"12345")
 
 
 class TestBytesRingBufferConsumeInto:
