@@ -45,9 +45,14 @@ what-if evaluation or plotting.
 - Can start immediately; `initialize()` is optional.
 
 ### TimeExponentialMovingAverage (TEMA)
-- Exponential decay based on wall-clock delta and `half_life_s`.
+- Exponential decay based on precise monotonic elapsed time and `half_life_s`.
 - Good for irregularly spaced data or variable update cadence.
 - Can start immediately; `initialize()` is optional.
+
+TEMA warm-up arrays have no timestamps. Their samples share one clock origin,
+so the first sample seeds the value and elapsed-time decay begins with live
+updates. Reinitialization resets that origin. Initialization results therefore
+do not depend on how long the warm-up loop takes to execute.
 
 ## Behavior notes
 

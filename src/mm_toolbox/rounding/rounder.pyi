@@ -33,9 +33,10 @@ class Rounder:
 
     """
 
-    tick_size: float
-    lot_size: float
-
+    @property
+    def tick_size(self) -> float: ...
+    @property
+    def lot_size(self) -> float: ...
     def __init__(self, config: RounderConfig) -> None: ...
     def bid(self, price: float) -> float:
         """Round a price down to the nearest tick size multiple."""
@@ -46,7 +47,7 @@ class Rounder:
         ...
 
     def size(self, size: float) -> float:
-        """Round a size down to the nearest lot size multiple."""
+        """Round a size in the configured direction (up by default)."""
         ...
 
     def bids(self, prices: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
@@ -58,5 +59,5 @@ class Rounder:
         ...
 
     def sizes(self, sizes: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        """Round an array of sizes down to the nearest lot size multiple."""
+        """Round sizes in the configured direction (up by default)."""
         ...

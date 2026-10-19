@@ -134,6 +134,12 @@ class TestTimeISO8601:
         assert len(fractional) == 9
         assert fractional.isdigit()
 
+    def test_iso8601_negative_fraction_uses_floor_and_positive_milliseconds(self):
+        """Pre-epoch fractions are represented in the preceding whole second."""
+        assert time_iso8601(-0.5) == "1969-12-31T23:59:59.500Z"
+        assert time_iso8601(-1.25) == "1969-12-31T23:59:58.750Z"
+        assert time_iso8601(-0.0005) == "1969-12-31T23:59:59.999Z"
+
     def test_iso8601_millisecond_precision(self):
         """Given current time, When formatted, Then includes millisecond precision."""
         text = time_iso8601()

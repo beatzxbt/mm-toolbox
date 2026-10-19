@@ -5,9 +5,10 @@ rather than a fixed window size.
 """
 
 cimport numpy as cnp
-from libc.math cimport log, exp
+from libc.math cimport expm1, isfinite, log
+from libc.stdint cimport int64_t as i64
 
-from mm_toolbox.time.time cimport time_s
+from mm_toolbox.time.time cimport time_monotonic_ns
 
 from mm_toolbox.moving_average.base cimport MovingAverage
 
@@ -18,7 +19,7 @@ cdef class TimeExponentialMovingAverage(MovingAverage):
     and a configurable half-life.
 
     Attributes:
-        _time_s (double): Timestamp of the last update (seconds).
+        _time_ns (i64): Monotonic timestamp of the last update (nanoseconds).
         _lam (double): Decay constant (ln(2) / half_life_s).
     """
 
@@ -38,14 +39,49 @@ cdef class TimeExponentialMovingAverage(MovingAverage):
             is_fast=is_fast,
         )
 
-        if half_life_s <= 0.0:
-            raise ValueError("Half life must be positive.")
+        if not isfinite(half_life_s) or half_life_s <= 0.0:
+            raise ValueError("Half life must be positive and finite.")
 
-        self._time_s = time_s()
         self._lam = log(2.0) / half_life_s
+        if not isfinite(self._lam):
+            raise ValueError("Half life is too small to represent safely.")
+        self._time_ns = time_monotonic_ns()
+
+    cdef inline double _alpha_at(self, i64 time_now_ns) noexcept:
+        """Calculate smoothing weight for a monotonic timestamp."""
+        cdef i64 elapsed_ns = time_now_ns - self._time_ns
+        if elapsed_ns <= 0:
+            return 0.0
+        return -expm1(-self._lam * (<double>elapsed_ns * 1e-9))
+
+    cdef double _next_at(self, double new_val, i64 time_now_ns) noexcept:
+        """Calculate a preview at a supplied monotonic timestamp."""
+        if not self._is_warm:
+            return new_val
+        cdef double alpha = self._alpha_at(time_now_ns)
+        return alpha * new_val + (1.0 - alpha) * self._value
+
+    cdef double _update_at(self, double new_val, i64 time_now_ns):
+        """Apply a sample at a supplied monotonic timestamp."""
+        cdef double alpha
+        if not self._is_warm:
+            self._time_ns = time_now_ns
+            self._value = new_val
+            self._is_warm = True
+            return self._value
+
+        alpha = self._alpha_at(time_now_ns)
+        self._time_ns = time_now_ns
+        self._value = alpha * new_val + (1.0 - alpha) * self._value
+        self.push_to_ringbuffer()
+        return self._value
 
     cpdef double initialize(self, cnp.ndarray values):
         """Warm the TEMA from an array of historical values.
+
+        Historical values have no timestamps, so all warm-up samples share
+        one clock origin. The first value seeds the baseline; elapsed-time
+        decay begins with subsequent live updates.
 
         Args:
             values (cnp.ndarray): Array of initial values (length > 1).
@@ -65,13 +101,14 @@ cdef class TimeExponentialMovingAverage(MovingAverage):
                 f"Input array too short; expected >1 but got {n}"
             )
 
+        self._time_ns = time_monotonic_ns()
         self._values.clear()
         self._value = values[0]
         self.push_to_ringbuffer()
         self._is_warm = True
 
         for i in range(1, n):
-            _temp_var = self.update(values[i])
+            _temp_var = self._update_at(values[i], self._time_ns)
 
         return self._value
 
@@ -84,15 +121,7 @@ cdef class TimeExponentialMovingAverage(MovingAverage):
         Returns:
             double: The projected TEMA value.
         """
-        if not self._is_warm:
-            return new_val
-
-        cdef:
-            double time_now = time_s()
-            double minus_dt = self._time_s - time_now
-            double alpha = 1.0 - exp(self._lam * minus_dt)
-
-        return alpha * new_val + (1.0 - alpha) * self._value
+        return self._next_at(new_val, time_monotonic_ns())
 
     cpdef double update(self, double new_val):
         """Update the TEMA with a new value.
@@ -103,19 +132,4 @@ cdef class TimeExponentialMovingAverage(MovingAverage):
         Returns:
             double: The updated TEMA value.
         """
-        if not self._is_warm:
-            self._time_s = time_s()
-            self._value = new_val
-            self._is_warm = True
-            return self._value
-
-        cdef:
-            double time_now = time_s()
-            double minus_dt = self._time_s - time_now
-            double alpha = 1.0 - exp(self._lam * minus_dt)
-
-        self._time_s = time_now
-        self._value = alpha * new_val + (1.0 - alpha) * self._value
-        self.push_to_ringbuffer()
-
-        return self._value
+        return self._update_at(new_val, time_monotonic_ns())

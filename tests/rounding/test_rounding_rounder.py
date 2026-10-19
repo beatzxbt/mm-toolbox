@@ -33,7 +33,7 @@ class TestRounderConfig:
     def test_tick_size_validation(self):
         """Given various tick sizes, When creating RounderConfig, Then validates correctly."""
         # Valid tick sizes
-        valid_tick_sizes = [0.01, 0.001, 0.0001, 1.0, 0.5]
+        valid_tick_sizes = [0.01, 0.001, 0.0001, 1.0, 10.0]
         for tick_size in valid_tick_sizes:
             cfg = RounderConfig(
                 tick_size=tick_size,
@@ -61,7 +61,7 @@ class TestRounderConfig:
     def test_lot_size_validation(self):
         """Given various lot sizes, When creating RounderConfig, Then validates correctly."""
         # Valid lot sizes
-        valid_lot_sizes = [0.01, 0.001, 0.0001, 1.0, 0.5]
+        valid_lot_sizes = [0.01, 0.001, 0.0001, 1.0, 10.0]
         for lot_size in valid_lot_sizes:
             cfg = RounderConfig(
                 tick_size=0.01,
@@ -320,25 +320,15 @@ class TestRounderDifferentTickSizes:
         assert rounder.bid(1.6) == 1.0
         assert rounder.ask(1.6) == 2.0
 
-    def test_fractional_tick_sizes(self):
-        """Given fractional tick size, When rounding, Then handles correctly."""
-        rounder = Rounder(RounderConfig.default(0.5, 0.1))
-
-        # Test 0.5 tick size (simpler fractions to avoid precision issues)
-        # Valid multiples of 0.5: 0.0, 0.5, 1.0, 1.5, 2.0, etc.
-
-        # Test basic rounding behavior
-        assert rounder.bid(1.2) == 1.0  # 1.2 rounds down to 1.0
-        assert rounder.ask(1.2) == 1.5  # 1.2 rounds up to 1.5
-
-        assert rounder.bid(1.7) == 1.5  # 1.7 rounds down to 1.5
-        assert rounder.ask(1.7) == 2.0  # 1.7 rounds up to 2.0
-
-        # Test exact multiples remain unchanged
-        assert rounder.bid(1.0) == 1.0
-        assert rounder.ask(1.0) == 1.0
-        assert rounder.bid(1.5) == 1.5
-        assert rounder.ask(1.5) == 1.5
+    @pytest.mark.parametrize(
+        "increment", [0.2, 0.3, 0.5, 1.5, 2.0, 25.0, float("nan"), float("inf")]
+    )
+    def test_non_power10_increment_rejected(self, increment):
+        """Only canonical positive finite decimal powers are supported."""
+        with pytest.raises(ValueError):
+            RounderConfig.default(increment, 0.1)
+        with pytest.raises(ValueError):
+            RounderConfig.default(0.1, increment)
 
     def test_lot_size_variations(self):
         """Given different lot sizes, When rounding size, Then handles correctly."""
@@ -464,8 +454,10 @@ class TestRounderEdgeCases:
 
         # Very large values
         large_price = 1e15
-        assert rounder.bid(large_price) == pytest.approx(large_price, rel=1e-10)
-        assert rounder.ask(large_price) == pytest.approx(large_price, rel=1e-10)
+        with pytest.raises(ValueError, match="tick range"):
+            rounder.bid(large_price)
+        with pytest.raises(ValueError, match="tick range"):
+            rounder.ask(large_price)
 
         # Very small values
         small_price = 1e-15

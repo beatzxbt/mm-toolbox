@@ -47,8 +47,8 @@ per_window = RateLimiter.per_window(20, 3)
 
 - The limiter has a fixed `capacity` that refills every `window_s` seconds.
 - Tokens are deducted on each consume call, and refilled only when the window elapses.
-- Refill is aligned to the wall clock at creation/refill time (per-second buckets align
-  to second boundaries).
+- Refill and sub-buckets use monotonic time relative to the current window
+  start. They do not align to wall-clock second boundaries.
 
 ### Sub-bucket strategy
 
@@ -108,7 +108,7 @@ t0             t0+1s          t0+2s          ...        t0+W
 ^ prev_refill   ^ per-second    ^ per-second            ^ next_refill
 
 overall window: refills at t0+W
-sub-buckets: refresh on the current second boundary
+sub-buckets: each one-second boundary is relative to the window start
 ```
 
 ### Consumption decision flow
