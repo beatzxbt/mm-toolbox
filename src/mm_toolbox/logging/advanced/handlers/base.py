@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import email.utils
+import json
 import sys
 import threading
+import time
 import traceback
 from abc import ABC, abstractmethod
-from concurrent.futures import Future
+from concurrent.futures import Future, wait
 from typing import TYPE_CHECKING
+from collections.abc import Mapping
 
 import aiohttp
 import msgspec
@@ -36,6 +40,7 @@ class _RateLimiter:
         self._capacity = max(1, int(burst))
         self._tokens = float(self._capacity)
         self._last: float | None = None
+        self._lock = asyncio.Lock()
 
     async def acquire(self, tokens: int = 1) -> None:
         """Wait until the requested number of tokens are available.
@@ -43,26 +48,31 @@ class _RateLimiter:
         Args:
             tokens (int): Number of tokens to acquire.
         """
-        loop = asyncio.get_running_loop()
-        now = loop.time()
-        if self._last is None:
-            self._last = now
-        else:
-            elapsed = max(0.0, now - self._last)
-            self._tokens = min(self._capacity, self._tokens + elapsed * self._rate)
-            self._last = now
         need = max(0, int(tokens))
-        if self._tokens >= need:
-            self._tokens -= need
+        if need == 0:
             return
-        wait_s = (need - self._tokens) / self._rate
-        await asyncio.sleep(wait_s)
-        # After sleep, consume
-        now2 = loop.time()
-        elapsed2 = max(0.0, now2 - self._last)
-        self._tokens = min(self._capacity, self._tokens + elapsed2 * self._rate)
-        self._last = now2
-        self._tokens = max(0.0, self._tokens - need)
+        if need > self._capacity:
+            raise ValueError("requested tokens exceed rate limiter burst capacity")
+
+        loop = asyncio.get_running_loop()
+        while True:
+            async with self._lock:
+                now = loop.time()
+                if self._last is None:
+                    self._last = now
+                else:
+                    elapsed = max(0.0, now - self._last)
+                    self._tokens = min(
+                        self._capacity, self._tokens + elapsed * self._rate
+                    )
+                    self._last = now
+                if self._tokens >= need:
+                    self._tokens -= need
+                    return
+                wait_s = (need - self._tokens) / self._rate
+            # Wait outside the lock; every waiter rechecks and reserves under
+            # the lock before it can proceed.
+            await asyncio.sleep(wait_s)
 
 
 class BaseLogHandler(ABC):
@@ -89,6 +99,10 @@ class BaseLogHandler(ABC):
         self._loop_thread: threading.Thread | None = None
         self._primary_config: LoggerConfig | None = None
         self._futures: list[Future] = []
+        self._futures_lock = threading.Lock()
+        self._pending_slots = threading.BoundedSemaphore(256)
+        self._closed = False
+        self._lifecycle_lock = threading.RLock()
         self._on_error: Callable[[BaseException, str], None] | None = None
 
     @property
@@ -137,7 +151,29 @@ class BaseLogHandler(ABC):
 
                 def _runner() -> None:
                     asyncio.set_event_loop(loop)
-                    loop.run_forever()
+                    try:
+                        loop.run_forever()
+                    finally:
+                        pending = asyncio.all_tasks(loop)
+                        for task in pending:
+                            task.cancel()
+                        if pending:
+                            with contextlib.suppress(Exception):
+                                loop.run_until_complete(
+                                    asyncio.wait_for(
+                                        asyncio.gather(
+                                            *pending, return_exceptions=True
+                                        ),
+                                        timeout=0.25,
+                                    )
+                                )
+                        session = self._http_session
+                        if session is not None and not session.closed:
+                            with contextlib.suppress(Exception):
+                                loop.run_until_complete(
+                                    asyncio.wait_for(session.close(), timeout=0.25)
+                                )
+                        loop.close()
 
                 self._loop_thread = threading.Thread(target=_runner, daemon=True)
                 self._loop_thread.start()
@@ -156,6 +192,26 @@ class BaseLogHandler(ABC):
         loop = self.ev_loop
         return asyncio.run_coroutine_threadsafe(coro, loop)
 
+    def _submit_coro(self, coro: "Coroutine[object, None, object]") -> Future | None:
+        """Submit remote work only while an in-flight slot is available."""
+        with self._lifecycle_lock:
+            if self._closed or not self._pending_slots.acquire(blocking=False):
+                coro.close()
+                return None
+            try:
+                future = self._run_coro(coro)
+            except BaseException:
+                self._pending_slots.release()
+                coro.close()
+                raise
+            future.add_done_callback(self._on_scheduled_done)
+            self._track_future(future)
+            return future
+
+    def _on_scheduled_done(self, fut: Future) -> None:
+        with contextlib.suppress(ValueError):
+            self._pending_slots.release()
+
     async def _ensure_session(self) -> None:
         """Ensure the HTTP session exists and is open.
 
@@ -164,7 +220,9 @@ class BaseLogHandler(ABC):
 
         """
         if self._http_session is None or self._http_session.closed:
-            self._http_session = aiohttp.ClientSession()
+            self._http_session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=3.0)
+            )
 
     @property
     def primary_config(self):
@@ -271,11 +329,13 @@ class BaseLogHandler(ABC):
             fut (Future): Future returned by run_coroutine_threadsafe.
 
         """
-        self._futures.append(fut)
+        with self._futures_lock:
+            self._futures.append(fut)
         fut.add_done_callback(self._on_future_done)
         # Trim to avoid unbounded growth
-        if len(self._futures) > 4096:
-            self._futures = self._futures[-2048:]
+        with self._futures_lock:
+            if len(self._futures) > 4096:
+                self._futures = self._futures[-2048:]
 
     def _on_future_done(self, fut: Future) -> None:
         """Capture exceptions from background handler tasks.
@@ -289,38 +349,124 @@ class BaseLogHandler(ABC):
             if exc is not None:
                 self._handle_exception(exc, "handler task")
 
+    @staticmethod
+    def _retry_after_seconds(value: str | None, body: bytes = b"") -> float | None:
+        """Parse numeric or HTTP-date Retry-After values without shortening them."""
+        if value:
+            try:
+                return max(0.0, float(value))
+            except ValueError:
+                try:
+                    retry_at = email.utils.parsedate_to_datetime(value).timestamp()
+                    return max(0.0, retry_at - time.time())
+                except (TypeError, ValueError, OverflowError):
+                    pass
+        try:
+            payload = json.loads(body)
+            return max(0.0, float(payload.get("retry_after")))
+        except (TypeError, ValueError, AttributeError, json.JSONDecodeError):
+            return None
+
+    async def _post_json_with_retries(
+        self,
+        url: str,
+        payload: Mapping[str, object],
+        *,
+        limiter: _RateLimiter | None,
+        service: str,
+    ) -> None:
+        """POST JSON with status validation and bounded transient retries."""
+        await self._ensure_session()
+        assert self._http_session is not None
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 10.0
+        for attempt in range(3):
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError(f"{service} delivery exceeded its 10-second budget")
+            try:
+                async with asyncio.timeout(remaining):
+                    if limiter is not None:
+                        await limiter.acquire(1)
+                    async with self._http_session.post(
+                        url,
+                        headers={"Content-Type": "application/json"},
+                        data=self.encode_json(payload),
+                    ) as response:
+                        if 200 <= response.status < 300:
+                            return
+                        body = await response.read()
+                        error = RuntimeError(f"{service} returned {response.status}")
+                        retryable = response.status == 429 or response.status >= 500
+                        retry_after = (
+                            self._retry_after_seconds(
+                                response.headers.get("Retry-After"), body
+                            )
+                            if response.status == 429
+                            else None
+                        )
+            except Exception as exc:
+                error = exc
+                retryable = True
+                retry_after = None
+            if not retryable or attempt == 2:
+                raise error
+            remaining = deadline - loop.time()
+            delay = (
+                retry_after if retry_after is not None else min(0.1 * (2**attempt), 0.4)
+            )
+            if delay >= remaining:
+                if retry_after is not None:
+                    raise RuntimeError(
+                        f"{service} Retry-After of {delay:.3f}s exceeds the remaining delivery budget"
+                    ) from error
+                raise TimeoutError(
+                    f"{service} delivery exceeded its 10-second budget"
+                ) from error
+            await asyncio.sleep(delay)
+
     def close(self, timeout_s: float = 2.0) -> None:
         """Close HTTP session and stop the handler loop.
 
         Args:
             timeout_s (float): Max seconds to wait for pending futures.
         """
-        # Wait for pending futures briefly
-        if self._futures:
-            remaining = max(0.0, timeout_s)
-            per = min(0.25, remaining) if remaining > 0 else 0.0
-            for fut in list(self._futures):
+        deadline = time.monotonic() + max(0.0, timeout_s)
+        with self._lifecycle_lock:
+            self._closed = True
+            with self._futures_lock:
+                pending = [fut for fut in self._futures if not fut.done()]
+        if pending:
+            _, still_pending = wait(
+                pending, timeout=max(0.0, deadline - time.monotonic())
+            )
+            for fut in still_pending:
+                fut.cancel()
+
+        loop = self._ev_loop
+        if loop is not None and not loop.is_closed():
+            remaining = max(0.0, deadline - time.monotonic())
+            if (
+                remaining > 0
+                and loop.is_running()
+                and self._http_session is not None
+                and not self._http_session.closed
+            ):
                 try:
-                    fut.result(timeout=per)
+                    fut = asyncio.run_coroutine_threadsafe(
+                        self._http_session.close(), loop
+                    )
+                    fut.result(timeout=remaining)
                 except Exception as exc:
                     self._handle_exception(exc, "handler close")
-        # Close session on the loop
+            with contextlib.suppress(RuntimeError):
+                loop.call_soon_threadsafe(loop.stop)
         if (
-            self._ev_loop
-            and not self._ev_loop.is_closed()
-            and self._http_session is not None
+            self._loop_thread
+            and self._loop_thread.is_alive()
+            and self._loop_thread is not threading.current_thread()
         ):
-            with contextlib.suppress(Exception):
-                fut = self._run_coro(self._http_session.close())
-                with contextlib.suppress(Exception):
-                    fut.result(timeout=timeout_s)
-        # Stop loop and join thread
-        if self._ev_loop and not self._ev_loop.is_closed():
-            with contextlib.suppress(Exception):
-                self._ev_loop.call_soon_threadsafe(self._ev_loop.stop)
-        if self._loop_thread and self._loop_thread.is_alive():
-            with contextlib.suppress(Exception):
-                self._loop_thread.join(timeout=timeout_s)
+            self._loop_thread.join(timeout=max(0.0, deadline - time.monotonic()))
 
     def __del__(self):
         with contextlib.suppress(Exception):

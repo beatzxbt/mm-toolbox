@@ -1,10 +1,4 @@
-"""Telegram bot handler for the standard logger.
-
-Pushes buffered log messages to a Telegram chat via the Bot API,
-chunking large batches to respect Telegram message size limits.
-"""
-
-import asyncio
+"""Telegram bot handler for the standard logger."""
 
 import aiohttp
 
@@ -28,9 +22,19 @@ class TelegramLogHandler(BaseLogHandler):
         self.headers = {"Content-Type": "application/json"}
 
     def push(self, buffer: list[str]) -> None:
-        """Batch messages into chunks and send to Telegram."""
+        """Queue bounded message chunks for background delivery."""
         chunks = self._chunk_messages(buffer, max_chars=4096)
-        asyncio.run(self._push_chunks(chunks))
+        for index, chunk in enumerate(chunks):
+            if not self._enqueue_delivery(chunk, self._deliver_chunk):
+                remaining = len(chunks) - index - 1
+                if remaining:
+                    self._handle_exception(
+                        OverflowError(
+                            f"delivery stopped; dropped {remaining} additional Telegram chunks"
+                        ),
+                        "push",
+                    )
+                break
 
     def _chunk_messages(self, messages: list[str], max_chars: int) -> list[str]:
         """Group messages into chunks that stay under max_chars.
@@ -48,40 +52,34 @@ class TelegramLogHandler(BaseLogHandler):
         current_len = 0
 
         for msg in messages:
-            msg_len = len(msg)
-            if current and current_len + 1 + msg_len > max_chars:
-                chunks.append("\n".join(current))
-                current = [msg]
-                current_len = msg_len
-            else:
-                if current:
-                    current_len += 1 + msg_len
+            # Split an oversized individual message so the service never
+            # receives a payload above its documented limit.
+            pieces = [msg[i : i + max_chars] for i in range(0, len(msg), max_chars)]
+            if not pieces:
+                pieces = [""]
+            for piece in pieces:
+                piece_len = len(piece)
+                if current and current_len + 1 + piece_len > max_chars:
+                    chunks.append("\n".join(current))
+                    current = [piece]
+                    current_len = piece_len
                 else:
-                    current_len = msg_len
-                current.append(msg)
+                    current_len += (1 if current else 0) + piece_len
+                    current.append(piece)
 
         if current:
             chunks.append("\n".join(current))
 
         return chunks
 
-    async def _push_chunks(self, chunks: list[str]) -> None:
-        """Send chunks to Telegram Bot API."""
-        async with aiohttp.ClientSession() as session:
-            for chunk in chunks:
-                payload = {
-                    "chat_id": self.chat_id,
-                    "text": chunk,
-                }
-                try:
-                    async with session.post(
-                        self.url,
-                        headers=self.headers,
-                        json=payload,
-                    ) as response:
-                        if response.status >= 400:
-                            raise RuntimeError(
-                                f"Telegram API returned {response.status}"
-                            )
-                except Exception as exc:
-                    self._handle_exception(exc, "Telegram push")
+    async def _deliver_chunk(self, chunk: object) -> None:
+        """Send one chunk with bounded timeout and transient retries."""
+        timeout = aiohttp.ClientTimeout(total=3.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            await self._post_with_retries(
+                session,
+                self.url,
+                headers=self.headers,
+                payload={"chat_id": self.chat_id, "text": str(chunk)},
+                service="Telegram API",
+            )

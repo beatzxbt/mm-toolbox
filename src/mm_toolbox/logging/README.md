@@ -1,7 +1,7 @@
 # Logging
 
 This package provides two logging stacks:
-- Standard logger: single-process, low-overhead buffering with a background thread.
+- Standard logger: single-process, synchronous buffering with optional remote-delivery workers.
 - Advanced logger: multi-process logging with IPC transport and a master-worker
   architecture.
 
@@ -11,36 +11,39 @@ Use this when everything runs in one process and you want simple, buffered loggi
 with optional stdout mirroring.
 
 Highlights:
-- Background thread flushes buffers on a cadence.
+- Flushes synchronously when the size threshold is met or a later log call observes that the configured interval elapsed.
+- `flush()` and `shutdown()` explicitly flush pending messages, including when the logger has been quiet.
+- Discord and Telegram delivery runs on bounded handler-owned workers, so an active asyncio loop is supported and slow endpoints do not block the logging call.
 - Handler fan-out (file, Discord, Telegram).
 - Buffered writes reduce handler overhead for high-frequency logs.
 
 ### Architecture overview
 
-The standard logger runs a background thread that drains a queue, batches
-messages, and pushes them to handlers.
+The standard logger keeps its message buffer in the caller's thread. It pushes
+each flushed batch to local handlers synchronously. Discord and Telegram
+handlers enqueue bounded delivery work on their own background threads.
 
 ```
 ┌──────────────┐
 │  App Thread  │
 │ logger.info  │
 └──────┬───────┘
-       │ enqueue (log_msg, level)
+       │ append
        ▼
 ┌──────────────┐
-│  Msg Queue   │
+│ Logger Buffer│
 └──────┬───────┘
-       │ drain + batch
+       │ flush condition or explicit flush()
        ▼
 ┌──────────────┐
-│ Flush Thread │
-│  (event loop)│
+│   Handlers   │
 └──────┬───────┘
-       │ async push
+       │ remote handlers enqueue
        ▼
 ┌──────────────────────┐
-│ Handlers             │
-│ File / Discord / ... │
+│ Bounded delivery     │
+│ workers (Discord,    │
+│ Telegram)            │
 └──────────────────────┘
 ```
 
@@ -61,6 +64,10 @@ logger.info("booted")
 logger.error("something went wrong")
 logger.shutdown()
 ```
+
+`flush_on_interval=True` does not start a timer. The next log call checks the
+elapsed time and flushes if due. Use `logger.flush()` when a quiet logger must
+flush at a specific time; `shutdown()` also flushes before closing handlers.
 
 When to choose:
 - Best for single-process apps, notebooks, or services without forked workers.
@@ -173,6 +180,12 @@ Additional config fields:
 - `max_batch_bytes` — max bytes before forced flush (default `1MB`).
 - `shm_capacity_bytes` — shared memory ring buffer capacity in bytes (default `64MB`).
 
+The advanced logger derives its producer shard count from `shm_capacity_bytes`
+and `max_batch_bytes`, with a maximum of 64 active producers including the
+master. The defaults allocate 32 shards, leaving room for 31 worker loggers.
+Each worker owns one shard; extra concurrent producers fail explicitly. The
+worker clamps batches to a safe shard size and reports records that cannot fit.
+
 ### Message flow
 
 #### 1. Worker logging
@@ -209,9 +222,9 @@ if current_time > next_checkin + 1_second:
 
 ### Thread safety
 
-- Lock-free design: uses message passing instead of shared memory
-- Process isolation: worker crashes do not affect master or other workers
-- Atomic operations: binary serialization with single-write semantics
+- Shared-memory IPC: exclusively claimed producer shards use the lock-free queue core; worker-local batch operations use a thread lock.
+- Process isolation: one worker crash does not publish a partial record. Its producer claim remains reserved until the mapping is recreated after all users stop.
+- Atomic publication: complete binary records become visible after serialization and publication.
 
 ### When to use
 
@@ -233,7 +246,23 @@ Overkill for:
 master = MasterLogger(config, [FileLogHandler("app.log")])
 worker = WorkerLogger(config, name=f"Worker-{os.getpid()}")
 
-worker.info("Worker started")
+worker.info(b"Worker started")
 worker.shutdown()
 master.shutdown()
 ```
+
+### Delivery and shutdown limits
+
+Remote HTTP handlers check response status, retry transient failures at most
+three times within a ten-second delivery budget, and honor Retry-After. If the
+required delay exceeds the remaining budget, delivery fails explicitly without
+an early retry. Background delivery errors go to the configured error callback
+or stderr. Standard remote queues hold at most 256 deliveries; advanced handlers
+allow at most 256 scheduled operations. Saturation is reported as loss.
+
+Standard handler close and advanced handler/master shutdown use one bounded
+drain deadline (two seconds by default). Pending work may be cancelled or
+discarded at that deadline and is reported. A user-supplied synchronous handler
+cannot be forcibly interrupted: a timed-out master leaves its mappings owned
+by the drain thread until it can finish safely. Stop workers before the master
+to include their final batches. File handlers append existing logs on restart.

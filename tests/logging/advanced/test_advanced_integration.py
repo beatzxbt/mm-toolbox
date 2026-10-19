@@ -117,7 +117,7 @@ def worker_process(
 
 def worker_large_msg(path, name, msg_size):
     """Worker target that sends a single *msg_size*-byte payload."""
-    config = LoggerConfig(path=path)
+    config = LoggerConfig(path=path, max_batch_bytes=2 * 1024 * 1024)
     logger = WorkerLogger(config=config, name=name)
     large_msg = b"x" * msg_size
     logger.info(msg_bytes=large_msg)
@@ -254,7 +254,7 @@ class TestIntegration:
     def test_large_messages(self, ipc_path):
         """Given a 1 MB payload, the master receives it intact without truncation."""
         path = ipc_path("test_large")
-        config = LoggerConfig(path=path)
+        config = LoggerConfig(path=path, max_batch_bytes=2 * 1024 * 1024)
         mock_handler = MockHandler()
         master = MasterLogger(config=config, log_handlers=[mock_handler])
         mock_handler.add_primary_config(config)

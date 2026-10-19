@@ -84,3 +84,41 @@ class TestWorkerLogger:
         logger = WorkerLogger(config=default_config)
         logger.shutdown()
         logger.info(msg_bytes=b"msg after shutdown")
+
+    def test_oversized_record_is_reported(self, tmp_path: Path, capsys):
+        """A record that cannot fit the configured batch budget is explicitly reported."""
+        config = LoggerConfig(
+            path=str(tmp_path / "small_batch.shm"),
+            max_batch_bytes=16,
+        )
+        logger = WorkerLogger(config=config, name="small-budget")
+        logger.info(msg_bytes=b"x" * 16)
+        logger.shutdown()
+        assert "dropped message of 16 bytes" in capsys.readouterr().err
+
+    def test_small_transport_reserves_a_worker_shard(self, tmp_path):
+        """The master and one worker can coexist even with a small mapping."""
+        import time
+        from mm_toolbox.logging.advanced.master import MasterLogger
+        from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
+
+        received = []
+
+        class Capture(BaseLogHandler):
+            def push(self, logs):
+                received.extend(bytes(log.message) for log in logs)
+
+        config = LoggerConfig(
+            path=str(tmp_path / "small_transport.shm"),
+            shm_capacity_bytes=4096,
+        )
+        handler = Capture()
+        master = MasterLogger(config=config, log_handlers=[handler])
+        worker = WorkerLogger(config=config)
+        worker.info(b"small transport")
+        worker.shutdown()
+        deadline = time.monotonic() + 1
+        while not received and time.monotonic() < deadline:
+            time.sleep(0.01)
+        master.shutdown()
+        assert received == [b"small transport"]

@@ -15,8 +15,9 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 from concurrent.futures import Future
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
@@ -27,6 +28,24 @@ from mm_toolbox.logging.advanced.handlers.discord import DiscordLogHandler
 from mm_toolbox.logging.advanced.handlers.file import FileLogHandler
 from mm_toolbox.logging.advanced.handlers.telegram import TelegramLogHandler
 from mm_toolbox.logging.advanced.pylog import PyLog, PyLogLevel
+
+
+def _request_context(status: int = 200, headers: dict[str, str] | None = None):
+    response = MagicMock()
+    response.status = status
+    response.headers = headers or {}
+    response.read = AsyncMock(return_value=b"{}")
+    request = MagicMock()
+    request.__aenter__ = AsyncMock(return_value=response)
+    request.__aexit__ = AsyncMock(return_value=False)
+    return request
+
+
+async def _wait_for_handler(handler: BaseLogHandler) -> None:
+    futures = list(handler._futures)
+    await asyncio.wait_for(
+        asyncio.gather(*(asyncio.wrap_future(fut) for fut in futures)), timeout=2.0
+    )
 
 
 class TestBaseLogHandler:
@@ -89,6 +108,27 @@ class TestBaseLogHandler:
         handler.close(timeout_s=1.0)
         assert fut.done()
         assert handler._loop_thread is None or not handler._loop_thread.is_alive()
+
+    def test_close_uses_one_bounded_deadline(self):
+        """A stalled coroutine is cancelled when the shared close deadline expires."""
+        handler = FileLogHandler("test.txt")
+        started = threading.Event()
+
+        async def stalled():
+            started.set()
+            await asyncio.sleep(60)
+
+        fut = handler._run_coro(stalled())
+        handler._track_future(fut)
+        assert started.wait(1.0)
+        began = time.monotonic()
+        handler.close(timeout_s=0.05)
+        elapsed = time.monotonic() - began
+
+        assert elapsed < 0.2
+        assert fut.cancelled() or fut.done()
+        if handler._loop_thread is not None:
+            handler._loop_thread.join(timeout=0.5)
 
     def test_future_trim_at_4096(self):
         """Given more than 4096 tracked futures, the list is trimmed to 2048 to bound memory."""
@@ -197,6 +237,13 @@ class TestFileLogHandler:
         os.remove(temp_file)
         _ = FileLogHandler(temp_file, create=True)
         assert os.path.exists(temp_file)
+
+    def test_init_create_preserves_existing_file(self, temp_file):
+        with open(temp_file, "w") as file:
+            file.write("previous run\n")
+        FileLogHandler(temp_file, create=True)
+        with open(temp_file) as file:
+            assert file.read() == "previous run\n"
 
     def test_init_invalid_extension(self):
         """Given a non-``.txt`` extension, construction raises ``ValueError``."""
@@ -309,18 +356,11 @@ class TestDiscordLogHandler:
             DiscordLogHandler("invalid url")
 
     @pytest.mark.asyncio
-    @patch("aiohttp.ClientSession.post", new_callable=AsyncMock)
-    async def test_push(self, mock_post):
-        """Given a single log, ``push()`` schedules an async POST without blocking."""
-        handler = DiscordLogHandler("https://discord.com/api/webhooks/123/abc")
-        logs = [PyLog(1234567890, b"name", PyLogLevel.INFO, b"msg")]
-        handler.push(logs)
-
-    @pytest.mark.asyncio
-    @patch("aiohttp.ClientSession.post", new_callable=AsyncMock)
+    @patch("aiohttp.ClientSession.post", new_callable=MagicMock)
     async def test_push_multiple(self, mock_post):
-        """Given two logs, they are concatenated with newlines and sent in one POST."""
+        """Given two logs, one POST contains the joined batch."""
         url = "https://discord.com/api/webhooks/123/abc"
+        mock_post.return_value = _request_context()
         handler = DiscordLogHandler(url)
         config = LoggerConfig(str_format="%(message)s")
         handler.add_primary_config(config)
@@ -330,15 +370,53 @@ class TestDiscordLogHandler:
             PyLog(2, b"name", PyLogLevel.INFO, b"msg2"),
         ]
         handler.push(logs)
+        try:
+            await _wait_for_handler(handler)
+            mock_post.assert_called_once()
+            call_args = mock_post.call_args
+            assert call_args[0][0] == url
+            assert call_args[1]["headers"] == {"Content-Type": "application/json"}
+            data = json.loads(call_args[1]["data"])
+            assert data["content"] == "msg1\nmsg2"
+        finally:
+            handler.close()
 
-        await asyncio.sleep(0.1)
+    @pytest.mark.asyncio
+    @patch("aiohttp.ClientSession.post", new_callable=MagicMock)
+    async def test_http_status_retries_and_reports_failure(self, mock_post):
+        mock_post.side_effect = [
+            _request_context(500),
+            _request_context(500),
+            _request_context(500),
+        ]
+        handler = DiscordLogHandler("https://discord.com/api/webhooks/123/abc")
+        errors = []
+        handler.set_error_handler(lambda exc, ctx: errors.append((exc, ctx)))
+        handler.add_primary_config(LoggerConfig(str_format="%(message)s"))
+        handler.push([PyLog(1, b"name", PyLogLevel.INFO, b"failed")])
+        try:
+            with pytest.raises(RuntimeError, match="returned 500"):
+                await _wait_for_handler(handler)
+            assert mock_post.call_count == 3
+            assert errors and errors[0][1] == "handler task"
+        finally:
+            handler.close()
 
-        mock_post.assert_called_once()
-        call_args = mock_post.call_args
-        assert call_args[0][0] == url
-        assert call_args[1]["headers"] == {"Content-Type": "application/json"}
-        data = json.loads(call_args[1]["data"])
-        assert data["content"] == "msg1\nmsg2"
+    @pytest.mark.asyncio
+    @patch("aiohttp.ClientSession.post", new_callable=MagicMock)
+    async def test_retry_after_429_then_success(self, mock_post):
+        mock_post.side_effect = [
+            _request_context(429, {"Retry-After": "0"}),
+            _request_context(204),
+        ]
+        handler = DiscordLogHandler("https://discord.com/api/webhooks/123/abc")
+        handler.add_primary_config(LoggerConfig(str_format="%(message)s"))
+        handler.push([PyLog(1, b"name", PyLogLevel.INFO, b"retry")])
+        try:
+            await _wait_for_handler(handler)
+            assert mock_post.call_count == 2
+        finally:
+            handler.close()
 
     def test_discord_chunking(self):
         """Given a 2500-character message, it is split into 1800-character chunks."""
@@ -365,50 +443,49 @@ class TestTelegramLogHandler:
         assert handler.url.startswith("https://api.telegram.org/bot")
 
     @pytest.mark.asyncio
-    @patch("aiohttp.ClientSession.post", new_callable=AsyncMock)
+    @patch("aiohttp.ClientSession.post", new_callable=MagicMock)
     async def test_push(self, mock_post):
-        """Given a single log, ``push()`` schedules an async POST with the correct payload."""
+        """A Telegram batch sends one encoded POST per log message."""
         handler = TelegramLogHandler("token", "chat")
         config = LoggerConfig(str_format="%(message)s")
         handler.add_primary_config(config)
-
-        logs = [PyLog(1, b"name", PyLogLevel.INFO, b"test msg")]
-        handler.push(logs)
-
-        await asyncio.sleep(0.1)
-
-        mock_post.assert_called_once()
-        call_args = mock_post.call_args
-        assert call_args[0][0] == handler.url
-        data = json.loads(call_args[1]["data"])
-        assert data["chat_id"] == "chat"
-        assert data["text"] == "test msg"
-
-    @pytest.mark.asyncio
-    @patch("aiohttp.ClientSession.post", new_callable=AsyncMock)
-    async def test_push_multiple(self, mock_post):
-        """Given two logs, each is sent in a separate POST because Telegram does not support batch text."""
-        handler = TelegramLogHandler("token", "chat")
-        config = LoggerConfig(str_format="%(message)s")
-        handler.add_primary_config(config)
-        mock_post.return_value.read = AsyncMock()
+        mock_post.side_effect = [_request_context(), _request_context()]
 
         logs = [
             PyLog(1, b"name", PyLogLevel.INFO, b"msg1"),
             PyLog(2, b"name", PyLogLevel.INFO, b"msg2"),
         ]
         handler.push(logs)
+        try:
+            await _wait_for_handler(handler)
+            assert mock_post.call_count == 2
+            calls = mock_post.call_args_list
+            for i, call in enumerate(calls, 1):
+                assert call[0][0] == handler.url
+                data = json.loads(call[1]["data"])
+                assert data["chat_id"] == "chat"
+                assert data["text"] == f"msg{i}"
+        finally:
+            handler.close()
 
-        for _ in range(50):
-            if mock_post.call_count >= 2:
-                break
-            await asyncio.sleep(0.01)
-
-        assert mock_post.call_count == 2
-        calls = mock_post.call_args_list
-        for i, call in enumerate(calls, 1):
-            data = json.loads(call[1]["data"])
-            assert data["text"] == f"msg{i}"
+    @pytest.mark.asyncio
+    @patch("aiohttp.ClientSession.post", new_callable=MagicMock)
+    async def test_http_error_is_observable_without_retrying_client_error(
+        self, mock_post
+    ):
+        mock_post.return_value = _request_context(400)
+        errors = []
+        handler = TelegramLogHandler("token", "chat")
+        handler.add_primary_config(LoggerConfig(str_format="%(message)s"))
+        handler.set_error_handler(lambda exc, ctx: errors.append((exc, ctx)))
+        handler.push([PyLog(1, b"name", PyLogLevel.INFO, b"bad request")])
+        try:
+            with pytest.raises(RuntimeError, match="returned 400"):
+                await _wait_for_handler(handler)
+            assert mock_post.call_count == 1
+            assert errors and errors[0][1] == "handler task"
+        finally:
+            handler.close()
 
     def test_telegram_chunking(self):
         """Given a 4000-character message, it is split into 3500-character chunks."""
@@ -448,3 +525,11 @@ class TestRateLimiter:
             await limiter.acquire(1)
         elapsed = asyncio.get_running_loop().time() - start
         assert elapsed < 0.1
+
+    @pytest.mark.asyncio
+    async def test_concurrent_waiters_reserve_tokens_atomically(self):
+        limiter = _RateLimiter(20.0, 1)
+        start = asyncio.get_running_loop().time()
+        await asyncio.gather(*(limiter.acquire(1) for _ in range(3)))
+        elapsed = asyncio.get_running_loop().time() - start
+        assert elapsed >= 0.07

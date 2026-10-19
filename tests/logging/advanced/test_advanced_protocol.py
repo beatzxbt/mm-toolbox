@@ -171,7 +171,7 @@ class TestProtocolIndirect:
     def test_protocol_large_message(self, tmp_path):
         """Given a 1 MB payload, the master receives it without truncation or corruption."""
         path = str(tmp_path / "test_protocol_large.shm")
-        config = LoggerConfig(path=path)
+        config = LoggerConfig(path=path, max_batch_bytes=2 * 1024 * 1024)
         handler = CaptureHandler()
         master = MasterLogger(config=config, log_handlers=[handler])
         handler.add_primary_config(config)
@@ -340,7 +340,7 @@ class TestProtocolBufferBoundaries:
     def test_5_mb_message(self, tmp_path):
         """Given a 5 MB payload, the master receives it without truncation."""
         path = str(tmp_path / "test_protocol_5mb.shm")
-        config = LoggerConfig(path=path)
+        config = LoggerConfig(path=path, max_batch_bytes=6 * 1024 * 1024)
         handler = CaptureHandler()
         master = MasterLogger(config=config, log_handlers=[handler])
         handler.add_primary_config(config)

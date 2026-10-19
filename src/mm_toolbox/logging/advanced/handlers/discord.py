@@ -39,15 +39,12 @@ class DiscordLogHandler(BaseLogHandler):
         Args:
             content (str): Message content to send.
         """
-        await self._ensure_session()
-        await self._limiter.acquire(1)
-        assert self._http_session is not None
-        resp = await self._http_session.post(
+        await self._post_json_with_retries(
             self.url,
-            headers=self.headers,
-            data=self.encode_json({"content": content}),
+            {"content": content},
+            limiter=self._limiter,
+            service="Discord webhook",
         )
-        await resp.read()
 
     @staticmethod
     def _chunk(text: str, limit: int) -> list[str]:
@@ -79,9 +76,16 @@ class DiscordLogHandler(BaseLogHandler):
         try:
             formatted_logs = "\n".join([self.format_log(log) for log in logs])
             # Discord limit is 2000 chars; keep headroom for safety
-            for chunk in self._chunk(formatted_logs, 1800):
-                fut = self._run_coro(self._post(chunk))
-                self._track_future(fut)
+            chunks = self._chunk(formatted_logs, 1800)
+            for index, chunk in enumerate(chunks):
+                if self._submit_coro(self._post(chunk)) is None:
+                    self._handle_exception(
+                        OverflowError(
+                            f"delivery capacity reached; dropped {len(chunks) - index} Discord chunks"
+                        ),
+                        "push",
+                    )
+                    break
 
         except Exception as e:
             self._handle_exception(e, "push")

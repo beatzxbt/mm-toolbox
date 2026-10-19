@@ -14,6 +14,7 @@ cdef class WorkerLogger:
         object          _config
         bytes           _name
         u32             _len_name
+        u32             _max_batch_data_bytes
         unsigned char*  _name_as_chars
         u32             _num_pending_logs
         BinaryWriter    _batch_writer

@@ -6,6 +6,7 @@ thread that drains a shared-memory MPSC ring.
 """
 
 import contextlib
+import sys
 import threading
 import time
 
@@ -20,6 +21,7 @@ from mm_toolbox.ringbuffer.shm.mpsc import ShmMpscConsumer, ShmMpscProducer
 
 from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
 from mm_toolbox.logging.advanced.config cimport LoggerConfig
+from mm_toolbox.logging.advanced.config import _producer_ring_count
 from mm_toolbox.logging.advanced.log cimport CLogLevel
 from mm_toolbox.logging.advanced.protocol cimport BinaryReader
 from mm_toolbox.logging.advanced.pylog import PyLog, PyLogLevel
@@ -65,11 +67,13 @@ cdef class MasterLogger:
         self._shm_producer = ShmMpscProducer(
             path=self._config.path,
             capacity_bytes=self._config.shm_capacity_bytes,
-            num_rings=0,
+            num_rings=_producer_ring_count(self._config),
             create=True,
             unlink_on_close=True,
         )
         self._transport = None
+        self._last_reported_drops = 0
+        self._shutdown_deadline = time.monotonic() + 2.0
 
         self._stop_event = threading.Event()
 
@@ -202,10 +206,10 @@ cdef class MasterLogger:
         Runs until ``_stop_event`` is set, then performs a final best-effort
         drain before exiting.
         """
-        # Create IPC transport in this thread and own its lifetime here
-        self._transport = ShmMpscConsumer(path=self._config.path)
-
         try:
+            # Create IPC transport in this thread and own its lifetime here.
+            self._transport = ShmMpscConsumer(path=self._config.path)
+            self._last_reported_drops = self._transport.dropped_count
             while not self._stop_event.is_set():
                 try:
                     # Non-blocking drain
@@ -224,8 +228,10 @@ cdef class MasterLogger:
                         if self._config.emit_internal:
                             self.error(msg_bytes=f"Error consuming messages: {e}".encode('utf-8'))
 
-                # Pace the loop using a short poll interval
-                time.sleep(0.001)
+                self._report_transport_drops()
+
+                # Pace the loop cooperatively so shutdown can wake it promptly.
+                self._stop_event.wait(0.001)
 
             # Final best-effort drain after stop signal
             messages = self._transport.consume_all()
@@ -234,11 +240,45 @@ cdef class MasterLogger:
                 for handler in self._log_handlers:
                     try:
                         handler.push(decoded_logs)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        if self._config.emit_internal:
+                            self.error(msg_bytes=f"Handler error during final drain: {e}".encode('utf-8'))
+            self._report_transport_drops()
         finally:
             if self._transport is not None:
-                self._transport.close()
+                with contextlib.suppress(Exception):
+                    self._transport.close()
+                self._transport = None
+
+            # The consumer thread owns cleanup so a timed-out shutdown never
+            # unmaps the creator transport while this thread can still use it.
+            if self._shm_producer is not None:
+                with contextlib.suppress(Exception):
+                    self._shm_producer.close()
+                self._shm_producer = None
+
+            for handler in self._log_handlers:
+                remaining = max(0.0, self._shutdown_deadline - time.monotonic())
+                try:
+                    handler.close(timeout_s=remaining)
+                except Exception as e:
+                    sys.stderr.write(f"[MasterLogger] handler close failed: {e}\n")
+
+    cdef void _report_transport_drops(self):
+        """Report new cumulative SHM overwrites once, independent of log level."""
+        cdef object current
+        cdef object delta
+        if self._transport is None:
+            return
+        current = self._transport.dropped_count
+        if current > self._last_reported_drops:
+            delta = current - self._last_reported_drops
+            sys.stderr.write(
+                f"[MasterLogger] SHM transport dropped {delta} log batches "
+                f"(cumulative {current})\n"
+            )
+            sys.stderr.flush()
+            self._last_reported_drops = current
 
     cdef void _log_direct(self, CLogLevel level, bytes msg_bytes):
         """Send a log directly to handlers without going through IPC.
@@ -333,7 +373,7 @@ cdef class MasterLogger:
         ):
             self._log_direct(CLogLevel.ERROR, msg_bytes)
 
-    cpdef void shutdown(self):
+    cpdef void shutdown(self, double timeout_s=2.0):
         """
         Flush any remaining messages and shuts down the master logger.
 
@@ -347,22 +387,20 @@ cdef class MasterLogger:
             return
         
         # Prevents any more logs from being added to the batch
+        self._shutdown_deadline = time.monotonic() + max(0.0, timeout_s)
         self._stop_event.set()
 
-        # Join background thread which owns the transport; it will perform final drain and stop
-        self._timed_operations_thread.join()
-
-        # Close the SHM ring producer (which unlinks the backing file)
-        with contextlib.suppress(Exception):
-            if self._shm_producer is not None:
-                self._shm_producer.close()
-
-        # Close handlers (best-effort)
-        try:
-            for handler in self._log_handlers:
-                handler.close()
-        except Exception:
-            pass
+        # One monotonic deadline covers drain-thread exit and its cooperative
+        # cleanup of the consumer, creator mapping, and handlers.
+        self._timed_operations_thread.join(
+            timeout=max(0.0, self._shutdown_deadline - time.monotonic())
+        )
+        if self._timed_operations_thread.is_alive():
+            sys.stderr.write(
+                "[MasterLogger] shutdown deadline exceeded; SHM mappings remain "
+                "open until the drain thread exits\n"
+            )
+            sys.stderr.flush()
     
     cpdef bint is_running(self):
         """Check if the master logger is running."""

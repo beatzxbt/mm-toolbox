@@ -6,12 +6,16 @@ no-op behaviour of logging after shutdown.
 """
 
 from pathlib import Path
+import threading
+import time
 
 import pytest
 
 from mm_toolbox.logging.advanced.config import LoggerConfig
+from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
 from mm_toolbox.logging.advanced.handlers.file import FileLogHandler
 from mm_toolbox.logging.advanced.master import MasterLogger
+from mm_toolbox.logging.advanced.worker import WorkerLogger
 
 pytestmark = pytest.mark.timeout(10, method="thread")
 
@@ -97,3 +101,42 @@ class TestMasterLogger:
         logger = MasterLogger(config=default_config)
         logger.shutdown()
         logger.info(msg_bytes=b"msg after shutdown")
+
+    def test_shutdown_deadline_keeps_transport_mapped_while_handler_is_active(
+        self, tmp_path: Path
+    ):
+        """A stalled dispatch cannot make shutdown unmap transport in use by its thread."""
+
+        class BlockingHandler(BaseLogHandler):
+            def __init__(self):
+                super().__init__()
+                self.started = threading.Event()
+                self.release = threading.Event()
+
+            def push(self, logs):
+                self.started.set()
+                self.release.wait(2.0)
+
+        path = tmp_path / "blocked_master.shm"
+        config = LoggerConfig(path=str(path), flush_interval_s=0.01)
+        handler = BlockingHandler()
+        logger = MasterLogger(config=config, log_handlers=[handler])
+        worker = WorkerLogger(config=config, name="blocked-worker")
+        try:
+            worker.info(msg_bytes=b"wait for blocking handler")
+            worker.shutdown()
+            assert handler.started.wait(2.0)
+            assert path.exists()
+
+            began = time.monotonic()
+            logger.shutdown(timeout_s=0.05)
+            assert time.monotonic() - began < 0.25
+            assert path.exists()
+        finally:
+            handler.release.set()
+            worker.shutdown()
+
+        cleanup_deadline = time.monotonic() + 2.0
+        while path.exists() and time.monotonic() < cleanup_deadline:
+            time.sleep(0.01)
+        assert not path.exists()

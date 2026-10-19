@@ -19,6 +19,20 @@ def _get_default_shm_path():
     return f"{runtime_dir}/mm_toolbox_logger_{token}.shm"
 
 
+def _producer_ring_count(config):
+    """Choose enough bounded producer shards for the configured batch size.
+
+    The total shared-memory capacity is split across shards. Keeping each
+    shard at least the rounded-up batch limit plus protocol/name headroom
+    prevents a default batch from becoming larger than a producer's ring.
+    A fixed upper bound avoids creating thousands of tiny shards for unusually
+    small batch settings. One shard is reserved by the master itself.
+    """
+    required = max(65536, int(config.max_batch_bytes) + 65536 + 21)
+    per_ring = 1 << (required - 1).bit_length()
+    return max(2, min(64, int(config.shm_capacity_bytes) // per_ring))
+
+
 cdef class LoggerConfig:
     def __cinit__(
         self, 
