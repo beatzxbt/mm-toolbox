@@ -20,6 +20,7 @@ cdef class WsConnection(WSListener):
         # Flattened hot-path state (avoids Python attribute lookups)
         ConnectionState   _conn_state
         i64               _seq_id
+        i64               _dropped_messages
         BytesRingBuffer   _ringbuffer
         double            _latency_ms
         object            _latency_ema
@@ -45,6 +46,7 @@ cdef class WsConnection(WSListener):
         object            _config
 
     cpdef int           get_seq_id(self)
+    cpdef i64           get_dropped_messages(self)
     cpdef double        get_latency_ms(self)
     cpdef bint          is_connected(self)
     cpdef object        get_ringbuffer(self)
@@ -56,6 +58,7 @@ cdef class WsConnection(WSListener):
     cpdef void          close(self)
     cpdef object        get_config(self)
     cpdef object        get_state(self)
+    cdef void           _buffer_message(self, bytes payload) except *
 
     # PicoWs should add void returns to these methods, but since they didnt
     # we cannot add them here as then it won't compile.

@@ -36,9 +36,11 @@ class TestWsPoolErrorScenarios:
             pool = await WsPool.new(
                 config, on_message=noop_message_handler, pool_config=pool_config
             )
-            async with pool:
-                await asyncio.sleep(0.3)
-                assert pool.get_connection_count() == 0
+            with pytest.raises(RuntimeError, match="every WebSocket connection"):
+                async with pool:
+                    pytest.fail("startup must fail")
+            assert pool.get_connection_count() == 0
+            assert pool.get_state() == ConnectionState.DISCONNECTED
             pool.close()
 
     async def test_pool_mid_stream_disconnect(

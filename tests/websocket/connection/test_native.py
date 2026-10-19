@@ -43,9 +43,24 @@ def test_ping_tracker_starts_at_zero():
     _native.test_ping_tracker_starts_at_zero()
 
 
-def test_ping_timeout_resets_tracker():
-    """Given a ping timeout, Then the tracker is reset so stale pings do not accumulate."""
-    _native.test_ping_timeout_resets_tracker()
+def test_receive_overflow_count():
+    """Receive loss is counted exactly and the oldest payload is overwritten."""
+    _native.test_receive_overflow_count()
+
+
+@pytest.mark.asyncio
+async def test_missing_pong_disconnects(basic_server, connection_factory):
+    """An expired PONG closes the real transport through the latency loop."""
+    import asyncio
+    from mm_toolbox.websocket.connection import ConnectionState
+
+    async with basic_server:
+        conn = await connection_factory(basic_server)
+        _native.expire_ping(conn)
+        async with asyncio.timeout(2):
+            while conn.is_connected():
+                await asyncio.sleep(0.01)
+        assert conn.get_state() == ConnectionState.DISCONNECTED
 
 
 def test_spurious_pong_ignored():

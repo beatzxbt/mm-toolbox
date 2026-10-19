@@ -1,6 +1,7 @@
 import os
 import random
 import asyncio
+import logging
 from typing import AsyncIterable, Self, Optional, cast
 
 from msgspec import Struct
@@ -12,13 +13,22 @@ from picows.picows cimport (
     WSMsgType, 
 )
 
-from mm_toolbox.time.time cimport time_ns, time_ms
+from mm_toolbox.time.time cimport time_ns, time_monotonic_ms
 from mm_toolbox.websocket.connection cimport ConnectionState
 from mm_toolbox.ringbuffer.bytes cimport BytesRingBuffer
 from mm_toolbox.moving_average.ema cimport ExponentialMovingAverage as Ema
 
 DEFAULT_MAX_FRAME_SIZE = 1_048_576
 DEFAULT_LATENCY_PING_INTERVAL_MS = 1000
+_logger = logging.getLogger(__name__)
+
+
+def _report_disconnect(future):
+    """Retrieve and report transport errors even without a disconnect waiter."""
+    if not future.cancelled():
+        error = future.exception()
+        if error is not None:
+            _logger.warning("WebSocket transport disconnected with error: %s", error)
 
 
 cdef inline bint _is_data_frame_type(WSMsgType msg_type):
@@ -95,6 +105,7 @@ cdef class WsConnection(WSListener):
         # Flatten hot-path state into cdef primitives
         self._conn_state = ConnectionState.DISCONNECTED
         self._seq_id = 0
+        self._dropped_messages = 0
         self._ringbuffer = ringbuffer
         self._latency_ms = 1000.0
         self._latency_ema = Ema(window=60, is_fast=True)
@@ -122,6 +133,10 @@ cdef class WsConnection(WSListener):
             Monotonically increasing sequence number for received messages.
         """
         return self._seq_id
+
+    cpdef i64 get_dropped_messages(self):
+        """Return receive-buffer overwrite count for this connection."""
+        return self._dropped_messages
 
     cpdef double get_latency_ms(self):
         """Return the current latency in milliseconds.
@@ -191,16 +206,20 @@ cdef class WsConnection(WSListener):
                     continue
 
                 if self._tracker_ping_sent_time_ms > 0.0:
-                    # Reset if pong was lost (prevents stalling forever)
-                    if time_ms() - self._tracker_ping_sent_time_ms > ping_timeout_ms:
-                        self._tracker_ping_sent_time_ms = 0.0
+                    # A half-open transport must be replaced, not kept alive
+                    # indefinitely by resetting its outstanding ping.
+                    if time_monotonic_ms() - self._tracker_ping_sent_time_ms > ping_timeout_ms:
+                        _logger.warning("WebSocket %s PONG timeout; disconnecting", self._config.conn_id)
+                        self.close()
+                        return
                     continue
 
                 try:
                     self._transport.send_ping()
-                    self._tracker_ping_sent_time_ms = time_ms()
+                    self._tracker_ping_sent_time_ms = time_monotonic_ms()
                 except Exception:
-                    pass
+                    self.close()
+                    return
         except asyncio.CancelledError:
             return
   
@@ -238,8 +257,9 @@ cdef class WsConnection(WSListener):
         Args:
             msg (bytes): The data to send as TEXT.
         """
-        if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
-            self._transport.send(WSMsgType.TEXT, msg)
+        if self._conn_state != ConnectionState.CONNECTED or self._transport is None:
+            raise RuntimeError("WebSocket connection is disconnected")
+        self._transport.send(WSMsgType.TEXT, msg)
 
     cpdef void send_data_bytearray(self, bytearray msg):
         """
@@ -252,11 +272,12 @@ cdef class WsConnection(WSListener):
             bytearray transport_buffer
             Py_ssize_t msg_len
 
+        if self._conn_state != ConnectionState.CONNECTED or self._transport is None:
+            raise RuntimeError("WebSocket connection is disconnected")
         msg_len = len(msg)
         transport_buffer = bytearray(14 + msg_len)
         transport_buffer[14:] = msg
-        if self._conn_state == ConnectionState.CONNECTED and self._transport is not None:
-            self._transport.send_reuse_external_bytearray(WSMsgType.TEXT, transport_buffer, 14)
+        self._transport.send_reuse_external_bytearray(WSMsgType.TEXT, transport_buffer, 14)
 
     cpdef void close(self):
         """Close the Websocket connection gracefully.
@@ -275,7 +296,8 @@ cdef class WsConnection(WSListener):
         
         # Disconnect transport if available
         if self._transport is not None:
-            self._transport.disconnect(graceful=True)
+            self._transport.disconnect(graceful=False)
+            self._transport = None
 
     cpdef object get_config(self):
         """Return the current connection config.
@@ -301,9 +323,12 @@ cdef class WsConnection(WSListener):
         Args:
             transport: PicoWs WSTransport instance.
         """
-        self._should_stop = False
+        if self._should_stop:
+            transport.disconnect(graceful=False)
+            return
         self._seq_id = 0
         self._transport = transport
+        transport.disconnected_future.add_done_callback(_report_disconnect)
         self._conn_state = ConnectionState.CONNECTED
         self._loop = asyncio.get_running_loop()
         self._tracker_ping_sent_time_ms = 0.0
@@ -342,7 +367,7 @@ cdef class WsConnection(WSListener):
             object     frame_payload_mv
 
         if frame_msg_type == WSMsgType.PONG:
-            pong_recv_time_ms = time_ms()
+            pong_recv_time_ms = time_monotonic_ms()
             ping_sent_time_ms = self._tracker_ping_sent_time_ms
             self._tracker_pong_recv_time_ms = pong_recv_time_ms
             if ping_sent_time_ms > 0.0 and pong_recv_time_ms >= ping_sent_time_ms:
@@ -393,8 +418,7 @@ cdef class WsConnection(WSListener):
         ):
             # Fast path: single complete frame — avoid picows internal copy
             frame_payload_mv = frame.get_payload_as_memoryview()
-            self._ringbuffer.insert(bytes(frame_payload_mv))
-            self._seq_id += 1
+            self._buffer_message(bytes(frame_payload_mv))
             return
 
         if frame_size > 0:
@@ -404,9 +428,19 @@ cdef class WsConnection(WSListener):
         if frame_unfinished:
             return
 
-        self._ringbuffer.insert(bytes(self._unfin_msg_buffer))
+        self._buffer_message(bytes(self._unfin_msg_buffer))
         self._unfin_msg_buffer.clear()
         self._unfin_msg_size = 0
+
+    cdef void _buffer_message(self, bytes payload) except *:
+        if self._ringbuffer.is_full():
+            self._dropped_messages += 1
+            _logger.warning(
+                "WebSocket %s receive buffer overflow: discarded oldest payload "
+                "(dropped=%d); sequence-dependent consumers must resynchronize",
+                self._config.conn_id, self._dropped_messages,
+            )
+        self._ringbuffer.insert(payload)
         self._seq_id += 1
 
     cpdef on_ws_disconnected(self, WSTransport transport):
@@ -437,12 +471,24 @@ cdef class WsConnection(WSListener):
         config: WsConnectionConfig,
     ) -> Self:
         """Opens a Websocket connection to the specified URL."""
-        wst, wsl = await ws_connect(
-            ws_listener_factory=lambda: cls(ringbuffer, config),
-            url=config.wss_url,
-            max_frame_size=config.max_frame_size,
-        )
-        return wsl
+        listeners = []
+        def listener_factory():
+            listener = cls(ringbuffer, config)
+            listeners.append(listener)
+            return listener
+        try:
+            wst, wsl = await ws_connect(
+                ws_listener_factory=listener_factory,
+                url=config.wss_url,
+                max_frame_size=config.max_frame_size,
+            )
+            if not wsl.is_connected():
+                raise RuntimeError("WebSocket disconnected during connection establishment")
+            return wsl
+        except BaseException:
+            for listener in listeners:
+                listener.close()
+            raise
 
     @classmethod
     async def new_with_reconnect(
@@ -450,7 +496,29 @@ cdef class WsConnection(WSListener):
         ringbuffer: BytesRingBuffer,
         config: WsConnectionConfig,
     ) -> AsyncIterable[Self]:
-        """Opens a Websocket connection to the specified URL with reconnect."""
+        """Yield live connections, retrying failures with 1–30 second backoff.
+
+        Closing the generator closes its current connection. With reconnect
+        disabled, the first error propagates and only one connection is yielded.
+        """
+        delay = 1.0
         while True:
-            yield await cls.new(ringbuffer, config)
-            await asyncio.sleep(1.0)
+            try:
+                conn = await cls.new(ringbuffer, config)
+            except Exception as exc:
+                if not config.auto_reconnect:
+                    raise
+                _logger.warning("WebSocket connection failed; retrying: %s", exc)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2.0, 30.0)
+                continue
+            delay = 1.0
+            try:
+                yield conn
+                while conn.is_connected():
+                    await asyncio.sleep(0.1)
+            finally:
+                conn.close()
+            if not config.auto_reconnect:
+                return
+            await asyncio.sleep(delay)

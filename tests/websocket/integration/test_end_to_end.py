@@ -169,28 +169,16 @@ class TestConnectionLifecycleE2E:
         server_reject_connections,
         connection_config_factory,
     ) -> None:
-        """Given a rejecting server, When direct connection and reconnect iterator are used, Then both reach DISCONNECTED and the retry loop can be broken after a few attempts."""
+        """Immediate rejection fails direct open and never yields a dead retry."""
         async with server_reject_connections:
-            # Direct new() should connect but server closes immediately
             ringbuffer = BytesRingBuffer(max_capacity=8, only_insert_unique=False)
             config = connection_config_factory(server_reject_connections)
-            conn = await WsConnection.new(ringbuffer, config)
-            await asyncio.sleep(0.2)
-            assert conn.get_state() == ConnectionState.DISCONNECTED
-            conn.close()
-
-            # Reconnect iterator: attempt a few times then break
-            rb2 = BytesRingBuffer(max_capacity=8, only_insert_unique=False)
-            conn_iter = WsConnection.new_with_reconnect(rb2, config)
-            conn_iter.__aiter__()
-            attempt = 0
-            async with asyncio.timeout(5.0):
-                async for _conn in conn_iter:
-                    attempt += 1
-                    _conn.close()
-                    if attempt >= 3:
-                        break
-            assert attempt >= 1
+            with pytest.raises(RuntimeError, match="disconnected"):
+                await WsConnection.new(ringbuffer, config)
+            conn_iter = WsConnection.new_with_reconnect(ringbuffer, config)
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(anext(conn_iter), timeout=1.3)
+            await conn_iter.aclose()
 
 
 # --------------------------------------------------------------------------- #
@@ -451,9 +439,11 @@ class TestPoolE2E:
             pool = await WsPool.new(
                 config, on_message=_noop_handler, pool_config=pool_config
             )
-            async with pool:
-                await asyncio.sleep(0.5)
-                assert pool.get_connection_count() == 0
+            with pytest.raises(RuntimeError, match="every WebSocket connection"):
+                async with pool:
+                    pytest.fail("startup must fail")
+            assert pool.get_connection_count() == 0
+            assert pool.get_state() == ConnectionState.DISCONNECTED
 
     async def test_pool_hash_deduplication(
         self,

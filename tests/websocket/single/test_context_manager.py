@@ -62,9 +62,10 @@ class TestWsSingleInterface:
         assert ws.get_config().on_connect == new_messages
 
     def test_operations_when_disconnected(self, config) -> None:
-        """Given a disconnected WsSingle, When send_data or close is called, Then no exception is raised and state remains DISCONNECTED."""
+        """Given a disconnected WsSingle, When send_data or close is called, Then sending raises and close remains safe."""
         ws = WsSingle(config)
-        ws.send_data(b'{"test": "message"}')
+        with pytest.raises(RuntimeError, match="disconnected"):
+            ws.send_data(b'{"test": "message"}')
         ws.close()
         assert ws.get_state() == ConnectionState.DISCONNECTED
 

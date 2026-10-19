@@ -30,7 +30,14 @@ class TestWsConnectionConfigForwarding:
             captured["ws_listener_factory"] = ws_listener_factory
             captured["url"] = url
             captured["max_frame_size"] = max_frame_size
-            return object(), "listener-sentinel"
+
+            class Listener:
+                def is_connected(self):
+                    return True
+
+            listener = Listener()
+            captured["listener"] = listener
+            return object(), listener
 
         monkeypatch.setattr(
             "mm_toolbox.websocket.connection.ws_connect", fake_ws_connect
@@ -43,7 +50,7 @@ class TestWsConnectionConfigForwarding:
         )
         listener = await WsConnection.new(ringbuffer, config)
 
-        assert listener == "listener-sentinel"
+        assert listener is captured["listener"]
         assert callable(captured["ws_listener_factory"])
         assert captured["url"] == "wss://test.com/ws"
         assert captured["max_frame_size"] == 2048

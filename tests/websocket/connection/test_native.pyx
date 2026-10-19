@@ -77,29 +77,21 @@ def test_ping_tracker_starts_at_zero():
     assert conn._tracker_pong_recv_time_ms == 0.0
 
 
-def test_ping_timeout_resets_tracker():
-    """Verify lost PONG resets tracker after 3x interval."""
-    cdef WsConnection conn = _make_conn_fast()
-    # Simulate a ping was sent 200ms ago (4x the 50ms interval)
-    conn._tracker_ping_sent_time_ms = 200.0
-    conn._latency_ping_interval_s = 0.05
-    
-    # The _latency_loop checks: time_ms() - sent > interval * 3000.0
-    # So if sent=200, interval=0.05, timeout=150ms.
-    # Current time must be > 350ms for reset.
-    # We can't easily mock time_ms() here, but we can test the logic directly
-    # by checking the condition that _latency_loop uses.
-    cdef double current_time_ms = 400.0
-    cdef double ping_timeout_ms = conn._latency_ping_interval_s * 3000.0
-    
-    assert conn._tracker_ping_sent_time_ms > 0.0
-    assert current_time_ms - conn._tracker_ping_sent_time_ms > ping_timeout_ms
-    
-    # Simulate what _latency_loop does on timeout
-    if (current_time_ms - conn._tracker_ping_sent_time_ms) > ping_timeout_ms:
-        conn._tracker_ping_sent_time_ms = 0.0
-    
-    assert conn._tracker_ping_sent_time_ms == 0.0
+def expire_ping(WsConnection conn):
+    """Arm an expired outstanding ping without sending a real one."""
+    from mm_toolbox.time import time_monotonic_ms
+    conn._tracker_ping_sent_time_ms = time_monotonic_ms() - 10000.0
+
+
+def test_receive_overflow_count():
+    """An overwritten payload increments the public loss diagnostic."""
+    cdef WsConnection conn = _make_conn()
+    for i in range(20):
+        conn._buffer_message(str(i).encode())
+    assert conn.get_dropped_messages() == 4
+    assert conn.get_seq_id() == 20
+    assert len(conn.get_ringbuffer()) == 16
+    assert conn.get_ringbuffer().consume() == b"4"
 
 
 def test_spurious_pong_ignored():
