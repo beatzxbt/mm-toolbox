@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## 1.0.0b9 (Unreleased)
 
+### Release hardening
+- Preserve lock-free overwrite-oldest SHM queues with atomic word copies, CAS retirement, exact overwrite counts, and exclusive producer leases. Format 2 rejects old mappings; recreate mappings after stopping all users. Large payload copying has a throughput cost.
+- Hide unsafe raw-pointer byte insertion from Python and reject invalid native lengths.
+- Make WebSocket sends fail explicitly when disconnected, require complete pool startup, recover missing connections, terminate single-client reconnect work on close, and count receive overwrites. Missing PONGs close the connection.
+- Fix candle replay boundaries, stale-trade checks, queued async delivery, and progress/conservation for tiny volume thresholds.
+- Use a precise monotonic clock for time EMA updates and one deterministic warm-up clock origin. Guard limiter overflow, signed filters, zero-alpha normalized weights, and negative ISO timestamps.
+- Restrict rounding to positive finite powers of ten with directional grid correction and an explicit precision limit.
+- Normalize duplicate orderbook ticks with last-entry-wins semantics, make rejected snapshots transactional, align crossed-book cleanup, and compute execution VWAP using partial fills.
+- Make standard remote logging safe in async applications, check HTTP status and bounded retries, honor Retry-After, bound shutdown, append existing files, and report bounded queue/batch loss.
+- Build and require all native test extensions in CI and installed-wheel tests. Gate releases on shared validation, include native test sources and py.typed, and scope cache cleanup to repository directories.
+
 ### Orderbook
 - Centralize advanced orderbook raw-value normalization; cleans up the raw-entry API and adds crossed-BBO validation.
 

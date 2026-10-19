@@ -96,7 +96,7 @@ Implement your changes following the standards in this document. Key checkpoints
 ```bash
 # Run the full quality gate (do this before every commit)
 make fix        # Format + typecheck
-make build-all  # Ensure Cython compiles
+make build      # Ensure Cython compiles
 make test-all   # C + Python tests
 ```
 
@@ -474,7 +474,7 @@ tests/
 ### Running Tests
 
 ```bash
-make test-all                     # C + Python tests (full suite)
+make test-all                     # Build native extensions, then C + Python tests
 make test-py                      # Python-only tests
 make test-c                       # C-only tests
 make test-coverage                # Full suite with Cython-aware coverage
@@ -507,17 +507,17 @@ uv run pytest tests/moving_average/test_moving_average_base.py -xvv
 | `make test-c`           | Run C unit tests only                                     |
 | `make build-lib`        | Build Cython extensions in-place                          |
 | `make build-test`       | Build Cython test extensions                              |
-| `make build-all`        | Build all extensions (lib + test)                         |
-| `make rebuild-all`      | Clean + rebuild everything                                |
+| `make build`            | Build all extensions (lib + test)                         |
+| `make rebuild`          | Clean + rebuild everything                                |
 | `make remove-build-lib` | Remove compiled `.so` files and build artifacts           |
-| `make clean-caches`     | Remove `__pycache__`, `.pytest_cache`, `.ruff_cache`      |
+| `make clean`            | Remove `__pycache__`, `.pytest_cache`, `.ruff_cache`      |
 
 
 ### Build Workflow
 
 ```bash
 # After pulling new code or switching branches
-make rebuild-all    # Clean + rebuild lib + test extensions
+make rebuild    # Clean + rebuild lib + test extensions
 make test-all       # Verify everything works
 
 # During active development
@@ -696,7 +696,7 @@ Configured for:
 
 - Python 3.12, 3.13, and 3.14
 - Linux (x86_64, aarch64)
-- macOS (x86_64, arm64)
+- macOS (arm64)
 
 ### Publishing
 
@@ -709,7 +709,7 @@ make upload-test
 **Production PyPI (after TestPyPI verification):**
 
 ```bash
-make upload-prod
+gh workflow run release.yml --ref <validated-tag> -f environment=pypi
 ```
 
 ### Release Checklist
@@ -722,10 +722,10 @@ make upload-prod
 6. [ ] Check distribution: `make check-dist`
 7. [ ] Test on TestPyPI: `make upload-test`
 8. [ ] Verify installation from TestPyPI
-9. [ ] Upload to PyPI: `make upload-prod`
-10. [ ] Tag the release: `git tag v1.0.0`
-11. [ ] Push tag: `git push origin v1.0.0`
-12. [ ] Create GitHub release
+9. [ ] Tag the validated commit: `git tag v1.0.0 <validated-sha>`
+10. [ ] Push tag: `git push origin v1.0.0`
+11. [ ] Publish the GitHub release to run the gated release workflow, or dispatch it explicitly for that tag.
+12. [ ] Verify the published PyPI artifacts and installation.
 
 ---
 
@@ -743,8 +743,8 @@ uv sync --all-groups
 uv run cython --version  # Should be >= 3.0.11
 
 # Clean and rebuild
-make remove-build-all
-make build-all
+make remove-build
+make build
 ```
 
 **Missing numpy during build:**
@@ -758,7 +758,7 @@ uv sync --all-groups
 
 ```bash
 # Ensure extensions are built
-make build-all
+make build
 
 # Check PYTHONPATH
 export PYTHONPATH=src:$PYTHONPATH
@@ -785,7 +785,7 @@ make build-test
 
 ```bash
 make wheel-check
-# If fails, rebuild: make remove-wheel && make wheel
+# If fails, rebuild: make remove-build-lib && make wheel
 ```
 
 **Upload fails:**
