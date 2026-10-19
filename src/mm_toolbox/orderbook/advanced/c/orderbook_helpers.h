@@ -14,6 +14,13 @@
 
 void reverse_entries(uint64_t num_entries, OrderbookEntry* entries);
 
+/**
+ * Compact equal tick runs in sorted input before any reversal. The final
+ * original entry supplies the absolute quantity and order count. Optionally
+ * omit final zero quantities when constructing a snapshot.
+ */
+uint64_t compact_entries(uint64_t num_entries, OrderbookEntry* entries, bool drop_zero);
+
 static inline uint64_t orderbook_floor_with_epsilon(double value) {
     if (!isfinite(value) || value < 0.0) {
         return 0;

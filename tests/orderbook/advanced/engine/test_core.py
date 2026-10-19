@@ -318,6 +318,18 @@ def test_core_vwmp_exceeds_liquidity():
     _native.test_core_vwmp_exceeds_liquidity()
 
 
+def test_core_raw_snapshot_and_deltas_resolve_duplicate_ticks():
+    _native.test_core_raw_snapshot_and_deltas_resolve_duplicate_ticks()
+
+
+def test_core_rejected_snapshot_does_not_commit_inferred_order():
+    _native.test_core_rejected_snapshot_does_not_commit_inferred_order()
+
+
+def test_core_execution_vwap_uses_partial_final_fill():
+    _native.test_core_execution_vwap_uses_partial_final_fill()
+
+
 def test_core_impact_zero_size():
     """Given size=0, When get_price_impact called, Then returns 0."""
     _native.test_core_impact_zero_size()

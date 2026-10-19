@@ -8,6 +8,7 @@ single price level on either side of an orderbook.
 from __future__ import annotations
 
 from math import floor
+from sys import float_info
 from typing import Self
 
 from msgspec import Struct
@@ -24,7 +25,7 @@ def price_to_ticks(price: float, tick_size: float) -> int:
         int: Equivalent number of ticks.
 
     """
-    return int(floor(price / tick_size))
+    return price_to_ticks_fast(price, 1.0 / tick_size)
 
 
 def size_to_lots(size: float, lot_size: float) -> int:
@@ -38,7 +39,7 @@ def size_to_lots(size: float, lot_size: float) -> int:
         int: Equivalent number of lots.
 
     """
-    return int(floor(size / lot_size))
+    return size_to_lots_fast(size, 1.0 / lot_size)
 
 
 def price_to_ticks_fast(price: float, inv_tick_size: float) -> int:
@@ -52,7 +53,8 @@ def price_to_ticks_fast(price: float, inv_tick_size: float) -> int:
         int: Equivalent number of ticks.
 
     """
-    return int(price * inv_tick_size)
+    value = price * inv_tick_size
+    return floor(value + abs(value) * float_info.epsilon * 4.0)
 
 
 def size_to_lots_fast(size: float, inv_lot_size: float) -> int:
@@ -66,7 +68,8 @@ def size_to_lots_fast(size: float, inv_lot_size: float) -> int:
         int: Equivalent number of lots.
 
     """
-    return int(size * inv_lot_size)
+    value = size * inv_lot_size
+    return floor(value + abs(value) * float_info.epsilon * 4.0)
 
 
 def price_from_ticks(ticks: int, tick_size: float) -> float:

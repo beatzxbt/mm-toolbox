@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from libc.stdint cimport uint64_t as u64
 from libc.stdlib cimport malloc, free
-from libc.math cimport fabs
+from libc.math cimport fabs, isinf
 
 from mm_toolbox.orderbook.advanced.level.level cimport (
     OrderbookLevel,
@@ -1473,8 +1473,108 @@ def test_core_vwmp_exceeds_liquidity():
     _populate_standard_book(core)
     
     cdef double vwmp = core.get_volume_weighted_mid_price(1e9, True)
-    # Should return DBL_MAX (infinity marker)
-    assert vwmp > 1e10
+    assert isinf(vwmp)
+
+
+def test_core_raw_snapshot_and_deltas_resolve_duplicate_ticks():
+    """Raw Cython entry points retain final quantities before reversing input."""
+    cdef CoreAdvancedOrderbook core = CoreAdvancedOrderbook(
+        1.0, 1.0, 16,
+        CyOrderbookSortedness.DESCENDING,
+        CyOrderbookSortedness.DESCENDING,
+    )
+    cdef OrderbookLevels asks = _alloc_levels(5)
+    cdef OrderbookLevels bids = _alloc_levels(3)
+    cdef OrderbookLadderData* ask_data
+    cdef OrderbookLadderData* bid_data
+    try:
+        asks.levels[0] = create_orderbook_level(120.0, 5.0, 5)
+        asks.levels[1] = create_orderbook_level(110.0, 4.0, 4)
+        asks.levels[2] = create_orderbook_level(110.2, 0.0, 0)
+        asks.levels[3] = create_orderbook_level(100.2, 2.0, 2)
+        asks.levels[4] = create_orderbook_level(100.1, 7.0, 7)
+        bids.levels[0] = create_orderbook_level(99.0, 2.0, 2)
+        bids.levels[1] = create_orderbook_level(99.2, 6.0, 6)
+        bids.levels[2] = create_orderbook_level(90.0, 3.0, 3)
+        core.consume_snapshot(asks, bids)
+        ask_data = core.get_asks_data()
+        bid_data = core.get_bids_data()
+        assert ask_data.num_levels == 2
+        assert c_ladder_at(ask_data, 0).ticks == 100
+        assert c_ladder_at(ask_data, 0).lots == 7
+        assert c_ladder_at(ask_data, 0).norders == 7
+        assert c_ladder_at(ask_data, 1).ticks == 120
+        assert bid_data.num_levels == 2
+        assert c_ladder_at(bid_data, 0).lots == 6
+
+        # The small path must delete the final zero at a duplicated tick.
+        asks.num_levels = 2
+        bids.num_levels = 0
+        asks.levels[0] = create_orderbook_level(100.0, 9.0, 9)
+        asks.levels[1] = create_orderbook_level(100.1, 0.0, 0)
+        core.consume_deltas(asks, bids)
+        assert ask_data.num_levels == 1
+        assert c_ladder_at(ask_data, 0).ticks == 120
+    finally:
+        _free_levels(&asks)
+        _free_levels(&bids)
+
+
+def test_core_rejected_snapshot_does_not_commit_inferred_order():
+    """A rejected first snapshot must not constrain the next valid snapshot."""
+    cdef CoreAdvancedOrderbook core = _create_core()
+    cdef OrderbookLevels asks = _alloc_levels(2)
+    cdef OrderbookLevels bids = _alloc_levels(2)
+    cdef bint raised = False
+    try:
+        asks.levels[0] = create_orderbook_level(100.0, 1.0, 1)
+        asks.levels[1] = create_orderbook_level(110.0, 1.0, 1)
+        bids.levels[0] = create_orderbook_level(120.0, 1.0, 1)
+        bids.levels[1] = create_orderbook_level(130.0, 1.0, 1)
+        try:
+            core.consume_snapshot(asks, bids)
+        except ValueError:
+            raised = True
+        assert raised
+        assert core.get_asks_data().num_levels == 0
+        assert core.get_bids_data().num_levels == 0
+
+        asks.levels[0] = create_orderbook_level(110.0, 1.0, 1)
+        asks.levels[1] = create_orderbook_level(100.0, 1.0, 1)
+        bids.levels[0] = create_orderbook_level(90.0, 1.0, 1)
+        bids.levels[1] = create_orderbook_level(80.0, 1.0, 1)
+        core.consume_snapshot(asks, bids)
+        assert c_ladder_at(core.get_asks_data(), 0).ticks == 10000
+        assert c_ladder_at(core.get_asks_data(), 1).ticks == 11000
+        assert c_ladder_at(core.get_bids_data(), 0).ticks == 9000
+    finally:
+        _free_levels(&asks)
+        _free_levels(&bids)
+
+
+def test_core_execution_vwap_uses_partial_final_fill():
+    """Execution VWAP uses every fill; marginal prices previously returned 95."""
+    cdef CoreAdvancedOrderbook core = CoreAdvancedOrderbook(
+        1.0, 1.0, 16,
+        CyOrderbookSortedness.BIDS_DESCENDING_ASKS_ASCENDING,
+        CyOrderbookSortedness.BIDS_DESCENDING_ASKS_ASCENDING,
+    )
+    cdef OrderbookLevels asks = _alloc_levels(2)
+    cdef OrderbookLevels bids = _alloc_levels(2)
+    try:
+        asks.levels[0] = create_orderbook_level(100.0, 1.0, 1)
+        asks.levels[1] = create_orderbook_level(110.0, 9.0, 1)
+        bids.levels[0] = create_orderbook_level(99.0, 5.0, 1)
+        bids.levels[1] = create_orderbook_level(80.0, 5.0, 1)
+        core.consume_snapshot(asks, bids)
+        # Buy VWAP 109 and sell VWAP 89.5 give 99.25 without tick flooring.
+        assert _approx_eq(core.get_volume_weighted_mid_price(10.0, True), 99.25)
+        assert _approx_eq(core.get_volume_weighted_mid_price(2.5, True), 102.5)
+        assert _approx_eq(core.get_volume_weighted_mid_price(247.5, False), 102.5)
+        assert isinf(core.get_volume_weighted_mid_price(10.5, True))
+    finally:
+        _free_levels(&asks)
+        _free_levels(&bids)
 
 
 # Price Impact tests

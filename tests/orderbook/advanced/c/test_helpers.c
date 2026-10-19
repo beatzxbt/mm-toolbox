@@ -127,11 +127,33 @@ static MunitResult test_lot_conversion_roundtrip(const MunitParameter params[] M
     return MUNIT_OK;
 }
 
+/** @test Snapshot compaction retains final original quantities before reversal. */
+static MunitResult test_compact_entries_snapshot(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
+    OrderbookEntry entries[] = {
+        {.ticks = 120, .lots = 5, .norders = 5},
+        {.ticks = 110, .lots = 4, .norders = 4},
+        {.ticks = 110, .lots = 0, .norders = 0},
+        {.ticks = 100, .lots = 2, .norders = 2},
+        {.ticks = 100, .lots = 7, .norders = 7},
+    };
+    uint64_t count = compact_entries(5, entries, true);
+    munit_assert_uint64(count, ==, 2);
+    reverse_entries(count, entries);
+    munit_assert_uint64(entries[0].ticks, ==, 100);
+    munit_assert_uint64(entries[0].lots, ==, 7);
+    munit_assert_uint64(entries[0].norders, ==, 7);
+    munit_assert_uint64(entries[1].ticks, ==, 120);
+    munit_assert_uint64(entries[1].lots, ==, 5);
+    munit_assert_uint64(compact_entries(0, NULL, true), ==, 0);
+    return MUNIT_OK;
+}
+
 /* ============================================================================
  * Test suite definition
  * ============================================================================ */
 
 static MunitTest helper_tests[] = {
+    { "/compact_entries/snapshot_last_wins", test_compact_entries_snapshot, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/price_to_tick/basic", test_price_to_tick_basic, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/price_to_tick/zero", test_price_to_tick_zero, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/price_to_tick/rounding", test_price_to_tick_rounding, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },

@@ -21,6 +21,7 @@ cdef extern from "orderbook_helpers.h":
     double tick_to_price(u64 tick, double tick_size) nogil
     double lot_to_size(u64 lot, double lot_size) nogil
     void reverse_entries_c "reverse_entries"(u64 num_entries, OrderbookEntry* entries) nogil
+    u64 compact_entries_c "compact_entries"(u64 num_entries, OrderbookEntry* entries, bint drop_zero) nogil
 
 
 cdef inline u64 convert_price_to_tick(double price, double tick_size_recip) noexcept nogil:
@@ -41,6 +42,10 @@ cdef inline double convert_size_from_lot(u64 lot, double lot_size) noexcept nogi
 
 cdef void reverse_entries(OrderbookEntry* entries, u64 num_entries) noexcept nogil:
     reverse_entries_c(num_entries, entries)
+
+
+cdef u64 compact_entries(OrderbookEntry* entries, u64 num_entries, bint drop_zero) noexcept nogil:
+    return compact_entries_c(num_entries, entries, drop_zero)
 
 
 cdef void validate_price(double price):

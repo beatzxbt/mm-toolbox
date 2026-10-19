@@ -144,14 +144,29 @@ best_bid, best_ask = ob.get_bbo()
 
 - Public advanced levels are raw `price`, `size`, and `norders` values.
 - Ticks and lots are computed on ingest and stored only in compact internal entries.
-- Snapshots reject crossed books.
+- For snapshots and deltas, duplicate normalized price ticks use the final
+  original entry's absolute quantity and order count. Zero lots delete a level;
+  snapshot zero lots are omitted. Duplicate resolution happens before reversing
+  a sorted side, and before applying the advanced capacity limit.
+- Snapshots reject crossed books after normalization and leave the previous
+  book intact on rejection.
 - BBO updates validate raw inputs and reject crossed incoming BBO values.
+- `get_mid_price()` and `get_wmid_price()` intentionally floor the result to a
+  whole price tick. An odd sum of best bid/ask ticks therefore rounds down.
+- `get_volume_weighted_mid_price()` computes each side's average execution price,
+  consuming only the needed quantity at the final level, then takes their
+  arithmetic midpoint without flooring to ticks. Quote notional is converted
+  to base quantity using `get_mid_price()`. Insufficient depth returns infinity;
+  nonpositive size returns `get_mid_price()`.
 - Advanced `get_price_impact(size, is_buy, is_base_currency)` is touch-anchored and
   returns terminal impact: `abs(last_touched_price - touch_anchor_price)`.
 - Advanced `get_size_for_price_impact_bps(impact_bps, is_buy, is_base_currency)`
   measures depth from touch (`best_ask` for buys, `best_bid` for sells) and includes
   boundary levels.
-- Advanced deltas ignore a special edge case: if a delta would wipe the entire
+- Deltas apply both sides of a batch before removing crossed levels. Ask updates
+  remove crossed bids first; bid updates then remove crossed asks. This avoids
+  deleting levels because of a temporary cross within a valid batch.
+- Deltas ignore a special edge case: if a delta would wipe the entire
   opposite side and provides no replacement levels, the delta is ignored.
 
 ## Performance notes

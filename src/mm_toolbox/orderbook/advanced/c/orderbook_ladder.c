@@ -124,6 +124,8 @@ void c_ladder_apply_sorted_deltas(
     uint64_t update_count,
     OrderbookEntry* scratch
 ) {
+    /* Direct C callers receive the same last-entry-wins semantics as the core. */
+    update_count = compact_entries(update_count, updates, false);
     uint64_t i = 0;
     uint64_t j = 0;
     uint64_t out = 0;

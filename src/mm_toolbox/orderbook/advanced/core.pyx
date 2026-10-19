@@ -7,14 +7,15 @@
 
 from __future__ import annotations
 
-from libc.float cimport DBL_MAX as INFINITY_DOUBLE
-from libc.math cimport fabs, isfinite
+from libc.float cimport DBL_EPSILON, DBL_MAX as INFINITY_DOUBLE
+from libc.math cimport INFINITY, fabs, isfinite
 from libc.stdint cimport uint64_t as u64
 from libc.stdlib cimport free, malloc
 
 from .enum.enums cimport CyOrderbookSortedness
 from .ladder.ladder cimport OrderbookLadder, OrderbookLadderData
 from .level.helpers cimport (
+    compact_entries,
     convert_price_from_tick,
     convert_price_to_tick,
     convert_price_to_tick_trusted,
@@ -449,10 +450,14 @@ cdef class CoreAdvancedOrderbook:
             OrderbookEntry* best_ask = NULL
             OrderbookEntry* best_bid = NULL
 
+        # Collapse normalized equal ticks in feed order before reversing a side.
+        # A final zero quantity deletes the tick, including in snapshots.
+        ask_count = compact_entries(asks, ask_count, True)
+        bid_count = compact_entries(bids, bid_count, True)
+
         if ask_order == ORDER_UNKNOWN:
             inferred = _infer_entries_order(asks, ask_count)
             if inferred != ORDER_UNKNOWN:
-                self._snapshot_ask_order = inferred
                 ask_order = inferred
         if ask_order == ORDER_UNKNOWN:
             ask_order = ORDER_ASCENDING
@@ -460,7 +465,6 @@ cdef class CoreAdvancedOrderbook:
         if bid_order == ORDER_UNKNOWN:
             inferred = _infer_entries_order(bids, bid_count)
             if inferred != ORDER_UNKNOWN:
-                self._snapshot_bid_order = inferred
                 bid_order = inferred
         if bid_order == ORDER_UNKNOWN:
             bid_order = ORDER_DESCENDING
@@ -477,6 +481,11 @@ cdef class CoreAdvancedOrderbook:
         ):
             raise ValueError("Crossed snapshot; best bid must be below best ask")
 
+        # Sortedness inference is part of the snapshot transaction as well.
+        if ask_count > 1:
+            self._snapshot_ask_order = ask_order
+        if bid_count > 1:
+            self._snapshot_bid_order = bid_order
         self._asks.reset()
         self._bids.reset()
         self._fill_snapshot_entries(
@@ -508,6 +517,9 @@ cdef class CoreAdvancedOrderbook:
             int inferred
             int ask_order = self._delta_ask_order
             int bid_order = self._delta_bid_order
+
+        ask_count = compact_entries(asks, ask_count, False)
+        bid_count = compact_entries(bids, bid_count, False)
 
         if ask_order == ORDER_UNKNOWN:
             inferred = _infer_entries_order(asks, ask_count)
@@ -755,25 +767,33 @@ cdef class CoreAdvancedOrderbook:
             return mid_price
         cdef:
             double target = size if is_base_currency else (size / mid_price)
-            u64 target_lots = convert_size_to_lot(target, self._lot_size_recip)
-            u64 cum_ask_lots = 0
-            u64 cum_bid_lots = 0
-            u64 final_buy_ticks = 0
-            u64 final_sell_ticks = 0
+            double tolerance = target * DBL_EPSILON * 4.0
+            double remaining = target
+            double consumed
+            double available
+            double buy_notional = 0.0
+            double sell_notional = 0.0
             u64 i
         for i in range(self._asks_data.num_levels):
-            cum_ask_lots += self._asks.at(i).lots
-            if cum_ask_lots >= target_lots:
-                final_buy_ticks = self._asks.at(i).ticks
+            available = convert_size_from_lot(self._asks.at(i).lots, self._lot_size)
+            consumed = available if available < remaining else remaining
+            buy_notional += <double>self._asks.at(i).ticks * consumed
+            remaining -= consumed
+            if remaining == 0.0:
                 break
+        if remaining > tolerance:
+            return INFINITY
+        remaining = target
         for i in range(self._bids_data.num_levels):
-            cum_bid_lots += self._bids.at(i).lots
-            if cum_bid_lots >= target_lots:
-                final_sell_ticks = self._bids.at(i).ticks
+            available = convert_size_from_lot(self._bids.at(i).lots, self._lot_size)
+            consumed = available if available < remaining else remaining
+            sell_notional += <double>self._bids.at(i).ticks * consumed
+            remaining -= consumed
+            if remaining == 0.0:
                 break
-        if final_buy_ticks == 0 or final_sell_ticks == 0:
-            return INFINITY_DOUBLE
-        return convert_price_from_tick((final_buy_ticks + final_sell_ticks) // 2, self._tick_size)
+        if remaining > tolerance:
+            return INFINITY
+        return (buy_notional + sell_notional) * self._tick_size / (2.0 * target)
 
     cdef inline double get_price_impact(self, double size, bint is_buy, bint is_base_currency):
         self._ensure_not_empty()

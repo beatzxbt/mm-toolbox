@@ -798,6 +798,9 @@ class TestOrderbookIntegrationAndEdgeCases:
 
         best_bid, best_ask = ob.get_bbo()
         assert best_ask.price == 100.004  # Should be new best ask
+        # The new ask shares tick 10000 with the old best bid. Cross cleanup
+        # removes that bid, matching the native engine's normalized-tick policy.
+        assert best_bid.price == 99.99
 
         # Update 3: Delete some levels
         del_updates = [
@@ -806,7 +809,7 @@ class TestOrderbookIntegrationAndEdgeCases:
         ]
         ob.consume_deltas(asks=[del_updates[1]], bids=[del_updates[0]])
 
-        assert len(ob._bids) == 2
+        assert len(ob._bids) == 1
         assert 9999 not in ob._bids
         assert 10002 not in ob._asks
 

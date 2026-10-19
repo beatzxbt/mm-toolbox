@@ -58,7 +58,7 @@ class TestEmptyOrderbookBoundaries:
             book.get_bbo_spread()
 
     def test_snapshot_with_zero_levels(self):
-        """Given snapshot with only deletion markers, When consumed, Then retains zero-size levels."""
+        """Snapshot deletion markers do not create executable depth."""
         book = _mk_book(num_levels=64)
 
         # Create snapshots with only deletion markers (size=0, norders=0)
@@ -67,13 +67,10 @@ class TestEmptyOrderbookBoundaries:
 
         book.consume_snapshot(empty_asks, empty_bids)
 
-        # Orderbook retains zero-size levels from snapshots
         bids = book.get_bids_numpy()
         asks = book.get_asks_numpy()
-        assert len(bids) == 1
-        assert len(asks) == 1
-        assert bids["size"][0] == 0.0
-        assert asks["size"][0] == 0.0
+        assert len(bids) == 0
+        assert len(asks) == 0
 
     def test_successive_deletions_to_empty_state(self):
         """Given populated book, When all levels deleted one-by-one, Then book is empty."""
@@ -437,11 +434,11 @@ class TestPathologicalDataBoundaries:
         book.consume_snapshot(asks, bids)
 
         asks_arr = book.get_asks_numpy()
-        # Should handle duplicates (last one wins or aggregate)
-        assert len(asks_arr) > 0
+        assert list(asks_arr["price"]) == [100.0, 100.01]
+        assert list(asks_arr["size"]) == [2.0, 1.0]
 
     def test_all_zero_sizes_in_snapshot(self):
-        """Given snapshot with all deletion markers, When consumed, Then retains zero-size levels."""
+        """All-zero snapshot entries delete levels rather than retain ghost depth."""
         book = _mk_book(num_levels=64)
 
         # All zero sizes
@@ -450,14 +447,10 @@ class TestPathologicalDataBoundaries:
 
         book.consume_snapshot(asks, bids)
 
-        # Orderbook retains zero-size levels from snapshots
         bids_arr = book.get_bids_numpy()
         asks_arr = book.get_asks_numpy()
-        assert len(bids_arr) == 1
-        assert len(asks_arr) == 2
-        # All sizes should be zero
-        assert all(bids_arr["size"] == 0.0)
-        assert all(asks_arr["size"] == 0.0)
+        assert len(bids_arr) == 0
+        assert len(asks_arr) == 0
 
     def test_extreme_price_values(self, pathological_data):
         """Given large tick-representable prices, When consumed, Then handles correctly."""

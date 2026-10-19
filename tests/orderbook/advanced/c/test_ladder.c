@@ -547,7 +547,77 @@ static MunitResult test_apply_sorted_deltas_wrapped_head(const MunitParameter pa
     return MUNIT_OK;
 }
 
+/** @test Ascending duplicates use the final quantity for existing and new ticks. */
+static MunitResult test_apply_sorted_deltas_duplicate_ticks(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
+    OrderbookEntry levels[6];
+    OrderbookEntry scratch[6];
+    OrderbookEntry updates[] = {
+        make_entry(99.0, 5.0, 5),
+        make_entry(99.0, 0.0, 0),
+        make_entry(100.0, 2.0, 2),
+        make_entry(100.0, 7.0, 7),
+        make_entry(101.0, 9.0, 9),
+        make_entry(101.0, 0.0, 0),
+        make_entry(102.0, 0.0, 0),
+        make_entry(102.0, 8.0, 8),
+    };
+    OrderbookLadderData ladder = {
+        .num_levels = 3,
+        .max_levels = 6,
+        .levels = levels,
+        .head = 4,
+        .is_price_ascending = 1
+    };
+    set_entry(&ladder, 0, 100.0);
+    set_entry(&ladder, 1, 101.0);
+    set_entry(&ladder, 2, 103.0);
+
+    c_ladder_apply_sorted_deltas(&ladder, updates, 8, scratch);
+    munit_assert_uint64(ladder.num_levels, ==, 3);
+    munit_assert_uint64(c_ladder_at(&ladder, 0)->ticks, ==, PRICE_TO_TICKS(100.0));
+    munit_assert_uint64(c_ladder_at(&ladder, 0)->lots, ==, SIZE_TO_LOTS(7.0));
+    munit_assert_uint64(c_ladder_at(&ladder, 0)->norders, ==, 7);
+    munit_assert_uint64(c_ladder_at(&ladder, 1)->ticks, ==, PRICE_TO_TICKS(102.0));
+    munit_assert_uint64(c_ladder_at(&ladder, 1)->lots, ==, SIZE_TO_LOTS(8.0));
+    munit_assert_uint64(c_ladder_at(&ladder, 2)->ticks, ==, PRICE_TO_TICKS(103.0));
+    return MUNIT_OK;
+}
+
+/** @test Descending duplicate insertion cannot consume capacity before its deletion. */
+static MunitResult test_apply_sorted_deltas_duplicate_ticks_descending(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
+    OrderbookEntry levels[3];
+    OrderbookEntry scratch[3];
+    OrderbookEntry updates[] = {
+        make_entry(105.0, 6.0, 6),
+        make_entry(105.0, 0.0, 0),
+        make_entry(102.0, 2.0, 2),
+        make_entry(102.0, 4.0, 4),
+        make_entry(101.0, 3.0, 3),
+        make_entry(101.0, 0.0, 0),
+    };
+    OrderbookLadderData ladder = {
+        .num_levels = 3,
+        .max_levels = 3,
+        .levels = levels,
+        .head = 0,
+        .is_price_ascending = 0
+    };
+    set_entry(&ladder, 0, 102.0);
+    set_entry(&ladder, 1, 101.0);
+    set_entry(&ladder, 2, 100.0);
+
+    c_ladder_apply_sorted_deltas(&ladder, updates, 6, scratch);
+    munit_assert_uint64(ladder.num_levels, ==, 2);
+    munit_assert_uint64(c_ladder_at(&ladder, 0)->ticks, ==, PRICE_TO_TICKS(102.0));
+    munit_assert_uint64(c_ladder_at(&ladder, 0)->lots, ==, SIZE_TO_LOTS(4.0));
+    munit_assert_uint64(c_ladder_at(&ladder, 0)->norders, ==, 4);
+    munit_assert_uint64(c_ladder_at(&ladder, 1)->ticks, ==, PRICE_TO_TICKS(100.0));
+    return MUNIT_OK;
+}
+
 static MunitTest ladder_tests[] = {
+    { "/apply_sorted_deltas/duplicate_ticks", test_apply_sorted_deltas_duplicate_ticks, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+    { "/apply_sorted_deltas/duplicate_ticks_descending", test_apply_sorted_deltas_duplicate_ticks_descending, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/roll_right/at_start", test_roll_right_at_start, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/roll_right/in_middle", test_roll_right_in_middle, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/roll_right/uses_prefix_shift", test_roll_right_uses_prefix_shift, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
