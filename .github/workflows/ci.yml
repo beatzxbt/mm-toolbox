@@ -12,55 +12,8 @@ concurrency:
 
 jobs:
   test:
-    name: Test on Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.12", "3.13", "3.14"]
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v5
-      with:
-        version: "latest"
-        enable-cache: true
-
-    - name: Install Python ${{ matrix.python-version }}
-      run: uv python install ${{ matrix.python-version }}
-
-    - name: Install dependencies
-      run: |
-        uv sync --all-groups --no-install-project --python ${{ matrix.python-version }}
-
-    - name: Build Cython extensions
-      run: |
-        make build-lib
-
-    - name: Run tests
-      run: |
-        make test-all
-
-    - name: Generate coverage data
-      run: |
-        make remove-build-lib
-        CYTHON_TRACE=1 uv run python setup.py build_ext --inplace --parallel $(nproc 2>/dev/null || uv run python -c 'import os;print(os.cpu_count())')
-        uv run pytest --cov=src --cov-report=xml --cov-report=term-missing
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v5
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        fail_ci_if_error: false
-
-    - name: Run code quality checks
-      run: |
-        uv run ruff format --check .
-        uv run ruff check .
-        make typecheck
+    uses: ./.github/workflows/validate.yml
+    secrets: inherit
 
   build-wheel:
     name: Build wheel
@@ -83,7 +36,7 @@ jobs:
 
     - name: Build wheel
       run: |
-        make wheel
+        make dist
 
     - name: Check distribution
       run: |
@@ -114,8 +67,8 @@ jobs:
     env:
       CIBW_BUILD: "cp312-* cp313-* cp314-*"
       CIBW_SKIP: "*-win*"
-      CIBW_ARCHS_LINUX: "x86_64 i686 aarch64 ppc64le s390x"
-      CIBW_ARCHS_MACOS: "x86_64 arm64 universal2"
+      CIBW_ARCHS_LINUX: "x86_64 aarch64"
+      CIBW_ARCHS_MACOS: "arm64"
 
     steps:
     - name: Checkout code

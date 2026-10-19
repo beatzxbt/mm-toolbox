@@ -14,7 +14,8 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Financial and Insurance Industry",
     "Natural Language :: English",
-    "Operating System :: OS Independent",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.12",
@@ -55,8 +56,8 @@ where = ["src"]
 [tool.cibuildwheel]
 build = "cp312-* cp313-* cp314-*"
 skip = "*-win* *-manylinux_i686"
-test-command = "pytest --maxfail=1 --timeout=300 {project}/tests"
-test-requires = ["pytest", "pytest-asyncio", "pytest-timeout", "websockets"]
+test-command = "python {project}/scripts/test_wheel.py {project}"
+test-requires = ["pytest", "pytest-asyncio", "pytest-timeout", "websockets", "Cython>=3.1.4", "numpy", "setuptools>=75"]
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64", "aarch64"]
@@ -75,6 +76,7 @@ dev = [
     "setuptools>=80.9.0",
     "pytest-asyncio>=1.1.0",
     "pytest-cov>=6.0",
+    "pytest-timeout>=2.3",
     "websockets>=12.0",
 ]
 build = [

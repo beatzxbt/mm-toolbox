@@ -1,6 +1,6 @@
 .PHONY: help format typecheck fix test-py test-c test-all test-coverage sync build rebuild remove-build clean \
         wheel wheel-pep517 wheel-check sdist dist check-dist clean-dist upload-test \
-        macos-wheels linux-wheels-x86_64 linux-wheels-aarch64 linux-wheels wheels %
+        macos-wheels linux-wheels-x86_64 linux-wheels-aarch64 linux-wheels wheels build-lib build-test remove-build-lib remove-build-tests
 
 .DEFAULT_GOAL := help
 
@@ -22,13 +22,14 @@ test-py: ## Run tests
 test-c: ## Run C unit tests
 	$(MAKE) -C tests/orderbook/advanced/c test
 
-test-all: ## Run all tests (C + Python)
-	$(MAKE) test-c test-py
+test-all: build ## Build and run all tests (C + Python)
+	$(MAKE) test-c
+	$(MAKE) test-py TEST_FLAGS="$(TEST_FLAGS) --require-native"
 
-test-coverage: ## Run tests with Cython-aware coverage (rebuild, test, clean)
+test-coverage: build-test ## Run tests with Cython-aware coverage (rebuild, test, clean)
 	$(MAKE) remove-build-lib
 	CYTHON_TRACE=1 uv run python setup.py build_ext --inplace --parallel $$(uv run python -c 'import os;print(max(1,(os.cpu_count() or 2)-1))')
-	@PYTHONPATH=src uv run pytest --cov=src --cov-report=term-missing --cov-report=html; \
+	@COVERAGE_CORE=ctrace PYTHONPATH=src uv run pytest --require-native --cov=src --cov-report=term-missing --cov-report=html --cov-report=xml; \
 	pytest_exit=$$?; \
 	find ./src -name "*.c" -type f | while read f; do [ -f "$${f%.c}.pyx" ] && rm -f "$$f"; done; \
 	exit $$pytest_exit
@@ -40,17 +41,14 @@ sync: ## Re‑lock and install latest versions
 build-lib:
 	uv run python setup.py build_ext --inplace --parallel $$(uv run python -c 'import os;print(max(1,(os.cpu_count() or 2)-1))')
 
-build-test:
-	$(MAKE) -C tests/orderbook/advanced/c test
+build-test: build-lib
 	cd tests && uv run python setup.py build_ext --inplace --parallel $$(uv run python -c 'import os;print(max(1,(os.cpu_count() or 2)-1))')
 
-build: ## Build all Cython extensions
-	$(MAKE) build-lib build-test
+build: build-test ## Build all Cython extensions
 
-clean: ## Remove all caches (pycache, pytest, ruff, uv, cibw)
-	find . -type d -name "__pycache__" -delete
+clean: ## Remove repository caches without touching dependency environments
+	find src tests benchmarks examples scripts -type d -name "__pycache__" -prune -exec rm -rf {} +
 	rm -rf .pytest_cache/ .ruff_cache/ htmlcov/ .cibw-cache/
-	uv cache clean
 
 remove-build-lib:
 	rm -rf build/ *.egg-info/
@@ -122,10 +120,6 @@ linux-wheels: ## Build all Linux wheels in parallel (run with: make -j2 linux-wh
 
 wheels: ## Build all wheels (macOS + Linux)
 	$(MAKE) macos-wheels linux-wheels
-
-# Pattern rule so additional args do not trigger "No rule to make target"
-%:
-	@:
 
 help: ## Display this help message
 	@echo 'Usage:'

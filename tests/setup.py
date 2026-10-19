@@ -16,22 +16,29 @@ from Cython.Build import cythonize
 import numpy as np
 import os
 import sys
+from pathlib import Path
 
-# Add src to path so we can import the library
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# Build against the installed wheel when validating distribution artifacts.
+if os.environ.get("MM_TOOLBOX_TEST_INSTALLED") == "1":
+    import mm_toolbox
+
+    source_root = Path(mm_toolbox.__file__).resolve().parent.parent
+else:
+    source_root = Path(__file__).resolve().parent.parent / "src"
+    sys.path.insert(0, str(source_root))
 
 # Compiler flags (match main library for consistency)
-EXTRA_COMPILE_ARGS = ["-O3", "-march=native"]
+EXTRA_COMPILE_ARGS = ["-O3"]
 EXTRA_LINK_ARGS = []
 
 ORDERBOOK_ADVANCED_INCLUDE_DIRS = [
     np.get_include(),
-    "../src/mm_toolbox/orderbook/advanced",
-    "../src/mm_toolbox/orderbook/advanced/c",
-    "../src/mm_toolbox/orderbook/advanced/enum",
-    "../src/mm_toolbox/orderbook/advanced/level",
-    "../src/mm_toolbox/orderbook/advanced/ladder",
-    "../src",
+    str(source_root / "mm_toolbox/orderbook/advanced"),
+    str(source_root / "mm_toolbox/orderbook/advanced/c"),
+    str(source_root / "mm_toolbox/orderbook/advanced/enum"),
+    str(source_root / "mm_toolbox/orderbook/advanced/level"),
+    str(source_root / "mm_toolbox/orderbook/advanced/ladder"),
+    str(source_root),
     ".",  # Current dir (tests/) for engine_helpers.pxd
     "orderbook/advanced/engine",
 ]
@@ -69,7 +76,7 @@ orderbook_advanced_extensions = [
 
 WEBSOCKET_INCLUDE_DIRS = [
     np.get_include(),
-    "../src",
+    str(source_root),
     ".",
 ]
 
@@ -85,7 +92,7 @@ websocket_extensions = [
 
 RINGBUFFER_INCLUDE_DIRS = [
     np.get_include(),
-    "../src",
+    str(source_root),
     ".",
     "ringbuffer",
 ]
@@ -104,6 +111,14 @@ all_extensions: list[Extension] = []
 all_extensions.extend(orderbook_advanced_extensions)
 all_extensions.extend(websocket_extensions)
 all_extensions.extend(ringbuffer_extensions)
+all_extensions.append(
+    Extension(
+        name="cython_test_tema_clock",
+        sources=["moving_average/tema_clock.pyx"],
+        include_dirs=[np.get_include(), str(source_root), "."],
+        extra_compile_args=EXTRA_COMPILE_ARGS,
+    )
+)
 
 # Collect all .pyx source files from extensions before cythonization
 pyx_files: list[str] = []

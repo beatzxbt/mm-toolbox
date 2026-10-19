@@ -50,7 +50,12 @@ def get_extension(name, sources, include_dirs=None):
         extra_link_args=EXTRA_LINK_ARGS,
     )
     if CYTHON_TRACE:
-        kwargs["define_macros"] = [("CYTHON_TRACE", "1")]
+        # Coverage plugins require the legacy C trace hooks on Python 3.13+.
+        # https://docs.cython.org/en/latest/src/userguide/source_files_and_compilation.html
+        kwargs["define_macros"] = [
+            ("CYTHON_TRACE", "1"),
+            ("CYTHON_USE_SYS_MONITORING", "0"),
+        ]
     return Extension(**kwargs)
 
 
@@ -450,6 +455,7 @@ setup(
     package_dir={"": "src"},
     package_data={
         "mm_toolbox": [
+            "py.typed",
             "**/*.pxd",
             "**/*.pyi",
         ]

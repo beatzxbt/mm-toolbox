@@ -1,4 +1,7 @@
 import time
+import importlib
+import sys
+from pathlib import Path
 from collections.abc import Callable
 
 import pytest
@@ -12,6 +15,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     Registers ``--run-live`` and ``--live-timeout`` so that network-dependent
     tests can be skipped by default and enabled on demand.
     """
+    parser.addoption(
+        "--require-native",
+        action="store_true",
+        help="Fail if any configured Cython test extension cannot be imported",
+    )
     try:
         parser.addoption(
             "--run-live",
@@ -45,6 +53,23 @@ def pytest_configure(config: pytest.Config) -> None:
     Returns:
         None
     """
+    if config.getoption("--require-native"):
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        for module in (
+            "cython_test_level",
+            "cython_test_ladder",
+            "cython_test_core",
+            "cython_test_wrapper",
+            "cython_test_websocket_connection",
+            "cython_test_memory",
+            "cython_test_tema_clock",
+        ):
+            try:
+                importlib.import_module(module)
+            except (ImportError, ValueError) as exc:
+                raise pytest.UsageError(
+                    f"Required native test module {module} is unavailable: {exc}"
+                ) from exc
     config.addinivalue_line(
         "markers", "live: mark test as requiring live internet connection"
     )
