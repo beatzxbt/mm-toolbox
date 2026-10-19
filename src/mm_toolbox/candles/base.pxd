@@ -6,12 +6,17 @@ cdef class BaseCandles:
         GenericRingBuffer _ringbuffer
         object candle_push_event
         bint _store_trades
+        object _pending_candles
+        unsigned long long _pending_dropped
+        double _last_trade_time_ms
 
         double __cum_volume
         double __total_size
 
     cdef inline double  calculate_vwap(self, double price, double size) noexcept nogil
     cdef inline bint    is_stale_trade(self, double time_ms) 
+    cdef void           _reset_aggregation(self)
+    cdef inline void    validate_trade(self, double price, double size)
     cdef inline void    insert_and_reset_candle(self)
     cpdef void          initialize(self, list[object] trades)
     cpdef void          process_trade(self, object trade)

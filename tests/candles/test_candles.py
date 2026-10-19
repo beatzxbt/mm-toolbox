@@ -71,7 +71,13 @@ class TestCandlesModuleIntegration:
             for trade in trades:
                 candle_obj.process_trade(trade)
 
-        assert True
+        for candle_obj in candles.values():
+            buckets = [candle_obj[i] for i in range(len(candle_obj))] + [
+                candle_obj.latest_candle
+            ]
+            assert sum(c.num_trades for c in buckets) == 5
+            assert sum(c.buy_size for c in buckets) == pytest.approx(3.3)
+            assert sum(c.sell_size for c in buckets) == pytest.approx(3.2)
 
     def test_candle_specialization_behavior(self):
         """Given divergent trigger thresholds, each candle type fires at its own point."""
@@ -99,7 +105,11 @@ class TestCandlesModuleIntegration:
             for trade in trades:
                 candle_obj.process_trade(trade)
 
-        assert True
+        assert [len(c) for _, c in candle_types] == [1, 0, 1, 1]
+        assert tick_candles[0].num_trades == 3
+        assert time_candles[0].num_trades == 2
+        assert price_candles[0].num_trades == 4
+        assert volume_candles.latest_candle.buy_size == 3.5
 
     def test_mixed_trade_patterns_across_types(self):
         """Given buy-only, sell-only, and alternating patterns, all types survive."""
@@ -145,7 +155,13 @@ class TestCandlesModuleIntegration:
                 for trade in pattern:
                     candle_obj.process_trade(trade)
 
-        assert True
+        for candle_obj in candle_types:
+            buckets = [candle_obj[i] for i in range(len(candle_obj))] + [
+                candle_obj.latest_candle
+            ]
+            assert sum(c.num_trades for c in buckets) == 10
+            assert sum(c.buy_size for c in buckets) == 6.0
+            assert sum(c.sell_size for c in buckets) == 4.0
 
 
 class TestCandlesAsyncIntegration:
@@ -171,6 +187,9 @@ class TestCandlesAsyncIntegration:
             for candle_obj in candles:
                 candle_obj.process_trade(trade)
 
+            for candle_obj in candles:
+                assert candle_obj.latest_candle.num_trades == 1
+                assert candle_obj.latest_candle.buy_volume == 100.0
             return True
 
         result = self.loop.run_until_complete(test_async())
@@ -198,7 +217,10 @@ class TestCandlesAsyncIntegration:
         for candle_obj in candle_instances:
             candle_obj.process_trade(trade)
 
-        assert True
+        for candle_obj in candle_instances:
+            assert candle_obj.latest_candle.num_trades == 1
+            assert candle_obj.latest_candle.close_price == 100.0
+            assert candle_obj.latest_candle.buy_size == 1.0
 
 
 if __name__ == "__main__":

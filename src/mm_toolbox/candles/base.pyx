@@ -13,11 +13,13 @@ Provides:
 # cython: wraparound=False
 
 import asyncio
+from collections import deque
 from abc import ABC, abstractmethod
 from typing import final, AsyncIterator, Self
 from msgspec import Struct
 
 from libc.stdint cimport uint64_t as u64
+from libc.math cimport isfinite, INFINITY
 
 from mm_toolbox.ringbuffer.generic cimport GenericRingBuffer
 
@@ -151,7 +153,9 @@ cdef class BaseCandles:
     def __cinit__(self):
         """Lightweight C-level construction."""
         self.latest_candle = Candle.empty()
-        self.candle_push_event = None
+        self.candle_push_event = []
+        self._last_trade_time_ms = -INFINITY
+        self._pending_dropped = 0
 
         # Reserved for VWAP, do not modify
         self.__cum_volume = 0.0
@@ -171,6 +175,7 @@ cdef class BaseCandles:
             raise ValueError(f"Invalid number of candles; expected >1 but got {num_candles}")
         self._ringbuffer = GenericRingBuffer(max_capacity=num_candles)
         self._store_trades = store_trades
+        self._pending_candles = deque(maxlen=num_candles)
 
     cdef inline double calculate_vwap(self, double price, double size) noexcept nogil:
         """Calculate the running VWAP.
@@ -197,7 +202,21 @@ cdef class BaseCandles:
         Returns:
             bool: True if the trade is stale and should be skipped.
         """
-        return time_ms < self.latest_candle.close_time_ms
+        if not isfinite(time_ms):
+            raise ValueError("Trade timestamp must be finite")
+        if time_ms < self._last_trade_time_ms:
+            return True
+        self._last_trade_time_ms = time_ms
+        return False
+
+    cdef inline void validate_trade(self, double price, double size):
+        """Reject nonfinite or negative trade quantities before changing state."""
+        if not isfinite(price) or not isfinite(size) or size < 0.0 or not isfinite(price * size):
+            raise ValueError("Trade price and size must be finite, with nonnegative size")
+
+    cdef void _reset_aggregation(self):
+        """Reset subclass trigger state when replaying a fresh history."""
+        pass
 
     cdef inline void insert_and_reset_candle(self):
         """Close the current candle, store it, and reset state.
@@ -210,20 +229,18 @@ cdef class BaseCandles:
         )
         self._ringbuffer.insert(closed_candle)
 
-        cdef object event = self.candle_push_event
         cdef object future
-        if isinstance(event, list):
-            for future in event:
-                if isinstance(future, asyncio.Future) and not future.done():
-                    future.set_result(closed_candle)
-            self.candle_push_event = closed_candle
-        elif isinstance(event, asyncio.Future):
-            if not event.done():
-                event.set_result(closed_candle)
-            self.candle_push_event = closed_candle
-        else:
-            self.candle_push_event = closed_candle
-        
+        cdef bint delivered = False
+        for future in self.candle_push_event:
+            if not future.done():
+                future.set_result(closed_candle)
+                delivered = True
+        self.candle_push_event = []
+        if not delivered:
+            if len(self._pending_candles) == self._pending_candles.maxlen:
+                self._pending_dropped += 1
+            self._pending_candles.append(closed_candle)
+
         self.latest_candle.reset()
         self.__cum_volume = 0.0
         self.__total_size = 0.0
@@ -246,6 +263,13 @@ cdef class BaseCandles:
 
         self.latest_candle.reset()
         self._ringbuffer.clear()
+        self._pending_candles.clear()
+        self._pending_dropped = 0
+        for future in self.candle_push_event:
+            future.cancel()
+        self.candle_push_event = []
+        self._last_trade_time_ms = -INFINITY
+        self._reset_aggregation()
         self.__cum_volume = 0.0
         self.__total_size = 0.0
 
@@ -310,25 +334,17 @@ cdef class BaseCandles:
         Returns:
             Candle: The next closed candle.
         """
-        cdef object event = self.candle_push_event
         cdef object future
-        cdef object new_candle
-
-        if isinstance(event, Candle):
-            self.candle_push_event = None
-            return event
-
+        if self._pending_dropped:
+            dropped = self._pending_dropped
+            self._pending_dropped = 0
+            raise RuntimeError(f"Candle consumer overrun: {dropped} pending candles were dropped")
+        if self._pending_candles:
+            return self._pending_candles.popleft()
         future = asyncio.get_running_loop().create_future()
-        if event is None:
-            self.candle_push_event = [future]
-        elif isinstance(event, list):
-            event.append(future)
-        elif isinstance(event, asyncio.Future):
-            # Convert single pending future to a list
-            self.candle_push_event = [event, future]
-        else:
-            self.candle_push_event = [future]
-
-        await future
-        new_candle = future.result()
-        return new_candle
+        self.candle_push_event.append(future)
+        try:
+            return await future
+        finally:
+            if future in self.candle_push_event:
+                self.candle_push_event.remove(future)
