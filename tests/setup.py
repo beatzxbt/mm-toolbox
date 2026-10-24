@@ -43,6 +43,14 @@ ORDERBOOK_ADVANCED_INCLUDE_DIRS = [
     "orderbook/advanced/engine",
 ]
 
+# These tests call the C ladder API directly rather than through a Cython
+# capsule. Link its implementation and helper dependency into each extension;
+# extension modules cannot rely on symbols exported by another Python module.
+ORDERBOOK_LADDER_SOURCES = [
+    str(source_root / "mm_toolbox/orderbook/advanced/c/orderbook_ladder.c"),
+    str(source_root / "mm_toolbox/orderbook/advanced/c/orderbook_helpers.c"),
+]
+
 orderbook_advanced_extensions = [
     Extension(
         name="cython_test_level",
@@ -53,14 +61,17 @@ orderbook_advanced_extensions = [
     ),
     Extension(
         name="cython_test_ladder",
-        sources=["orderbook/advanced/engine/test_ladder.pyx"],
+        sources=[
+            "orderbook/advanced/engine/test_ladder.pyx",
+            *ORDERBOOK_LADDER_SOURCES,
+        ],
         include_dirs=ORDERBOOK_ADVANCED_INCLUDE_DIRS,
         extra_compile_args=EXTRA_COMPILE_ARGS,
         extra_link_args=EXTRA_LINK_ARGS,
     ),
     Extension(
         name="cython_test_core",
-        sources=["orderbook/advanced/engine/test_core.pyx"],
+        sources=["orderbook/advanced/engine/test_core.pyx", *ORDERBOOK_LADDER_SOURCES],
         include_dirs=ORDERBOOK_ADVANCED_INCLUDE_DIRS,
         extra_compile_args=EXTRA_COMPILE_ARGS,
         extra_link_args=EXTRA_LINK_ARGS,
@@ -150,6 +161,7 @@ setup(
     cmdclass={"build_ext": build_ext},
     ext_modules=cythonize(
         all_extensions,
+        include_path=[str(source_root)],
         compiler_directives={
             "language_level": "3",
             "boundscheck": False,
