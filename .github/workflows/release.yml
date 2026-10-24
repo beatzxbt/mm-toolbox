@@ -19,26 +19,92 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release-ref:
+    name: Validate release tag and source SHA
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout exact workflow SHA
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.sha }}
+        fetch-depth: 0
+
+    - name: Match tag, project version, and checked-out SHA
+      env:
+        RELEASE_REF_NAME: ${{ github.ref_name }}
+        RELEASE_REF_TYPE: ${{ github.ref_type }}
+        RELEASE_SHA: ${{ github.sha }}
+      run: |
+        python - <<'PY'
+        import os
+        import subprocess
+        import tomllib
+        from pathlib import Path
+
+        version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+        expected_tag = f"v{version}"
+        ref_name = os.environ["RELEASE_REF_NAME"]
+        ref_type = os.environ["RELEASE_REF_TYPE"]
+        expected_sha = os.environ["RELEASE_SHA"].lower()
+
+        if ref_type != "tag" or ref_name != expected_tag:
+            raise SystemExit(
+                f"Release must run from tag {expected_tag}; got {ref_type} {ref_name}."
+            )
+
+        head_sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], text=True
+        ).strip().lower()
+        tag_sha = subprocess.check_output(
+            ["git", "rev-parse", f"refs/tags/{expected_tag}^{{commit}}"],
+            text=True,
+        ).strip().lower()
+
+        if head_sha != expected_sha:
+            raise SystemExit(f"Checkout SHA {head_sha} does not match workflow SHA {expected_sha}.")
+        if tag_sha != expected_sha:
+            raise SystemExit(
+                f"Tag {expected_tag} resolves to {tag_sha}, "
+                f"not workflow SHA {expected_sha}."
+            )
+
+        print(f"Validated {expected_tag} at {expected_sha}.")
+        PY
+
   validate:
+    needs: release-ref
     uses: ./.github/workflows/validate.yml
     secrets: inherit
 
   build-wheels:
     needs: validate
-    name: Build wheels on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Build wheels for ${{ matrix.platform.name }} CPython cp${{ matrix['python-tag'] }}
+    runs-on: ${{ matrix.platform.runner }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        platform:
+        - runner: ubuntu-latest
+          arch: x86_64
+          name: linux-x86_64
+        - runner: ubuntu-24.04-arm
+          arch: aarch64
+          name: linux-aarch64
+        - runner: macos-latest
+          arch: arm64
+          name: macos-arm64
+        python-tag: ["312", "313", "314", "315"]
     env:
-      CIBW_BUILD: "cp312-* cp313-* cp314-*"
+      CIBW_BUILD: "cp${{ matrix['python-tag'] }}-*"
       CIBW_SKIP: "*-win*"
-      CIBW_ARCHS_LINUX: "x86_64 aarch64"
-      CIBW_ARCHS_MACOS: "arm64"
+      CIBW_ARCHS_LINUX: ${{ matrix.platform.arch }}
+      CIBW_ARCHS_MACOS: ${{ matrix.platform.arch }}
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.sha }}
 
     - name: Install uv
       uses: astral-sh/setup-uv@v5
@@ -48,11 +114,7 @@ jobs:
 
     - name: Install cibuildwheel
       run: |
-        uv tool install cibuildwheel
-
-    - name: Set up QEMU (Linux cross-arch builds)
-      if: runner.os == 'Linux'
-      uses: docker/setup-qemu-action@v3
+        uv tool install 'cibuildwheel>=4.3.4,<5'
 
     - name: Print Linux wheel targets
       if: runner.os == 'Linux'
@@ -71,7 +133,7 @@ jobs:
     - name: Upload wheel artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: wheels-${{ matrix.os }}
+        name: wheels-${{ matrix.platform.name }}-cp${{ matrix['python-tag'] }}
         path: wheelhouse/*.whl
         retention-days: 14
 
@@ -83,6 +145,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.sha }}
 
     - name: Install uv
       uses: astral-sh/setup-uv@v5
@@ -121,6 +185,11 @@ jobs:
       url: https://test.pypi.org/p/mm-toolbox
     
     steps:
+    - name: Checkout exact workflow SHA
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.sha }}
+
     - name: Download artifacts
       uses: actions/download-artifact@v4
       with:
@@ -140,6 +209,12 @@ jobs:
         ls dist/*.whl >/dev/null 2>&1 || { echo "No wheel artifacts found in dist/."; exit 1; }
         ls dist/*.tar.gz >/dev/null 2>&1 || { echo "No sdist artifact found in dist/."; exit 1; }
         ls dist/*manylinux*aarch64*.whl >/dev/null 2>&1 || { echo "Missing Linux aarch64 manylinux wheel."; exit 1; }
+
+    - name: Validate release artifact versions
+      env:
+        RELEASE_VERSION: ${{ github.ref_name }}
+      run: |
+        python scripts/validate_release_artifacts.py --version "${RELEASE_VERSION#v}"
     
     - name: Publish to TestPyPI
       uses: pypa/gh-action-pypi-publish@release/v1
@@ -159,6 +234,11 @@ jobs:
       url: https://pypi.org/p/mm-toolbox
     
     steps:
+    - name: Checkout exact workflow SHA
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.sha }}
+
     - name: Download artifacts
       uses: actions/download-artifact@v4
       with:
@@ -178,6 +258,12 @@ jobs:
         ls dist/*.whl >/dev/null 2>&1 || { echo "No wheel artifacts found in dist/."; exit 1; }
         ls dist/*.tar.gz >/dev/null 2>&1 || { echo "No sdist artifact found in dist/."; exit 1; }
         ls dist/*manylinux*aarch64*.whl >/dev/null 2>&1 || { echo "Missing Linux aarch64 manylinux wheel."; exit 1; }
+
+    - name: Validate release artifact versions
+      env:
+        RELEASE_VERSION: ${{ github.ref_name }}
+      run: |
+        python scripts/validate_release_artifacts.py --version "${RELEASE_VERSION#v}"
     
     - name: Publish to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1

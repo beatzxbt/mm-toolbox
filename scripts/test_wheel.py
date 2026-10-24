@@ -17,6 +17,11 @@ def main() -> None:
         # Preserve pytest settings and markers while keeping imports outside
         # the source checkout. Native compilation still uses installed headers.
         shutil.copy2(project / "pyproject.toml", Path(directory) / "pyproject.toml")
+        shutil.copytree(
+            project / "scripts",
+            Path(directory) / "scripts",
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
         tests = Path(directory) / "tests"
         shutil.copytree(
             project / "tests",
