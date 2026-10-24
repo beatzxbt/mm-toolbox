@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "beatzxbt", email = "121855680+beatzxbt@users.noreply.github.com" }
 ]
-requires-python = ">=3.12,<3.15"
+requires-python = ">=3.12,<3.16"
 license = "MIT"
 keywords = ["market making", "hft", "high-frequency trading", "trading", "cython", "performance"]
 classifiers = [
@@ -21,6 +21,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Programming Language :: Python :: Implementation :: CPython",
     "Topic :: Office/Business :: Financial :: Investment",
     "Topic :: Software Development :: Libraries :: Python Modules",
@@ -30,7 +31,9 @@ classifiers = [
 urls = { homepage = "https://github.com/beatzxbt/mm-toolbox", repository = "https://github.com/beatzxbt/mm-toolbox" }
 dependencies = [
     "numpy",
-    "picows",
+    # Cython extensions access picows object layouts directly. Keep the
+    # runtime version identical to the build dependency below.
+    "picows==2.3.1",
     "ciso8601",
     "msgspec",
     "aiohttp",
@@ -41,9 +44,9 @@ dependencies = [
 requires = [
     "setuptools>=75",
     "wheel",
-    "Cython>=3.1.4",
+    "Cython>=3.3.0",
     "numpy>=1.26",
-    "picows",
+    "picows==2.3.1",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -54,10 +57,10 @@ zip-safe = false
 where = ["src"]
 
 [tool.cibuildwheel]
-build = "cp312-* cp313-* cp314-*"
+build = "cp312-* cp313-* cp314-* cp315-*"
 skip = "*-win* *-manylinux_i686"
 test-command = "python {project}/scripts/test_wheel.py {project}"
-test-requires = ["pytest", "pytest-asyncio", "pytest-timeout", "websockets", "Cython>=3.1.4", "numpy", "setuptools>=75"]
+test-requires = ["pytest", "pytest-asyncio", "pytest-timeout", "websockets", "Cython>=3.3.0", "numpy", "setuptools>=75"]
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64", "aarch64"]
@@ -71,8 +74,8 @@ dev = [
     "ty>=0.0.7",
     "pytest>=9.0.2",
     "ruff>=0.14.9",
-    "cython>=3.1.4",
-    "uv>=0.8.8",
+    "cython>=3.3.0",
+    "uv>=0.13.4",
     "setuptools>=80.9.0",
     "pytest-asyncio>=1.1.0",
     "pytest-cov>=6.0",
@@ -82,7 +85,7 @@ dev = [
 build = [
     "build>=1.0.0",
     "twine>=5.0.0",
-    "cibuildwheel>=2.16.0",
+    "cibuildwheel>=4.3.4,<5",
 ]
 
 [tool.coverage.run]

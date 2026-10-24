@@ -224,7 +224,8 @@ class TestRealisticWorkflow:
     """End-to-end 1000-tick price stream."""
 
     @pytest.fixture(scope="class")
-    def price_stream(self) -> np.ndarray:
+    @classmethod
+    def price_stream(cls) -> np.ndarray:
         """A synthetic 1000-tick price series."""
         rng = np.random.default_rng(42)
         returns = rng.normal(loc=0.0, scale=0.01, size=1000)
@@ -266,7 +267,8 @@ class TestReferenceAccuracy:
     """Compare MA outputs to reference NumPy implementations."""
 
     @pytest.fixture(scope="class")
-    def price_stream(self) -> np.ndarray:
+    @classmethod
+    def price_stream(cls) -> np.ndarray:
         rng = np.random.default_rng(12345)
         returns = rng.normal(loc=0.0, scale=0.005, size=500)
         return (100.0 * np.exp(np.cumsum(returns))).astype(np.float64)
