@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 1.0.0b9 (Unreleased)
+## 1.0.0b9 (2026-10-24)
 
 ### Release hardening
 - Link native orderbook test extensions with their C implementations on Linux and remove the generated C test executable from version control.

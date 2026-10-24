@@ -60,7 +60,7 @@ To upgrade to the latest published pre-release:
 pip install --pre --upgrade mm-toolbox
 ```
 
-The b9 branch is unreleased; install from source to try its changes.
+Published beta versions are available with --pre; use the source installation below to build this branch.
 
 To install directly from the source, clone the repository and install the dependencies:
 ```bash

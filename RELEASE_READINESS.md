@@ -1,6 +1,6 @@
 # Public release readiness and hardening
 
-## Hardening status — 2026-10-19
+## Initial hardening status — 2026-10-19
 
 The fixes are implemented on `fix/b9-release-hardening` for review against
 `v1.0b9`. The supported contracts are lock-free overwrite-oldest SHM queues,
@@ -46,11 +46,13 @@ are retained as historical context for reviewing the changes.
 - Fixed the Linux native-test linkage failure by compiling the ladder and helper C sources into the test extensions that call them directly.
 - Removed the generated C test executable from version control.
 - Aligned picows build/runtime requirements at 2.3.1 and refreshed compiler/native dependencies; Cython 3.3.0 is now required.
-- Full Python 3.15.1 suite: **1,657 passed, eight live-network tests skipped**. Additional release-artifact validation and moving-average tests: **139 passed** after fixture cleanup.
+- Final Python 3.15.1 source and installed-wheel suites: **1,667 passed, eight live-network tests skipped**, including artifact-version regressions and fixture cleanup.
 - Fresh Python 3.14.8 coverage build with the updated lock: **1,657 passed, eight skipped**, **85.17%** aggregate coverage.
 - Local TLS 1.3 probes on Python 3.15 passed default certificate rejection, hostname verification, process-local test trust, all three WebSocket interfaces, and task/socket cleanup.
 - Release checks require the version tag, workflow SHA, checked-out source and wheel/sdist metadata to agree.
-- CI wheel jobs use native Linux x86-64/aarch64 and macOS arm64 runners, split by Python version; fresh remote validation remains pending.
+- [Remote CI passed](https://github.com/beatzxbt/mm-toolbox/actions/runs/40128764089) on Python 3.12–3.15 with **85.20%** coverage and all **20 wheels** across native Linux x86-64/aarch64 (glibc and musl) and macOS arm64.
+- Bounded follow-up validation passed 2.4 million native SHM insertions with sanitizer checks, plus 10,000 Python producer attachments across 100 mapping cycles; observed memory and file descriptors remained stable.
+- [PR #29](https://github.com/beatzxbt/mm-toolbox/pull/29) is merged into v1.0b9. Release publication is performed separately by the tag-validated workflow.
 
 ## Initial review at 02d239f
 
