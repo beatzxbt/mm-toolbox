@@ -1,4 +1,8 @@
-"""Type stubs for python.pyx - Python-facing advanced orderbook API."""
+"""Type stubs for the Python-facing advanced orderbook API.
+
+Provides PyAdvancedOrderbook signatures for struct, scalar BBO, and NumPy
+ingestion paths plus level export and price calculation accessors.
+"""
 
 from __future__ import annotations
 
@@ -18,8 +22,8 @@ class PyAdvancedOrderbook:
     PyOrderbookLevels) and the internal C structs.
 
     The orderbook maintains separate bid and ask sides, each with a fixed maximum
-    number of levels. Levels are stored internally using integer arithmetic (ticks
-    and lots) for precision and performance.
+    number of levels. Tick and lot values are derived from price and size during
+    core normalization and stored in compact internal entries.
     """
 
     def __init__(
@@ -35,9 +39,9 @@ class PyAdvancedOrderbook:
         Args:
             tick_size: Minimum price increment (must be > 0)
             lot_size: Minimum size increment (must be > 0)
-            num_levels: Maximum number of levels per side (must be > 0)
-            delta_sortedness: Expected sort order for delta updates (default: UNKNOWN)
-            snapshot_sortedness: Expected sort order for snapshot updates (default: UNKNOWN)
+            num_levels: Maximum number of levels per side (must be >= 4)
+            delta_sortedness: Expected delta order, or UNKNOWN for lazy inference.
+            snapshot_sortedness: Expected snapshot order, or UNKNOWN for lazy inference.
         """
         ...
 
@@ -71,6 +75,30 @@ class PyAdvancedOrderbook:
         Args:
             ask: PyOrderbookLevel for the best ask
             bid: PyOrderbookLevel for the best bid
+
+        Raises:
+            ValueError: If raw values are invalid or bid price is not below ask price.
+        """
+        ...
+
+    def consume_bbo_values(
+        self,
+        ask_price: float,
+        ask_size: float,
+        bid_price: float,
+        bid_size: float,
+        ask_norders: int = 1,
+        bid_norders: int = 1,
+    ) -> None:
+        """Update only the best bid and offer from scalar values.
+
+        This is the allocation-free Python path for top-of-book updates when
+        callers already have primitive price and size values. Prices and sizes
+        are normalized to derived ticks and lots before delegating to the core
+        BBO update path.
+
+        Raises:
+            ValueError: If raw values are invalid or bid price is not below ask price.
         """
         ...
 
@@ -87,6 +115,8 @@ class PyAdvancedOrderbook:
 
         This method provides a more efficient path for users who already have data
         in numpy arrays, avoiding the overhead of constructing PyOrderbookLevels.
+        The public NumPy ingestion API accepts raw price, size, and optional
+        norders arrays only. Ticks and lots are derived by core normalization.
 
         Args:
             ask_prices: 1D array of ask prices
@@ -111,6 +141,8 @@ class PyAdvancedOrderbook:
 
         This method provides a more efficient path for users who already have data
         in numpy arrays, avoiding the overhead of constructing PyOrderbookLevels.
+        The public NumPy ingestion API accepts raw price, size, and optional
+        norders arrays only. Ticks and lots are derived by core normalization.
 
         Args:
             ask_prices: 1D array of ask prices
@@ -142,11 +174,23 @@ class PyAdvancedOrderbook:
         ...
 
     def get_bids_numpy(self) -> npt.NDArray[np.void]:
-        """Get bid levels as a NumPy structured array."""
+        """Get bid levels as a NumPy structured array.
+
+        The returned array is a view into an internal reusable export buffer.
+        It remains valid until the next get_bids_numpy call on this orderbook
+        that rewrites that bid export buffer. Copy the result if it must
+        outlive subsequent bid exports.
+        """
         ...
 
     def get_asks_numpy(self) -> npt.NDArray[np.void]:
-        """Get ask levels as a NumPy structured array."""
+        """Get ask levels as a NumPy structured array.
+
+        The returned array is a view into an internal reusable export buffer.
+        It remains valid until the next get_asks_numpy call on this orderbook
+        that rewrites that ask export buffer. Copy the result if it must
+        outlive subsequent ask exports.
+        """
         ...
 
     def get_mid_price(self) -> float:
@@ -206,11 +250,14 @@ class PyAdvancedOrderbook:
 
         Args:
             size: Trade size
-            is_buy: If True, anchor at best ask and consume asks upward; if False, anchor at best bid and consume bids downward
-            is_base_currency: If True, size is in base currency; if False, convert quote size to base using the same touch anchor price
+            is_buy: If True, anchor at best ask and consume asks upward; if
+                False, anchor at best bid and consume bids downward.
+            is_base_currency: If True, size is in base currency; if False,
+                convert quote size to base using the same touch anchor price.
 
         Returns:
-            Absolute terminal impact from touch anchor to last consumed level, or infinity if size cannot be filled
+            Absolute terminal impact from touch anchor to last consumed level,
+            or infinity if size cannot be filled.
 
         Raises:
             RuntimeError: If orderbook is empty
@@ -224,7 +271,8 @@ class PyAdvancedOrderbook:
 
         Args:
             impact_bps: Price depth in basis points from touch
-            is_buy: If True, aggregate asks up to best_ask * (1 + impact_bps/10000); if False, bids down to best_bid * (1 - impact_bps/10000)
+            is_buy: If True, aggregate asks up to best_ask * (1 + impact_bps/10000);
+                if False, bids down to best_bid * (1 - impact_bps/10000).
             is_base_currency: If True, return base size; if False, return quote notional
 
         Returns:

@@ -6,33 +6,24 @@ multiples. Supports both scalar and NumPy array operations with
 bid/ask/size-specific rounding directions.
 """
 import msgspec
+import math
 import numpy as np
 cimport numpy as cnp
 from numpy cimport (
     ndarray as cndarray,
     PyArray_EMPTY as cPyArray_EMPTY,
 )
-from libc.math cimport ceil, floor, modf, pow, round as c_round
+from libc.math cimport ceil, floor, fabs, isfinite
 
 
-cdef inline double _rounding_factor(double size) nogil:
-    cdef double int_part, frac_part
-    cdef int count = 0
-    cdef double s = size if size > 0 else -size
-
-    if s >= 1.0:
-        return 1.0
-
-    while count < 20:
-        frac_part = modf(s, &int_part)
-        if frac_part < 1e-12:
-            break
-        s *= 10.0
-        count += 1
-
-    if count == 0:
-        return 1.0
-    return pow(10.0, count)
+def _power10_exponent(double value, str field):
+    """Validate canonical finite decimal powers once, outside rounding paths."""
+    if not isfinite(value) or value <= 0.0:
+        raise ValueError(f"Invalid {field}; must be greater than 0 and finite")
+    exponent = int(round(math.log10(value)))
+    if exponent < -308 or exponent > 308 or value != float(f"1e{exponent}"):
+        raise ValueError(f"Invalid {field}; must be a power of ten in [1e-308, 1e308]")
+    return exponent
 
 class RounderConfig(msgspec.Struct):
     tick_size: float
@@ -42,10 +33,8 @@ class RounderConfig(msgspec.Struct):
     round_size_up: bool
 
     def __post_init__(self) -> None:
-        if self.tick_size <= 0.0:
-            raise ValueError("Invalid tick_size; must be greater than 0")
-        if self.lot_size <= 0.0:
-            raise ValueError("Invalid lot_size; must be greater than 0")
+        _power10_exponent(self.tick_size, "tick_size")
+        _power10_exponent(self.lot_size, "lot_size")
 
     @classmethod
     def default(cls, tick_size: float, lot_size: float) -> "RounderConfig":
@@ -76,27 +65,48 @@ cdef class Rounder:
         self.tick_size = config.tick_size
         self.lot_size = config.lot_size
 
-        self._bid_round_func = floor if config.round_bids_down else ceil
-        self._ask_round_func = ceil if config.round_asks_up else floor
-        self._size_round_func = ceil if config.round_size_up else floor
+        self._bid_up = not config.round_bids_down
+        self._ask_up = config.round_asks_up
+        self._size_up = config.round_size_up
 
-        # Precompute frequently used values
-        self._inverse_tick_size = 1.0 / self.tick_size
-        self._inverse_lot_size = 1.0 / self.lot_size
-        self._tick_rounding_factor = _rounding_factor(self.tick_size)
-        self._lot_rounding_factor = _rounding_factor(self.lot_size)
+        # Derive reciprocal scales from decimal exponents, avoiding 1 / tick drift.
+        tick_exp = _power10_exponent(self.tick_size, "tick_size")
+        lot_exp = _power10_exponent(self.lot_size, "lot_size")
+        self._inverse_tick_size = float(f"1e{-tick_exp}")
+        self._inverse_lot_size = float(f"1e{-lot_exp}")
+        self._tick_rounding_factor = float(f"1e{abs(tick_exp)}")
+        self._lot_rounding_factor = float(f"1e{abs(lot_exp)}")
 
-    cdef inline double _round_to(self, double num, double factor) nogil:
-        """Round a value to a specific decimal precision.
+    cdef inline double _grid_value(self, double ticks, double step, double factor) noexcept nogil:
+        """Reconstruct the nearest float to a decimal grid point."""
+        return ticks / factor if step < 1.0 else ticks * step
 
-        Args:
-            num: Value to round.
-            factor: Precision factor (e.g., 100.0 for 2 decimal places).
-
-        Returns:
-            Rounded value.
-        """
-        return c_round(num * factor) / factor
+    cdef inline double _quantize(self, double value, double step, double inverse, double factor, bint up):
+        """Round on a decimal grid, correcting one-tick quotient boundary errors."""
+        cdef double quotient = value * inverse
+        cdef double ticks, result, adjacent
+        if not isfinite(value) or not isfinite(quotient) or fabs(quotient) > 4503599627370495.0:
+            raise ValueError("Value must be finite and within the supported 2**52 tick range")
+        ticks = ceil(quotient) if up else floor(quotient)
+        result = self._grid_value(ticks, step, factor)
+        if up:
+            if result < value:
+                ticks += 1.0
+            else:
+                adjacent = self._grid_value(ticks - 1.0, step, factor)
+                if adjacent >= value:
+                    ticks -= 1.0
+        else:
+            if result > value:
+                ticks -= 1.0
+            else:
+                adjacent = self._grid_value(ticks + 1.0, step, factor)
+                if adjacent <= value:
+                    ticks += 1.0
+        result = self._grid_value(ticks, step, factor)
+        if not isfinite(result):
+            raise ValueError("Rounded result exceeds finite float range")
+        return result
 
     cpdef double bid(self, double price):
         """Round a bid price to the nearest tick size multiple.
@@ -107,8 +117,7 @@ cdef class Rounder:
         Returns:
             Rounded bid price.
         """
-        cdef double value = self.tick_size * self._bid_round_func(price * self._inverse_tick_size)
-        return self._round_to(value, self._tick_rounding_factor)
+        return self._quantize(price, self.tick_size, self._inverse_tick_size, self._tick_rounding_factor, self._bid_up)
 
     cpdef double ask(self, double price):
         """Round an ask price to the nearest tick size multiple.
@@ -119,8 +128,7 @@ cdef class Rounder:
         Returns:
             Rounded ask price.
         """
-        cdef double value = self.tick_size * self._ask_round_func(price * self._inverse_tick_size)
-        return self._round_to(value, self._tick_rounding_factor)
+        return self._quantize(price, self.tick_size, self._inverse_tick_size, self._tick_rounding_factor, self._ask_up)
 
     cpdef double size(self, double size):
         """Round a size to the nearest lot size multiple.
@@ -131,8 +139,7 @@ cdef class Rounder:
         Returns:
             Rounded size.
         """
-        cdef double value = self.lot_size * self._size_round_func(size * self._inverse_lot_size)
-        return self._round_to(value, self._lot_rounding_factor)
+        return self._quantize(size, self.lot_size, self._inverse_lot_size, self._lot_rounding_factor, self._size_up)
 
     cpdef cnp.ndarray bids(self, cnp.ndarray prices):
         """Round an array of prices to the nearest tick size multiple (bids).
@@ -156,9 +163,9 @@ cdef class Rounder:
             double tick_rounding_factor = self._tick_rounding_factor
 
         for i in range(n):
-            result_view[i] = self._round_to(
-                tick_size * self._bid_round_func(prices_view[i] * inverse_tick_size),
-                tick_rounding_factor
+            result_view[i] = self._quantize(
+                prices_view[i], tick_size, inverse_tick_size,
+                tick_rounding_factor, self._bid_up
             )
         return result
 
@@ -184,9 +191,9 @@ cdef class Rounder:
             double tick_rounding_factor = self._tick_rounding_factor
 
         for i in range(n):
-            result_view[i] = self._round_to(
-                tick_size * self._ask_round_func(prices_view[i] * inverse_tick_size),
-                tick_rounding_factor
+            result_view[i] = self._quantize(
+                prices_view[i], tick_size, inverse_tick_size,
+                tick_rounding_factor, self._ask_up
             )
         return result
 
@@ -212,8 +219,8 @@ cdef class Rounder:
             double lot_rounding_factor = self._lot_rounding_factor
 
         for i in range(n):
-            result_view[i] = self._round_to(
-                lot_size * self._size_round_func(sizes_view[i] * inverse_lot_size),
-                lot_rounding_factor
+            result_view[i] = self._quantize(
+                sizes_view[i], lot_size, inverse_lot_size,
+                lot_rounding_factor, self._size_up
             )
         return result

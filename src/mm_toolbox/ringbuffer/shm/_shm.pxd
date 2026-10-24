@@ -45,6 +45,17 @@ cdef extern from "c/shm_core.h":
         u64 mask
         int spin_wait
 
+    u64 shm_record_span(u64 payload_len) nogil
+    int shm_producer_claim(ShmHeader* hdr, u64 owner) nogil
+    void shm_producer_release(ShmHeader* hdr, u64 owner) nogil
+    int shm_producer_reserve(ShmProducerContext* ctx, u64 need, u64* dropped_out) nogil
+    void shm_producer_write(ShmProducerContext* ctx, const unsigned char* payload,
+                            size_t payload_len, u64 pos) nogil
+    void shm_producer_publish(ShmProducerContext* ctx, u64 end) nogil
+    int shm_snapshot_begin(ShmConsumerContext* ctx, u64* read_out, u64* write_out) nogil
+    int shm_snapshot_record(ShmConsumerContext* ctx, u64 pos, u64 write, u64* len_out) nogil
+    int shm_snapshot_valid(ShmConsumerContext* ctx, u64 read) nogil
+    u64 shm_message_count(ShmConsumerContext* ctx) nogil
     int shm_producer_insert(ShmProducerContext* ctx, const unsigned char* payload,
                            size_t payload_len, u64* dropped_out) nogil
     int shm_consumer_peek_available(ShmConsumerContext* ctx, u64* msg_len_out,
@@ -71,5 +82,14 @@ cdef class _ShmRingBase:
     cdef object _path_py
     cdef const char* _path
 
+    cdef inline void _ensure_open(self)
+    cdef void _release_lease(self) noexcept
     cdef inline void _close_map(self)
     cpdef void close(self)
+
+cdef object _try_consume(ShmConsumerContext* ctx, Py_ssize_t limit=*)
+cdef int _try_consume_into(ShmConsumerContext* ctx, bytearray dst, bytearray scratch)
+cdef list _snapshot(ShmConsumerContext* ctx)
+cdef bint _insert_batch(ShmProducerContext* ctx, list items, u64* dropped)
+cdef u64 _count(ShmHeader* hdr, unsigned char* data, u64 capacity)
+cdef bint _full(ShmHeader* hdr, u64 capacity)

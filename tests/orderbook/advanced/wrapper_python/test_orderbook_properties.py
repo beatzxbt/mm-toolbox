@@ -1,4 +1,4 @@
-"""Property-based and invariant tests for AdvancedOrderbook.
+"""Property-based and invariant tests for PyAdvancedOrderbook.
 
 Tests that certain properties and invariants hold across a wide range of inputs
 and sequences of operations. Uses pytest parametrization and randomized testing
@@ -15,8 +15,6 @@ from mm_toolbox.orderbook.advanced import (
     OrderbookLevels,
 )
 from tests.orderbook.advanced.conftest import (
-    TICK_SIZE,
-    LOT_SIZE,
     _mk_book,
     _empty_bid_levels,
 )
@@ -63,12 +61,8 @@ def _generate_valid_snapshot(
     bid_norders = [rng.randint(1, 100) for _ in range(num_bids)]
     ask_norders = [rng.randint(1, 100) for _ in range(num_asks)]
 
-    asks = OrderbookLevels.from_list_with_ticks_and_lots(
-        ask_prices, ask_sizes, ask_norders, TICK_SIZE, LOT_SIZE
-    )
-    bids = OrderbookLevels.from_list_with_ticks_and_lots(
-        bid_prices, bid_sizes, bid_norders, TICK_SIZE, LOT_SIZE
-    )
+    asks = OrderbookLevels.from_list(ask_prices, ask_sizes, ask_norders)
+    bids = OrderbookLevels.from_list(bid_prices, bid_sizes, bid_norders)
 
     return asks, bids
 
@@ -115,9 +109,7 @@ class TestBBOInvariant:
             delta_price = rng.uniform(99.0, 101.0)
             delta_size = rng.uniform(0.1, 10.0)
 
-            delta = OrderbookLevels.from_list_with_ticks_and_lots(
-                [delta_price], [delta_size], [1], TICK_SIZE, LOT_SIZE
-            )
+            delta = OrderbookLevels.from_list([delta_price], [delta_size], [1])
             book.consume_deltas(delta, _empty_bid_levels())
 
         try:
@@ -157,12 +149,8 @@ class TestCapacityInvariant:
         sizes = [1.0] * snapshot_size
         norders = [1] * snapshot_size
 
-        asks = OrderbookLevels.from_list_with_ticks_and_lots(
-            ask_prices, sizes, norders, TICK_SIZE, LOT_SIZE
-        )
-        bids = OrderbookLevels.from_list_with_ticks_and_lots(
-            bid_prices, sizes, norders, TICK_SIZE, LOT_SIZE
-        )
+        asks = OrderbookLevels.from_list(ask_prices, sizes, norders)
+        bids = OrderbookLevels.from_list(bid_prices, sizes, norders)
 
         book.consume_snapshot(asks, bids)
 
@@ -189,9 +177,7 @@ class TestCapacityInvariant:
             price = rng.uniform(90.0, 110.0)
             size = rng.uniform(0.1, 10.0)
 
-            delta = OrderbookLevels.from_list_with_ticks_and_lots(
-                [price], [size], [1], TICK_SIZE, LOT_SIZE
-            )
+            delta = OrderbookLevels.from_list([price], [size], [1])
             book.consume_deltas(delta, _empty_bid_levels())
 
             # Check capacity after each delta
@@ -255,9 +241,7 @@ class TestSortedOrderInvariant:
             price = rng.uniform(95.0, 105.0)
             size = rng.uniform(0.1, 10.0)
 
-            delta = OrderbookLevels.from_list_with_ticks_and_lots(
-                [price], [size], [1], TICK_SIZE, LOT_SIZE
-            )
+            delta = OrderbookLevels.from_list([price], [size], [1])
             book.consume_deltas(delta, _empty_bid_levels())
 
         try:
@@ -355,9 +339,7 @@ class TestOperationSequenceConsistency:
                     size = rng.uniform(0.1, 10.0)
                     norders = 1
 
-                delta = OrderbookLevels.from_list_with_ticks_and_lots(
-                    [price], [size], [norders], TICK_SIZE, LOT_SIZE
-                )
+                delta = OrderbookLevels.from_list([price], [size], [norders])
                 book.consume_deltas(delta, _empty_bid_levels())
 
             elif operation == "clear":
@@ -406,9 +388,7 @@ class TestOperationSequenceConsistency:
                 size = 1.0 if i % 3 != 0 else 0.0  # Some deletions
                 norders = 0 if size == 0.0 else 1
 
-                delta = OrderbookLevels.from_list_with_ticks_and_lots(
-                    [price], [size], [norders], TICK_SIZE, LOT_SIZE
-                )
+                delta = OrderbookLevels.from_list([price], [size], [norders])
                 book.consume_deltas(delta, _empty_bid_levels())
 
             # Verify consistency
@@ -436,9 +416,7 @@ class TestOperationSequenceConsistency:
             size = rng.uniform(0.0, 5.0)
             norders = 0 if size == 0.0 else rng.randint(1, 10)
 
-            delta = OrderbookLevels.from_list_with_ticks_and_lots(
-                [price], [size], [norders], TICK_SIZE, LOT_SIZE
-            )
+            delta = OrderbookLevels.from_list([price], [size], [norders])
             book.consume_deltas(delta, _empty_bid_levels())
 
         # Should still be valid

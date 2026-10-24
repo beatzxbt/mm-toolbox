@@ -44,100 +44,56 @@ cdef u64 pow2_at_least(u64 v) nogil:
     return v + 1
 
 
-cdef void write_u64_le(unsigned char* base, u64 idx, u64 mask, u64 val) nogil:
-    """Write u64 in little-endian with wrap handling.
+cdef extern from *:
+    u64 __atomic_load_n(u64* ptr, int order) noexcept nogil
+    void __atomic_store_n(u64* ptr, u64 value, int order) noexcept nogil
 
-    Args:
-        base: Pointer to the ring buffer base.
-        idx: Absolute index in the ring.
-        mask: Capacity mask (capacity - 1, capacity must be power of two).
-        val: Value to write.
-    """
-    cdef u64 pos = idx & mask
-    cdef u64 capacity = mask + 1
-    if pos + 8 <= capacity:
-        # Unaligned access is safe and fast on x86_64 and ARM64
-        memcpy(base + pos, &val, 8)
-    else:
-        base[(idx + 0) & mask] = <unsigned char>(val & 0xFF)
-        base[(idx + 1) & mask] = <unsigned char>((val >> 8) & 0xFF)
-        base[(idx + 2) & mask] = <unsigned char>((val >> 16) & 0xFF)
-        base[(idx + 3) & mask] = <unsigned char>((val >> 24) & 0xFF)
-        base[(idx + 4) & mask] = <unsigned char>((val >> 32) & 0xFF)
-        base[(idx + 5) & mask] = <unsigned char>((val >> 40) & 0xFF)
-        base[(idx + 6) & mask] = <unsigned char>((val >> 48) & 0xFF)
-        base[(idx + 7) & mask] = <unsigned char>((val >> 56) & 0xFF)
+
+cdef void write_u64_le(unsigned char* base, u64 idx, u64 mask, u64 val) nogil:
+    """Atomic word storage, also supporting utility calls at byte offsets."""
+    copy_into_ring(base, idx, mask, <const unsigned char*>&val, 8, mask + 1)
 
 
 cdef u64 read_u64_le(const unsigned char* base, u64 idx, u64 mask) nogil:
-    """Read u64 in little-endian with wrap handling.
-
-    Args:
-        base: Pointer to the ring buffer base.
-        idx: Absolute index in the ring.
-        mask: Capacity mask (capacity - 1, capacity must be power of two).
-
-    Returns:
-        The u64 value at the given position.
-    """
-    cdef u64 pos = idx & mask
-    cdef u64 capacity = mask + 1
-    cdef u64 val
-    if pos + 8 <= capacity:
-        memcpy(&val, base + pos, 8)
-        return val
-    else:
-        return (
-            (<u64>base[(idx + 0) & mask])
-            | (<u64>base[(idx + 1) & mask] << 8)
-            | (<u64>base[(idx + 2) & mask] << 16)
-            | (<u64>base[(idx + 3) & mask] << 24)
-            | (<u64>base[(idx + 4) & mask] << 32)
-            | (<u64>base[(idx + 5) & mask] << 40)
-            | (<u64>base[(idx + 6) & mask] << 48)
-            | (<u64>base[(idx + 7) & mask] << 56)
-        )
+    cdef u64 val = 0
+    copy_from_ring(<unsigned char*>&val, base, idx, mask, 8, mask + 1)
+    return val
 
 
-cdef void copy_into_ring(unsigned char* ring, u64 start, u64 mask, const unsigned char* src, size_t n, u64 capacity) nogil:
-    """Copy contiguous bytes into ring with wrap handling.
-
-    Args:
-        ring: Pointer to the ring buffer base.
-        start: Absolute start index in the ring.
-        mask: Capacity mask.
-        src: Source buffer pointer.
-        n: Number of bytes to copy.
-        capacity: Ring buffer capacity.
-    """
-    if n == 0:
+cdef void copy_into_ring(unsigned char* ring, u64 start, u64 mask,
+                         const unsigned char* src, size_t n, u64 capacity) nogil:
+    """Copy through aligned release stores; capacity must be at least eight."""
+    cdef u64 idx, word
+    cdef size_t offset, take
+    cdef u64* slot
+    if capacity < 8:
         return
-    cdef u64 idx = start & mask
-    cdef u64 endspace = capacity - idx
-    if n <= endspace:
-        memcpy(ring + idx, src, n)
-    else:
-        memcpy(ring + idx, src, <size_t>endspace)
-        memcpy(ring, src + <size_t>endspace, n - <size_t>endspace)
+    while n:
+        idx = start & mask
+        offset = <size_t>(idx & 7)
+        take = min(<size_t>8 - offset, n)
+        slot = <u64*>(ring + (idx & ~<u64>7))
+        word = __atomic_load_n(slot, 0) if offset or take < 8 else 0
+        memcpy((<unsigned char*>&word) + offset, src, take)
+        __atomic_store_n(slot, word, 3)
+        start += take
+        src += take
+        n -= take
 
 
-cdef void copy_from_ring(unsigned char* dst, const unsigned char* ring, u64 start, u64 mask, size_t n, u64 capacity) nogil:
-    """Copy contiguous bytes from ring with wrap handling.
-
-    Args:
-        dst: Destination buffer pointer.
-        ring: Pointer to the ring buffer base.
-        start: Absolute start index in the ring.
-        mask: Capacity mask.
-        n: Number of bytes to copy.
-        capacity: Ring buffer capacity.
-    """
-    if n == 0:
+cdef void copy_from_ring(unsigned char* dst, const unsigned char* ring, u64 start,
+                         u64 mask, size_t n, u64 capacity) nogil:
+    """Speculative relaxed loads; callers validate before exposing a copy."""
+    cdef u64 idx, word
+    cdef size_t offset, take
+    if capacity < 8:
         return
-    cdef u64 idx = start & mask
-    cdef u64 endspace = capacity - idx
-    if n <= endspace:
-        memcpy(dst, ring + idx, n)
-    else:
-        memcpy(dst, ring + idx, <size_t>endspace)
-        memcpy(dst + <size_t>endspace, ring, n - <size_t>endspace)
+    while n:
+        idx = start & mask
+        offset = <size_t>(idx & 7)
+        take = min(<size_t>8 - offset, n)
+        word = __atomic_load_n(<u64*>(ring + (idx & ~<u64>7)), 0)
+        memcpy(dst, (<const unsigned char*>&word) + offset, take)
+        start += take
+        dst += take
+        n -= take

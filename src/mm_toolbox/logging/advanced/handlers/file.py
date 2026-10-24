@@ -32,14 +32,14 @@ class FileLogHandler(BaseLogHandler):
         self.create = create
 
         if self.create:
-            # Create the file if it doesn't exist, or truncate it if it does
+            # Ensure the path is ready without destroying logs from an earlier run.
             try:
                 directory = os.path.dirname(self.filepath)
                 if directory:
                     os.makedirs(directory, exist_ok=True)
 
-                # Create or truncate the file
-                with open(self.filepath, "w"):
+                # Append mode creates a missing file and preserves existing data.
+                with open(self.filepath, "a"):
                     pass
             except Exception as e:
                 self._handle_exception(e, "init")

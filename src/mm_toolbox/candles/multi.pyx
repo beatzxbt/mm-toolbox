@@ -8,7 +8,7 @@ Creates a new candle when any of these conditions are met:
 
 from mm_toolbox.candles.base import Trade
 from mm_toolbox.candles.base cimport BaseCandles
-from libc.math cimport fmax, fmin
+from libc.math cimport fmax, fmin, isfinite, nextafter
 
 cdef class MultiCandles(BaseCandles):
     """Candle aggregator triggered by duration, tick count, or volume.
@@ -36,13 +36,13 @@ cdef class MultiCandles(BaseCandles):
         Raises:
             ValueError: If any limit is not positive.
         """
-        if max_duration_secs <= 0.0:
+        if not isfinite(max_duration_secs) or not isfinite(max_duration_secs * 1000.0) or max_duration_secs <= 0.0 or max_duration_secs * 1000.0 == 0.0:
             raise ValueError(
                 f"Invalid max_duration_secs; expected >0 but got {max_duration_secs}"
             )
         if max_ticks <= 0:
             raise ValueError(f"Invalid max_ticks; expected >0 but got {max_ticks}")
-        if max_size <= 0.0:
+        if not isfinite(max_size) or max_size <= 0.0:
             raise ValueError(f"Invalid max_size; expected >0 but got {max_size}")
 
         BaseCandles.__init__(self, num_candles, store_trades)
@@ -65,12 +65,13 @@ cdef class MultiCandles(BaseCandles):
             double available_size
             double chunk_size
             double volume
-            double eps = 1e-12
+            double next_remaining
 
+        self.validate_trade(price, remaining_size)
         if self.is_stale_trade(time_ms):
             return
 
-        while remaining_size > eps:
+        while remaining_size > 0.0:
             # Initialize a new candle if this is the first trade
             if self.latest_candle.num_trades == 0:
                 self.latest_candle.open_time_ms = time_ms
@@ -79,7 +80,7 @@ cdef class MultiCandles(BaseCandles):
                 self.latest_candle.low_price = price
 
             # Check if max duration has been exceeded
-            if self.latest_candle.open_time_ms + self.max_duration_millis <= time_ms:
+            if self.latest_candle.num_trades > 0 and time_ms - self.latest_candle.open_time_ms >= self.max_duration_millis:
                 self.insert_and_reset_candle()
                 continue
 
@@ -90,11 +91,14 @@ cdef class MultiCandles(BaseCandles):
 
             total_size = self.latest_candle.buy_size + self.latest_candle.sell_size
             available_size = self.max_size - total_size
-            if available_size <= eps:
+            if available_size <= 0.0:
                 self.insert_and_reset_candle()
                 continue
 
             chunk_size = remaining_size if remaining_size <= available_size else available_size
+            next_remaining = 0.0 if chunk_size == remaining_size else remaining_size - chunk_size
+            if next_remaining >= remaining_size:
+                raise ValueError("Bucket threshold is too small relative to trade size")
             volume = price * chunk_size
 
             # Update HLC statistics
@@ -111,7 +115,7 @@ cdef class MultiCandles(BaseCandles):
 
             self.latest_candle.vwap = self.calculate_vwap(price, chunk_size)
             if self._store_trades:
-                if chunk_size == remaining_size:
+                if chunk_size == trade.size:
                     self.latest_candle.trades.append(trade)
                 else:
                     self.latest_candle.trades.append(
@@ -125,13 +129,11 @@ cdef class MultiCandles(BaseCandles):
             self.latest_candle.num_trades += 1
             self.latest_candle.close_time_ms = time_ms
 
-            remaining_size -= chunk_size
-            if remaining_size <= eps:
-                remaining_size = 0.0
+            remaining_size = next_remaining
 
             if self.latest_candle.num_trades >= self.max_ticks:
                 self.insert_and_reset_candle()
                 continue
 
-            if self.latest_candle.buy_size + self.latest_candle.sell_size >= self.max_size - eps:
+            if self.latest_candle.buy_size + self.latest_candle.sell_size >= nextafter(self.max_size, 0.0):
                 self.insert_and_reset_candle()

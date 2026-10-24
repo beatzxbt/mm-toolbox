@@ -1,4 +1,4 @@
-"""Tests for the Python wrapper boundary behavior of AdvancedOrderbook.
+"""Tests for the Python wrapper boundary behavior of PyAdvancedOrderbook.
 
 Validates that error messages are user-friendly from Python, cpdef methods
 are callable, and numpy arrays are accepted as inputs.
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from mm_toolbox.orderbook.advanced import AdvancedOrderbook
+from mm_toolbox.orderbook.advanced import PyAdvancedOrderbook
 from tests.orderbook.advanced.conftest import LOT_SIZE
 
 
@@ -21,9 +21,9 @@ class TestPythonErrorMessages:
             empty_book.get_mid_price()
 
     def test_invalid_init_error_message(self):
-        """Given invalid tick_size, When creating AdvancedOrderbook, Then raises with helpful message."""
+        """Given invalid tick_size, When creating PyAdvancedOrderbook, Then raises with helpful message."""
         with pytest.raises(ValueError, match="Invalid tick_size"):
-            AdvancedOrderbook(
+            PyAdvancedOrderbook(
                 tick_size=-0.01,
                 lot_size=LOT_SIZE,
                 num_levels=64,
@@ -47,3 +47,47 @@ class TestCpdefBehavior:
 
         empty_book.consume_snapshot_numpy(ask_prices, ask_sizes, bid_prices, bid_sizes)
         assert empty_book.get_mid_price() > 0
+
+
+class TestInputValidation:
+    """Layer 2: Verify invalid inputs are rejected at the boundary."""
+
+    def test_consume_bbo_values_negative_ask_price(self, standard_book):
+        """Given negative ask_price, When consume_bbo_values called, Then raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid price"):
+            standard_book.consume_bbo_values(
+                ask_price=-1.0,
+                ask_size=1.0,
+                bid_price=100.0,
+                bid_size=1.0,
+            )
+
+    def test_consume_bbo_values_negative_bid_price(self, standard_book):
+        """Given negative bid_price, When consume_bbo_values called, Then raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid price"):
+            standard_book.consume_bbo_values(
+                ask_price=100.01,
+                ask_size=1.0,
+                bid_price=-1.0,
+                bid_size=1.0,
+            )
+
+    def test_consume_bbo_values_negative_ask_size(self, standard_book):
+        """Given negative ask_size, When consume_bbo_values called, Then raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid size"):
+            standard_book.consume_bbo_values(
+                ask_price=100.01,
+                ask_size=-1.0,
+                bid_price=100.0,
+                bid_size=1.0,
+            )
+
+    def test_consume_bbo_values_negative_bid_size(self, standard_book):
+        """Given negative bid_size, When consume_bbo_values called, Then raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid size"):
+            standard_book.consume_bbo_values(
+                ask_price=100.01,
+                ask_size=1.0,
+                bid_price=100.0,
+                bid_size=-1.0,
+            )

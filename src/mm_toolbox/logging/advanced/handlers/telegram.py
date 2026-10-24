@@ -37,17 +37,14 @@ class TelegramLogHandler(BaseLogHandler):
         Args:
             text (str): Message content to send.
         """
-        await self._ensure_session()
-        await self._limiter.acquire(1)
         payload = dict(self.partial_payload)
         payload["text"] = text
-        assert self._http_session is not None
-        resp = await self._http_session.post(
+        await self._post_json_with_retries(
             self.url,
-            headers=self.headers,
-            data=self.encode_json(payload),
+            payload,
+            limiter=self._limiter,
+            service="Telegram API",
         )
-        await resp.read()
 
     @staticmethod
     def _chunk(text: str, limit: int) -> list[str]:
@@ -77,11 +74,21 @@ class TelegramLogHandler(BaseLogHandler):
             logs (list[PyLog]): Batch of log entries.
         """
         try:
+            if not logs:
+                return
             # Telegram message limit ~4096 chars
+            chunks = []
             for log in logs:
-                for chunk in self._chunk(self.format_log(log), 3500):
-                    fut = self._run_coro(self._post(chunk))
-                    self._track_future(fut)
+                chunks.extend(self._chunk(self.format_log(log), 3500))
+            for index, chunk in enumerate(chunks):
+                if self._submit_coro(self._post(chunk)) is None:
+                    self._handle_exception(
+                        OverflowError(
+                            f"delivery capacity reached; dropped {len(chunks) - index} Telegram chunks"
+                        ),
+                        "push",
+                    )
+                    break
 
         except Exception as e:
             self._handle_exception(e, "push")

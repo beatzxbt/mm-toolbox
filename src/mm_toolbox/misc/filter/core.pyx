@@ -5,6 +5,8 @@ defined by a percentage threshold. When a new value falls outside the
 current bounds, the reference is reset to that value and new bounds are set.
 """
 
+from libc.math cimport fabs, isfinite
+
 
 cdef class DataBoundsFilter:
     """Maintains dynamic bounds around a reference value by percentage."""
@@ -18,23 +20,32 @@ cdef class DataBoundsFilter:
         Raises:
             ValueError: If the threshold is not within (0, 100).
         """
-        if threshold_pct <= 0.0 or threshold_pct >= 100.0:
-            raise ValueError("threshold_pct must be in (0, 100)")
+        if (
+            not isfinite(threshold_pct)
+            or threshold_pct <= 0.0
+            or threshold_pct >= 100.0
+        ):
+            raise ValueError("threshold_pct must be finite and in (0, 100)")
         self._threshold = threshold_pct / 100.0
         self._lower_bound = 0.0
         self._upper_bound = 0.0
 
-    cpdef void reset(self, double value) noexcept:
+    cpdef void reset(self, double value):
         """Reset bounds centered on value."""
-        self._lower_bound = value * (1.0 - self._threshold)
-        self._upper_bound = value * (1.0 + self._threshold)
+        if not isfinite(value):
+            raise ValueError("value must be finite")
+        cdef double radius = fabs(value) * self._threshold
+        self._lower_bound = value - radius
+        self._upper_bound = value + radius
 
-    cpdef bint check_and_update(self, double value, bint reset=False) noexcept:
+    cpdef bint check_and_update(self, double value, bint reset=False):
         """Return True if bounds were (re)initialized or updated.
 
         If reset is True, bounds are reset unconditionally around value.
         Otherwise, bounds are reset only when value is outside current bounds.
         """
+        if not isfinite(value):
+            raise ValueError("value must be finite")
         if reset:
             self.reset(value)
             return True

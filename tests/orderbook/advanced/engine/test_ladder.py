@@ -24,7 +24,7 @@ except ImportError as e:
     pytest.skip(f"Native Cython test module not built: {e}", allow_module_level=True)
 
 
-# Layer 2: OrderbookLadder (24 test functions)
+# Layer 2: OrderbookLadder
 
 
 # Initialization tests
@@ -54,14 +54,34 @@ def test_ladder_init_large():
 
 
 # Insert tests
-def test_ladder_insert_level():
-    """Given a level, When inserted, Then stored correctly."""
-    _native.test_ladder_insert_level()
+def test_ladder_insert_entry():
+    """Given an entry, When inserted, Then stored correctly."""
+    _native.test_ladder_insert_entry()
 
 
 def test_ladder_insert_multiple():
     """Given multiple levels, When inserted, Then all stored correctly."""
     _native.test_ladder_insert_multiple()
+
+
+def test_ladder_accessor_methods():
+    """Given populated ladder, When using accessors, Then values are correct."""
+    _native.test_ladder_accessor_methods()
+
+
+def test_ladder_assign_entry():
+    """Given empty ladder, When assigning an entry, Then values are correct."""
+    _native.test_ladder_assign_entry()
+
+
+def test_ladder_seek_start_ascending():
+    """Given ask ladder, When seeking insertion point, Then uses ascending order."""
+    _native.test_ladder_seek_start_ascending()
+
+
+def test_ladder_seek_start_descending():
+    """Given bid ladder, When seeking insertion point, Then uses descending order."""
+    _native.test_ladder_seek_start_descending()
 
 
 # Roll right tests
@@ -138,24 +158,3 @@ def test_ladder_get_data():
 def test_ladder_data_reflects_changes():
     """Given modified ladder, When getting data, Then reflects changes."""
     _native.test_ladder_data_reflects_changes()
-
-
-# NumPy accessor tests
-def test_ladder_get_levels():
-    """Given populated ladder, When getting levels, Then returns correct data."""
-    _native.test_ladder_get_levels()
-
-
-def test_ladder_get_prices():
-    """Given populated ladder, When getting prices, Then returns correct array."""
-    _native.test_ladder_get_prices()
-
-
-def test_ladder_get_sizes():
-    """Given populated ladder, When getting sizes, Then returns correct array."""
-    _native.test_ladder_get_sizes()
-
-
-def test_ladder_empty_accessors():
-    """Given empty ladder, When accessing data, Then handles correctly."""
-    _native.test_ladder_empty_accessors()

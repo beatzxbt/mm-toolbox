@@ -1,7 +1,7 @@
 """Layer 2 — Component tests for ``VolumeCandles``.
 
 Validates volume-threshold-based candle completion: candles close when the
-cumulative volume (price × size) exceeds a configured limit. Covers exact
+cumulative trade size reaches a configured limit. Covers exact
 thresholds, buy/sell separation, zero-volume trades, single high-volume trades,
 and boundary conditions.
 """
@@ -23,7 +23,7 @@ class TestVolumeCandlesSpecific:
 
     def test_volume_based_candle_completion(self):
         """Given a 500-volume bucket, the candle completes when cumulative volume exceeds the threshold."""
-        volume_candles = VolumeCandles(500.0)
+        volume_candles = VolumeCandles(5.0)
 
         trades = [
             Trade(time_ms=1000, is_buy=True, price=100.0, size=2.0),
@@ -36,7 +36,10 @@ class TestVolumeCandlesSpecific:
         final_trade = Trade(time_ms=3000, is_buy=True, price=101.0, size=1.0)
         volume_candles.process_trade(final_trade)
 
-        assert True
+        assert len(volume_candles) == 1
+        assert volume_candles[0].buy_size == 5.0
+        assert volume_candles[0].buy_volume == pytest.approx(500.5)
+        assert volume_candles.latest_candle.buy_size == 0.5
 
     def test_volume_accumulation_accuracy(self):
         """Given known price/size pairs, the computed total volume equals the manual sum.
@@ -54,9 +57,9 @@ class TestVolumeCandlesSpecific:
         ]
 
         total_expected_volume = 0.0
-        for price, size, expected_volume in volume_test_cases:
+        for index, (price, size, expected_volume) in enumerate(volume_test_cases):
             trade = Trade(
-                time_ms=1640995200000 + len(str(price)),
+                time_ms=1640995200000 + index,
                 is_buy=True,
                 price=price,
                 size=size,
@@ -65,7 +68,10 @@ class TestVolumeCandlesSpecific:
             total_expected_volume += expected_volume
 
         assert total_expected_volume == 538.0
-        assert True
+        assert volume_candles.latest_candle.buy_volume == pytest.approx(
+            total_expected_volume
+        )
+        assert volume_candles.latest_candle.buy_size == pytest.approx(5.4)
 
     def test_buy_sell_volume_separation(self):
         """Given buy and sell trades, buy_volume and sell_volume are tracked independently.
@@ -84,11 +90,14 @@ class TestVolumeCandlesSpecific:
         for trade in trades:
             volume_candles.process_trade(trade)
 
-        assert True
+        assert volume_candles.latest_candle.buy_volume == pytest.approx(351.5)
+        assert volume_candles.latest_candle.sell_volume == pytest.approx(148.0)
+        assert volume_candles.latest_candle.buy_size == 3.5
+        assert volume_candles.latest_candle.sell_size == 1.5
 
     def test_volume_threshold_boundary_conditions(self):
         """Given trades at exactly the threshold and just over it, both paths complete without error."""
-        volume_candles = VolumeCandles(1000.0)
+        volume_candles = VolumeCandles(10.0)
 
         exact_trades = [
             Trade(time_ms=1000, is_buy=True, price=100.0, size=5.0),
@@ -98,9 +107,11 @@ class TestVolumeCandlesSpecific:
         for trade in exact_trades:
             volume_candles.process_trade(trade)
 
-        assert True
+        assert len(volume_candles) == 1
+        assert volume_candles[0].buy_size == 10.0
+        assert volume_candles.latest_candle.num_trades == 0
 
-        vc_over = VolumeCandles(1000.0)
+        vc_over = VolumeCandles(10.0)
         over_trades = [
             Trade(time_ms=1000, is_buy=True, price=100.0, size=5.0),
             Trade(time_ms=2000, is_buy=True, price=100.0, size=5.1),
@@ -109,7 +120,9 @@ class TestVolumeCandlesSpecific:
         for trade in over_trades:
             vc_over.process_trade(trade)
 
-        assert True
+        assert len(vc_over) == 1
+        assert vc_over[0].buy_size == 10.0
+        assert vc_over.latest_candle.buy_size == pytest.approx(0.1)
 
     def test_zero_volume_trade_handling(self):
         """Given a zero-size trade, it contributes zero volume and does not corrupt the accumulator."""
@@ -124,7 +137,9 @@ class TestVolumeCandlesSpecific:
         for trade in trades:
             volume_candles.process_trade(trade)
 
-        assert True
+        assert volume_candles.latest_candle.buy_volume == 100.0
+        assert volume_candles.latest_candle.sell_volume == 198.0
+        assert volume_candles.latest_candle.num_trades == 2
 
     def test_high_volume_single_trades(self):
         """Given a single trade whose volume exceeds the bucket size, the candle completes immediately.
@@ -132,7 +147,7 @@ class TestVolumeCandlesSpecific:
         This guards against infinite loops where the aggregator waits for
         more trades that will never arrive.
         """
-        volume_candles = VolumeCandles(1000.0)
+        volume_candles = VolumeCandles(10.0)
 
         high_volume_trade = Trade(
             time_ms=1640995200000,
@@ -143,7 +158,9 @@ class TestVolumeCandlesSpecific:
 
         volume_candles.process_trade(high_volume_trade)
 
-        assert True
+        assert len(volume_candles) == 1
+        assert volume_candles[0].buy_size == 10.0
+        assert volume_candles.latest_candle.buy_size == 5.0
 
 
 if __name__ == "__main__":

@@ -211,6 +211,22 @@ class TestRateLimiterBasicOperations:
         assert forced.usage == pytest.approx(1.5)
         assert rl.tokens_remaining() == -1
 
+    def test_large_remaining_result_is_not_narrowed_to_c_int(self) -> None:
+        """ConsumeResult preserves remaining counts wider than a C int."""
+        capacity = 1 << 40
+        rl = make_limiter(
+            capacity=capacity,
+            window_s=1,
+            state_enabled=False,
+            sub_bucket_strategy=SubBucketStrategy.DISABLED,
+        )
+
+        result = rl.try_consume_multiple(1 << 31, force=True)
+
+        assert result.allowed is True
+        assert result.remaining == capacity - (1 << 31)
+        assert rl.tokens_remaining() == capacity - (1 << 31)
+
 
 class TestRateLimiterThresholds:
     """Layer 2 — Warning and blocking threshold behaviour."""
@@ -377,6 +393,66 @@ class TestRateLimiterConsumeMethods:
         assert denied.allowed is False
         assert denied.state == RateLimitState.BLOCKED
         assert denied.remaining == 0
+
+    def test_overflow_sized_request_is_denied_without_state_mutation(self) -> None:
+        """A valid int64 request cannot wrap usage into a successful consume."""
+        rl = make_limiter(
+            capacity=10,
+            window_s=5,
+            state_enabled=False,
+            sub_bucket_strategy=SubBucketStrategy.DISABLED,
+        )
+        rl.try_consume()
+
+        result = rl.try_consume_multiple((1 << 63) - 1)
+
+        assert result.allowed is False
+        assert result.state == RateLimitState.BLOCKED
+        assert result.remaining == 9
+        assert rl.tokens_remaining() == 9
+        assert rl.usage() == pytest.approx(0.1)
+
+    def test_forced_counter_overflow_is_rejected_without_partial_update(self) -> None:
+        """Forced counts respect representable bounds for both bucket counters."""
+        rl = make_limiter(
+            capacity=10,
+            window_s=5,
+            state_enabled=False,
+            sub_bucket_strategy=SubBucketStrategy.PER_SECOND,
+        )
+        maximum = (1 << 63) - 1
+
+        first = rl.try_consume_multiple(maximum, force=True)
+        before_remaining = rl.tokens_remaining()
+        before_usage = rl.usage()
+        rejected = rl.try_consume_multiple(1, force=True)
+
+        assert first.allowed is True
+        assert first.state == RateLimitState.OVERRIDE
+        assert rejected.allowed is False
+        assert rejected.state == RateLimitState.BLOCKED
+        assert rejected.remaining == before_remaining
+        assert rl.tokens_remaining() == before_remaining
+        assert rl.usage() == pytest.approx(before_usage)
+
+    def test_large_burst_request_caps_counters_without_overflow(self) -> None:
+        """A configured huge burst remains bounded by bucket allocations."""
+        rl = make_limiter(
+            capacity=10,
+            window_s=2,
+            state_enabled=False,
+            burst_enabled=True,
+            max_tokens=(1 << 63) - 1,
+            max_attempts=1,
+            sub_bucket_strategy=SubBucketStrategy.PER_SECOND,
+        )
+
+        rl.try_consume_multiple(10, force=True)
+        result = rl.try_consume_multiple((1 << 63) - 1)
+
+        assert result.allowed is True
+        assert result.remaining == 0
+        assert rl.tokens_remaining() == 0
 
 
 class TestRateLimiterRefillBehavior:

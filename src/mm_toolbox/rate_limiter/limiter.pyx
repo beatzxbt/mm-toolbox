@@ -22,6 +22,8 @@ from mm_toolbox.time.time cimport time_monotonic_ms
 from libc.stdlib cimport malloc, free
 from libc.stdint cimport int64_t as i64
 
+cdef i64 _I64_MAX = 9223372036854775807
+
 from .result import RateLimitState, ConsumeResult
 from .config import RateLimiterConfig, SubBucketStrategy
 
@@ -196,18 +198,39 @@ cdef class RateLimiter:
             return ConsumeResult(
                 allowed=True,
                 state=RateLimitState.NORMAL,
-                remaining=<int>remaining,
+                remaining=remaining,
                 usage=usage,
             )
 
         if force:
+            # Check every counter before changing any of them. Forced
+            # consumption bypasses policy limits, but cannot represent a
+            # value outside the signed counters used internally.
+            if num_tokens > _I64_MAX - self._used_tokens:
+                return ConsumeResult(
+                    allowed=False,
+                    state=RateLimitState.BLOCKED,
+                    remaining=remaining,
+                    usage=usage,
+                )
+            sub_idx = 0
+            if self._sub_enabled:
+                sub_idx = self._sub_index(now)
+                if num_tokens > _I64_MAX - self._sub_used[sub_idx]:
+                    return ConsumeResult(
+                        allowed=False,
+                        state=RateLimitState.BLOCKED,
+                        remaining=remaining,
+                        usage=usage,
+                    )
+                sub_new_used = self._sub_used[sub_idx] + num_tokens
             self._used_tokens += num_tokens
             if self._sub_enabled:
-                self._sub_used[self._sub_index(now)] += num_tokens
+                self._sub_used[sub_idx] = sub_new_used
             return ConsumeResult(
                 allowed=True,
                 state=RateLimitState.OVERRIDE,
-                remaining=<int>(self._capacity - self._used_tokens),
+                remaining=self._capacity - self._used_tokens,
                 usage=(
                     1.0
                     if self._capacity <= 0
@@ -217,16 +240,24 @@ cdef class RateLimiter:
                 ),
             )
 
-        new_used = self._used_tokens + num_tokens
-        overall_ok = new_used <= self._capacity
+        # Compare against remaining capacity before adding. This keeps the
+        # decision safe even when a forced consume has already used most of
+        # the signed counter range.
+        overall_ok = num_tokens <= self._capacity - self._used_tokens
+        new_used = 0
+        if overall_ok:
+            new_used = self._used_tokens + num_tokens
         sub_ok = True
         sub_idx = 0
         sub_new_used = 0
 
         if self._sub_enabled:
             sub_idx = self._sub_index(now)
-            sub_new_used = self._sub_used[sub_idx] + num_tokens
-            sub_ok = sub_new_used <= self._sub_allocations[sub_idx]
+            sub_ok = num_tokens <= (
+                self._sub_allocations[sub_idx] - self._sub_used[sub_idx]
+            )
+            if sub_ok:
+                sub_new_used = self._sub_used[sub_idx] + num_tokens
 
         if overall_ok and sub_ok:
             new_usage = <double>new_used / <double>self._capacity
@@ -234,7 +265,7 @@ cdef class RateLimiter:
                 return ConsumeResult(
                     allowed=False,
                     state=RateLimitState.BLOCKED,
-                    remaining=<int>remaining,
+                    remaining=remaining,
                     usage=usage,
                 )
             self._used_tokens = new_used
@@ -249,7 +280,7 @@ cdef class RateLimiter:
             return ConsumeResult(
                 allowed=True,
                 state=state,
-                remaining=<int>(self._capacity - self._used_tokens),
+                remaining=self._capacity - self._used_tokens,
                 usage=post_usage,
             )
 
@@ -258,24 +289,24 @@ cdef class RateLimiter:
                 return ConsumeResult(
                     allowed=False,
                     state=RateLimitState.BLOCKED,
-                    remaining=<int>remaining,
+                    remaining=remaining,
                     usage=usage,
                 )
             if self._burst_used < self._max_burst_attempts:
                 self._burst_used += 1
                 self._used_tokens = (
-                    new_used if new_used <= self._capacity else self._capacity
+                    new_used if overall_ok else self._capacity
                 )
                 if self._sub_enabled:
                     self._sub_used[sub_idx] = (
                         sub_new_used
-                        if sub_new_used <= self._sub_allocations[sub_idx]
+                        if sub_ok
                         else self._sub_allocations[sub_idx]
                     )
                 return ConsumeResult(
                     allowed=True,
                     state=RateLimitState.NORMAL,
-                    remaining=<int>(self._capacity - self._used_tokens),
+                    remaining=self._capacity - self._used_tokens,
                     usage=(
                         1.0
                         if self._capacity <= 0
@@ -288,14 +319,14 @@ cdef class RateLimiter:
             return ConsumeResult(
                 allowed=False,
                 state=RateLimitState.WARNING,
-                remaining=<int>remaining,
+                remaining=remaining,
                 usage=usage,
             )
 
         return ConsumeResult(
             allowed=False,
             state=RateLimitState.BLOCKED,
-            remaining=<int>remaining,
+            remaining=remaining,
             usage=usage,
         )
 

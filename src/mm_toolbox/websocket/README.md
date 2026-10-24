@@ -123,6 +123,35 @@ asyncio.run(main())
 
 - `wss_url` must start with `ws://` or `wss://`.
 - Callbacks must accept a single `bytes` argument and annotate it as `bytes`.
-- Only TEXT frames are inserted into the ring buffer.
-- Auto-reconnect loops recreate connections on disconnects.
+- Complete TEXT and BINARY messages are inserted into the ring buffer.
+- Pool startup is all-or-nothing: every configured socket must be live before
+  entry succeeds. A failed open cancels pending opens, closes successful opens,
+  and raises RuntimeError with the connection error as its cause.
+- After successful startup, `auto_reconnect=True` restores missing sockets,
+  including after a complete outage. At most one retry task runs per missing
+  socket, with exponential backoff from 1 to 30 seconds. With reconnect disabled,
+  lost sockets stay disconnected and periodic eviction is disabled.
+- Pool state is `CONNECTING` during startup or a complete reconnecting outage,
+  `CONNECTED` while any successfully started socket is live, and `DISCONNECTED`
+  after close or a complete outage with reconnect disabled.
+- The fastest socket is checked again before sending. Disconnected payload sends
+  raise `RuntimeError`; transport errors propagate. Sends are never automatically
+  retried because a failed write may already have reached the peer. A successful
+  send only establishes transport acceptance, not application acknowledgement.
+- `WsSingle.start()` retries initial failures when reconnect is enabled. Context
+  entry makes one initial attempt and raises promptly on failure; after entry,
+  both callback and iterator sessions monitor disconnects for recovery.
+- `WsSingle.close()` is permanent and idempotent. It cancels connection, reconnect,
+  and callback work, and wakes idle readers. Iteration drains already buffered
+  messages before raising `StopAsyncIteration`. Create a new single client for a
+  new session. Context exit also waits for owned tasks to terminate.
+- Missing PONGs for three ping intervals disconnect the socket so the configured
+  reconnect path can replace a half-open connection.
 - Pool eviction periodically replaces slower connections based on latency.
+- Receive buffers retain the newest 128 messages. Overflow discards the oldest
+  message and logs a warning through `mm_toolbox.websocket.connection`, including
+  the connection ID and cumulative drop count. The connection also exposes
+  get_dropped_messages(). Sequence-dependent market data
+  consumers must treat this as lost feed validity and resynchronize (for example,
+  by fetching a fresh orderbook snapshot). Hash deduplication does not detect
+  exchange sequence gaps or establish continuity.

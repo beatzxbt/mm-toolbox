@@ -39,6 +39,9 @@ mm-toolbox/
 
 ## Installation
 
+MM Toolbox supports standard GIL-enabled CPython 3.12 through 3.15. Prebuilt
+wheels target Linux x86_64 and aarch64, and macOS arm64.
+
 MM Toolbox is available on PyPI and can be installed using pip:
 
 ```bash
@@ -49,17 +52,19 @@ To try the beta without replacing a stable install, use a separate virtual envir
 ```bash
 python -m venv mm_toolbox_beta
 source mm_toolbox_beta/bin/activate
-pip install mm-toolbox==1.0.0b3
-```
-
-To always pull the latest pre-release:
-```bash
 pip install --pre mm-toolbox
 ```
 
+To upgrade to the latest published pre-release:
+```bash
+pip install --pre --upgrade mm-toolbox
+```
+
+The b9 branch is unreleased; install from source to try its changes.
+
 To install directly from the source, clone the repository and install the dependencies:
 ```bash
-git clone https://github.com/beatzxbt/mm-toolbox.git
+git clone --branch v1.0b9 https://github.com/beatzxbt/mm-toolbox.git
 cd mm-toolbox
 # Install uv if you haven't already: curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync --all-groups
@@ -69,7 +74,7 @@ make build  # Compile Cython extensions
 ## v1.1 Roadmap Note
 
 Parser modules are being introduced in **v1.1**. They are intentionally not
-included in the current `v1.0b5` release branch.
+included in the current `v1.0b9` release branch.
 
 ## Usage
 
@@ -115,7 +120,7 @@ that covers API details, architecture notes, and usage examples.
 
 **Candles** (`mm_toolbox.candles`): High-performance candle aggregation with time, tick, volume, price, and multi-trigger buckets. Maintains a live `latest_candle`, stores completed candles in a ring buffer, and supports async iteration for stream processing.
 
-**Misc** (`mm_toolbox.misc`): Utility helpers including `DataBoundsFilter` for bounds-based change detection. Parser modules are introduced in `v1.1` (not in this `v1.0b5` branch).
+**Misc** (`mm_toolbox.misc`): Utility helpers including `DataBoundsFilter` for bounds-based change detection. Parser modules are introduced in `v1.1` (not in this `v1.0b9` branch).
 
 **Rate Limiter** (`mm_toolbox.rate_limiter`): Token-bucket rate limiting with optional burst policies and per-second sub-buckets, plus explicit state tracking via `RateLimitState`.
 
@@ -129,7 +134,7 @@ that covers API details, architecture notes, and usage examples.
 All ring buffers share consistent insert/consume semantics and overwrite oldest
 entries on overflow for bounded memory usage.
 
-**Moving Average** (`mm_toolbox.moving_average`): Comprehensive moving average implementations including EMA, SMA, WMA, and TEMA (Triple Exponential Moving Average). All implementations support `.next()` for previewing future values without state mutation.
+**Moving Average** (`mm_toolbox.moving_average`): EMA, SMA, WMA, and time-based EMA (TEMA) implementations. All implementations support `.next()` for previewing future values without state mutation.
 
 **Orderbook** (`mm_toolbox.orderbook`): Dual implementation approach with aligned APIs:
 - `standard`: Pure Python implementation for flexibility
@@ -266,12 +271,9 @@ Follow these steps when moving from `master` to `v1.0b`.
 ## Roadmap
 
 ### v1.1.0
-- **Websocket**: Move `WsPool` and `WsSingle` into Cython classes to eliminate `call_soon_threadsafe` overhead in hot paths.
+- **Websocket**: Explore Cython implementations of `WsPool` and `WsSingle` to reduce Python dispatch overhead.
 - **Logging**: Move more advanced logger components into C to unlock similar performance gains.
-- **Orderbook**: Add Cython helpers to build/consume levels from string pair lists (e.g., `[[price, size], ...]`) to avoid Python loops in depth snapshots/deltas.
-
-### v1.2.0
-**Parsers**: Introduction of high-performance parsing utilities including JSON parsers and crypto exchange-specific parsers (e.g., Binance top-of-book parser).
+- **Parsers**: High-performance parsing utilities and exchange-specific parsers.
 
 ## License
 MM Toolbox is licensed under the MIT License. See the [LICENSE](/LICENSE) file for more information.

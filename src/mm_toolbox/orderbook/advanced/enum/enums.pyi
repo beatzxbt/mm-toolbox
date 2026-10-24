@@ -8,11 +8,12 @@ class PyOrderbookSortedness(IntEnum):
     """Python-facing enum for specifying orderbook level sortedness.
 
     Use this enum when constructing PyAdvancedOrderbook to indicate
-    how incoming snapshot and delta data is sorted.
+    how incoming snapshot and delta data is sorted. UNKNOWN infers stable
+    ordering on first input and rejects unsorted inputs.
     """
 
     UNKNOWN = 0
-    """Sortedness is unknown; levels will be sorted on ingestion."""
+    """Infer stable sort order on first input; reject unsorted input."""
 
     ASCENDING = 1
     """Levels are sorted in ascending order (lowest price first)."""

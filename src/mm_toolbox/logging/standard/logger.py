@@ -10,9 +10,11 @@ from mm_toolbox.time.time import time_iso8601, time_ms
 
 
 class Logger:
-    """A simple synchronous single-threaded logger that buffers messages and
+    """A synchronous logger that buffers messages and flushes on demand.
 
-    pushes them to configured handlers when flush conditions are met.
+    Interval flushing is opportunistic: elapsed time is checked only while
+    processing a new log call. Call :meth:`flush` or :meth:`shutdown` to flush
+    a quiet logger's pending messages explicitly.
     """
 
     def __init__(

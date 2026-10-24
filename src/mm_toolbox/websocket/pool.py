@@ -125,6 +125,10 @@ class WsPool:
         self._should_stop = False  # Lightweight stop signal
         self._eviction_task: asyncio.Task[None] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._started = False
+        self._generation = 0
+        self._opening_tasks: set[asyncio.Task[WsConnection]] = set()
+        self._replacement_tasks: set[asyncio.Task[None]] = set()
 
     def __default_on_message(self, msg: bytes) -> None:
         """Default callback for processing WebSocket messages. For convenience
@@ -135,44 +139,30 @@ class WsPool:
             print(f"Error decoding message: {e}")
 
     async def _timed_operations(self) -> None:
-        """Enforces the configuration to evict slow connections."""
-        time_now_s = time_s()
-        next_eviction_time = time_now_s + self._pool_config.evict_interval_s
-
+        """Restore missing sockets and periodically replace slow live sockets."""
+        next_eviction_time = time_s() + self._pool_config.evict_interval_s
         while not self._should_stop:
-            if (
-                self._pool_state != ConnectionState.CONNECTED
-                or time_s() < next_eviction_time
-            ):
-                await asyncio.sleep(0.5)
-                continue
-
-            connected_conns = [
-                conn for conn in self._conns.values() if conn.is_connected()
-            ]
-            restart_conns: list[WsConnection] = []
-            if connected_conns:
-                restart_count = (
-                    self._pool_config.num_connections // 2
-                    if self._pool_config.num_connections >= 4
-                    else 1
-                )
-                restart_conns = nlargest(
-                    restart_count,
-                    connected_conns,
-                    key=lambda x: x.get_latency_ms(),
-                )
-
-            # Queue connection replacements instead of blocking
-            for old_conn in restart_conns:
-                old_conn.close()
-                old_conn_id = old_conn.get_config().conn_id
-                self._conns.pop(old_conn_id, None)
-
+            for conn_id, conn in list(self._conns.items()):
+                if not conn.is_connected():
+                    self._conns.pop(conn_id, None)
             self._update_fast_connection()
-            self._schedule_replacements(len(restart_conns))
-
-            next_eviction_time += self._pool_config.evict_interval_s
+            if self._config.auto_reconnect:
+                if time_s() >= next_eviction_time:
+                    connected = list(self._conns.values())
+                    restart_count = (
+                        self._pool_config.num_connections // 2
+                        if self._pool_config.num_connections >= 4
+                        else 1
+                    )
+                    for conn in nlargest(
+                        restart_count, connected, key=lambda c: c.get_latency_ms()
+                    ):
+                        self._conns.pop(conn.get_config().conn_id, None)
+                        conn.close()
+                    self._update_fast_connection()
+                    next_eviction_time = time_s() + self._pool_config.evict_interval_s
+                self._schedule_replacements(self._pool_config.num_connections)
+            await asyncio.sleep(0.1)
 
     def _update_fast_connection(self) -> None:
         """Refresh the cached fastest connection by latency.
@@ -191,29 +181,40 @@ class WsPool:
         )
 
     def _schedule_replacements(self, count: int) -> None:
-        """Schedules replacement connections on the event loop.
-
-        Args:
-            count (int): Number of replacement connections to open.
-
-        Returns:
-            None: This method does not return a value.
-        """
-        if count <= 0 or self._should_stop:
+        """Keep at most one retry task per missing connection."""
+        if count <= 0 or self._should_stop or not self._config.auto_reconnect:
             return
         loop = self._loop
         if loop is None or loop.is_closed():
             return
-        for _ in range(count):
-            loop.call_soon_threadsafe(self._create_open_task)
+        try:
+            same_loop = asyncio.get_running_loop() is loop
+        except RuntimeError:
+            same_loop = False
+        if not same_loop:
+            loop.call_soon_threadsafe(self._schedule_replacements, count)
+            return
+        missing = (
+            self._pool_config.num_connections
+            - self.get_connection_count()
+            - len(self._replacement_tasks)
+        )
+        for _ in range(min(count, max(0, missing))):
+            task = loop.create_task(self._replace_connection())
+            self._replacement_tasks.add(task)
+            task.add_done_callback(self._replacement_tasks.discard)
 
-    def _create_open_task(self) -> None:
-        """Create a task to open a new connection on the event loop.
-
-        Returns:
-            None: This method does not return a value.
-        """
-        asyncio.create_task(self._open_new_conn())
+    async def _replace_connection(self) -> None:
+        """Retry a missing socket with bounded exponential backoff."""
+        delay = 1.0
+        while not self._should_stop and self._config.auto_reconnect:
+            try:
+                await self._open_new_conn()
+                return
+            except Exception as exc:
+                _logger.warning("WebSocket replacement failed; retrying: %s", exc)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2.0, 30.0)
 
     @staticmethod
     def _hash_payload(msg: bytes) -> int:
@@ -247,46 +248,46 @@ class WsPool:
         Returns:
             None: This method does not return a value.
         """
-        fast_conn = self._fast_conn
-        if only_fastest and fast_conn is not None:
+        if only_fastest:
+            fast_conn = self._fast_conn
+            if fast_conn is None or not fast_conn.is_connected():
+                self._update_fast_connection()
+                fast_conn = self._fast_conn
+            if fast_conn is None:
+                raise RuntimeError("No live connections")
+            # A transport error may follow a write. Propagate it without
+            # retrying an order whose delivery is uncertain.
             fast_conn.send_data(msg)
         else:
-            for conn in self._conns.values():
+            connected = [conn for conn in self._conns.values() if conn.is_connected()]
+            if not connected:
+                raise RuntimeError("No live connections")
+            for conn in connected:
                 conn.send_data(msg)
 
-    async def _open_new_conn(self) -> None:
-        """Open a new WebSocket connection and add it to the pool.
-
-        Automatically derives a safe connection config from the base config
-        and updates the fast-connection cache on success.
-
-        """
-        try:
-            if self._should_stop:
-                return
-            base_url = self._config.wss_url
-            safe_url = base_url if base_url.startswith("wss://") else "wss://localhost"
-            config = WsConnectionConfig.default(
-                safe_url,
-                on_connect=self._config.on_connect,
-                auto_reconnect=self._config.auto_reconnect,
-                max_frame_size=self._config.max_frame_size,
-                latency_ping_interval_ms=self._config.latency_ping_interval_ms,
-            )
-            if config.wss_url != base_url:
-                # Preserve ws:// URLs for local test servers after validation.
-                config.wss_url = base_url
-            new_conn = await WsConnection.new(
-                ringbuffer=self._ringbuffer,
-                config=config,
-            )
-            if self._should_stop:
-                new_conn.close()
-                return
-            self._conns[config.conn_id] = new_conn
-            self._update_fast_connection()
-        except Exception as exc:
-            _logger.warning("WebSocket connection failed: %s", exc)
+    async def _open_new_conn(self) -> WsConnection:
+        """Return one live socket or raise, including when shutdown races open."""
+        if self._should_stop:
+            raise RuntimeError("WebSocket pool is closed")
+        generation = self._generation
+        config = WsConnectionConfig.default(
+            self._config.wss_url,
+            on_connect=self._config.on_connect,
+            auto_reconnect=self._config.auto_reconnect,
+            max_frame_size=self._config.max_frame_size,
+            latency_ping_interval_ms=self._config.latency_ping_interval_ms,
+        )
+        conn = await WsConnection.new(ringbuffer=self._ringbuffer, config=config)
+        if (
+            self._should_stop
+            or generation != self._generation
+            or not conn.is_connected()
+        ):
+            conn.close()
+            raise RuntimeError("WebSocket pool closed or disconnected during open")
+        self._conns[config.conn_id] = conn
+        self._update_fast_connection()
+        return conn
 
     def set_on_connect(self, on_connect: list[bytes]) -> None:
         """Update the messages sent when new connections open.
@@ -308,7 +309,7 @@ class WsPool:
         If sending something latency sensitive like an Order, it should
         only be sent through one connection.
         """
-        if self._pool_state != ConnectionState.CONNECTED:
+        if not self._started or self._should_stop:
             raise RuntimeError("Connection not running")
         if self.get_connection_count() == 0:
             raise RuntimeError("No live connections")
@@ -337,6 +338,12 @@ class WsPool:
             ConnectionState: Overall pool state.
 
         """
+        if self._started and not self._should_stop:
+            if self.get_connection_count():
+                return ConnectionState.CONNECTED
+            if self._config.auto_reconnect:
+                return ConnectionState.CONNECTING
+            return ConnectionState.DISCONNECTED
         return self._pool_state
 
     def get_config(self) -> WsConnectionConfig:
@@ -390,6 +397,12 @@ class WsPool:
     def close(self) -> None:
         """Shut down the pool, cancel eviction, and close all connections."""
         self._should_stop = True
+        self._started = False
+        self._generation += 1
+        for task in (*self._opening_tasks, *self._replacement_tasks):
+            task.cancel()
+        self._opening_tasks.clear()
+        self._replacement_tasks.clear()
         self._pool_state = ConnectionState.DISCONNECTED
         if self._eviction_task is not None:
             self._eviction_task.cancel()
@@ -406,28 +419,54 @@ class WsPool:
             conn.close()
 
     async def __aenter__(self) -> Self:
-        """Async context manager entry. Opens all connections in the pool."""
+        """Open every requested socket; any failure rolls back the whole start."""
+        if self._started and not self._should_stop:
+            return self
         self._loop = asyncio.get_running_loop()
-        if self._pool_state != ConnectionState.CONNECTED:
-            # Create connections concurrently for faster startup
-            tasks = [
-                self._open_new_conn() for _ in range(self._pool_config.num_connections)
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            successes = [r for r in results if not isinstance(r, Exception)]
-            if not successes:
-                raise RuntimeError("Failed to establish any WebSocket connections")
-            self._pool_state = ConnectionState.CONNECTED
-
-            # Set initial fast connection
-            self._update_fast_connection()
-            if self._eviction_task is None or self._eviction_task.done():
-                self._eviction_task = asyncio.create_task(self._timed_operations())
+        self._should_stop = False
+        self._generation += 1
+        self._pool_state = ConnectionState.CONNECTING
+        tasks = [
+            self._loop.create_task(self._open_new_conn())
+            for _ in range(self._pool_config.num_connections)
+        ]
+        self._opening_tasks.update(tasks)
+        try:
+            results = await asyncio.gather(*tasks)
+            if (
+                self._should_stop
+                or len(results) != self._pool_config.num_connections
+                or any(not conn.is_connected() for conn in results)
+            ):
+                raise RuntimeError("Failed to establish every WebSocket connection")
+        except BaseException as exc:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            self.close()
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+            raise RuntimeError(
+                "Failed to establish every WebSocket connection"
+            ) from exc
+        finally:
+            self._opening_tasks.difference_update(tasks)
+        self._started = True
+        self._pool_state = ConnectionState.CONNECTED
+        self._update_fast_connection()
+        self._eviction_task = asyncio.create_task(self._timed_operations())
         return self
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Async context manager exit. Closes all connections in the pool."""
+        tasks = set(self._opening_tasks) | set(self._replacement_tasks)
+        if self._eviction_task is not None:
+            tasks.add(self._eviction_task)
         self.close()
+        current = asyncio.current_task()
+        await asyncio.gather(
+            *(task for task in tasks if task is not current), return_exceptions=True
+        )
 
     def __aiter__(self) -> Self:
         """Returns an async iterator over the pool's ringbuffer."""

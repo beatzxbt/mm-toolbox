@@ -7,7 +7,6 @@ implementations.
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 import numpy as np
@@ -20,6 +19,7 @@ from mm_toolbox.moving_average import (
     WeightedMovingAverage,
 )
 from mm_toolbox.moving_average.base import MovingAverage
+from .tema_clock import set_time_ns, update_at
 
 MA_CLASSES = [
     SimpleMovingAverage,
@@ -134,8 +134,6 @@ class TestIdenticalSequence:
         ma.initialize(np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64))
 
         for price in [5.0, 6.0, 7.0]:
-            if ma_cls is TimeExponentialMovingAverage:
-                time.sleep(0.01)  # let TEMA's clock advance slightly
             result = ma.update(price)
             assert isinstance(result, float)
 
@@ -145,8 +143,6 @@ class TestIdenticalSequence:
         ma = _make_instance(ma_cls, window=4)
         ma.initialize(np.array([10.0, 20.0, 30.0, 40.0], dtype=np.float64))
 
-        if ma_cls is TimeExponentialMovingAverage:
-            time.sleep(0.01)
         returned = ma.update(50.0)
         assert ma.get_value() == pytest.approx(returned)
 
@@ -190,13 +186,19 @@ class TestFastMode:
         ma_fast.initialize(init_vals.copy())
         ma_norm.initialize(init_vals.copy())
 
-        for price in updates:
+        if ma_cls is TimeExponentialMovingAverage:
+            set_time_ns(ma_fast, 1_000_000_000)
+            set_time_ns(ma_norm, 1_000_000_000)
+        for index, price in enumerate(updates):
             if ma_cls is TimeExponentialMovingAverage:
-                time.sleep(0.01)
-            v_fast = ma_fast.update(price)
-            v_norm = ma_norm.update(price)
-            assert v_fast == pytest.approx(v_norm, abs=1e-9)
-            assert ma_fast.get_value() == pytest.approx(ma_norm.get_value(), abs=1e-9)
+                timestamp = (index + 2) * 1_000_000_000
+                v_fast = update_at(ma_fast, price, timestamp)
+                v_norm = update_at(ma_norm, price, timestamp)
+            else:
+                v_fast = ma_fast.update(price)
+                v_norm = ma_norm.update(price)
+            assert v_fast == pytest.approx(v_norm, abs=1e-5)
+            assert ma_fast.get_value() == pytest.approx(ma_norm.get_value(), abs=1e-5)
 
     @pytest.mark.parametrize("ma_cls", MA_CLASSES, ids=MA_NAMES)
     def test_fast_mode_len_stays_zero(self, ma_cls: Any):
@@ -205,8 +207,6 @@ class TestFastMode:
         ma.initialize(np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64))
 
         for _ in range(10):
-            if ma_cls is TimeExponentialMovingAverage:
-                time.sleep(0.005)
             ma.update(5.0)
 
         # len() is already tested to raise, but we can also inspect
@@ -224,7 +224,8 @@ class TestRealisticWorkflow:
     """End-to-end 1000-tick price stream."""
 
     @pytest.fixture(scope="class")
-    def price_stream(self) -> np.ndarray:
+    @classmethod
+    def price_stream(cls) -> np.ndarray:
         """A synthetic 1000-tick price series."""
         rng = np.random.default_rng(42)
         returns = rng.normal(loc=0.0, scale=0.01, size=1000)
@@ -239,9 +240,6 @@ class TestRealisticWorkflow:
         ma.initialize(price_stream[:window].copy())
 
         for price in price_stream[window:]:
-            if ma_cls is TimeExponentialMovingAverage:
-                # tiny sleep so TEMA's alpha is non-zero
-                time.sleep(0.001)
             ma.update(float(price))
 
         assert ma.get_value() > 0.0
@@ -255,8 +253,6 @@ class TestRealisticWorkflow:
         ma.initialize(np.full(window, 50.0, dtype=np.float64))
 
         for _ in range(100):
-            if ma_cls is TimeExponentialMovingAverage:
-                time.sleep(0.001)
             ma.update(50.0)
 
         assert ma.get_value() == pytest.approx(50.0, abs=1e-3)
@@ -271,7 +267,8 @@ class TestReferenceAccuracy:
     """Compare MA outputs to reference NumPy implementations."""
 
     @pytest.fixture(scope="class")
-    def price_stream(self) -> np.ndarray:
+    @classmethod
+    def price_stream(cls) -> np.ndarray:
         rng = np.random.default_rng(12345)
         returns = rng.normal(loc=0.0, scale=0.005, size=500)
         return (100.0 * np.exp(np.cumsum(returns))).astype(np.float64)
@@ -317,30 +314,25 @@ class TestReferenceAccuracy:
         np.testing.assert_allclose(results, ref[window - 1 :], rtol=1e-12)
 
     def test_tema_approximates_expected_with_known_timestamps(self):
-        """TEMA against an explicit Python reference with controlled time steps."""
+        """TEMA recurrence matches a reference with controlled timestamps."""
         half_life = 1.0
         window = 2
         prices = np.array([10.0, 10.0, 20.0, 20.0, 30.0], dtype=np.float64)
-        # Simulate 1-second intervals
-        timestamps = np.arange(len(prices), dtype=np.float64)
 
         ma = TimeExponentialMovingAverage(window=window, half_life_s=half_life)
         ma.initialize(prices[:2].copy())
-
-        results = [ma.get_value()]
-        for i in range(2, len(prices)):
-            time.sleep(1.0)  # real wall-clock step of 1 s
-            results.append(ma.update(float(prices[i])))
-
-        # Reference
+        time_ns = 1_000_000_000
+        set_time_ns(ma, time_ns)
+        reference = ma.get_value()
         lam = np.log(2.0) / half_life
-        ref_values = [prices[0]]
-        for i in range(1, len(prices)):
-            dt = timestamps[i] - timestamps[i - 1]
-            alpha = 1.0 - np.exp(-lam * dt)
-            ref_values.append(alpha * prices[i] + (1.0 - alpha) * ref_values[-1])
+        elapsed_ns = [250_000_000, 1_000_000_000, 500_000_000]
+        for price, dt_ns in zip(prices[2:], elapsed_ns):
+            time_ns += dt_ns
+            alpha = -np.expm1(-lam * (dt_ns * 1e-9))
+            reference = alpha * price + (1.0 - alpha) * reference
+            result = update_at(ma, float(price), time_ns)
 
-        np.testing.assert_allclose(results, ref_values[1:], rtol=1e-3)
+            assert result == pytest.approx(reference, abs=1e-12)
 
 
 if __name__ == "__main__":

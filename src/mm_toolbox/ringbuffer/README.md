@@ -62,8 +62,8 @@ Producer                       Consumer
 
 `ShmMpscProducer` and `ShmMpscConsumer` provide a multi-producer/single-consumer
 shared-memory ring buffer built on a sharded sub-ring architecture. Each
-sub-ring is a complete SPSC queue; producers pick a sub-ring round-robin via an
-atomic counter while the consumer round-robins across all sub-rings for fairness.
+sub-ring is a complete SPSC queue; producers claim an exclusive sub-ring using CAS, starting from a rotating
+search position while the consumer round-robins across all sub-rings for fairness.
 
 - File-backed mmap with power-of-two capacity per sub-ring.
 - Length-prefixed messages.
@@ -82,7 +82,7 @@ atomic counter while the consumer round-robins across all sub-rings for fairness
 
 ### BytesRingBufferFast
 - Pre-allocated slots sized from `expected_item_size` and `buffer_percent`.
-- `insert_char` supports direct `char*` ingestion to avoid conversions.
+- `insert_char` is Cython-only for direct `char*` ingestion; Python uses `insert(bytes)`.
 - Oversized inserts raise `ValueError`; no truncation occurs.
 - Best for high-frequency byte workloads with predictable message sizes.
 
@@ -154,3 +154,27 @@ The module exports protocol types for type-checked abstractions:
 - In-process buffers use FIFO consume semantics: `consume()` pops the oldest item.
 - `unwrapped()` returns items from oldest to newest.
 - Async helpers (`aconsume`, `aconsume_iterable`) block until new data arrives.
+
+## Shared-memory format and loss reporting
+
+The hardened format uses eight-byte-aligned, padded records and a versioned
+128-byte per-ring header. Existing mappings from previous versions are rejected;
+stop all users and recreate the mapping when upgrading. Capacity includes record
+headers and up to seven padding bytes per message.
+
+The native queue core uses lock-free 64-bit atomic copies and cursor CAS; it has
+no reader/writer lock. A failed speculative read is retried without delivering
+its contents. Blocking wrappers still wait for data when empty.
+
+Each producer instance owns one shard until close. More active producers than
+shards raises `RuntimeError`; a creator that also writes counts as a producer.
+Do not use an inherited producer after fork: attach a fresh instance. Claims
+from crashed writers are not stolen; recreate the mapping after stopping users.
+One consuming operation per SPSC ring or MPSC consumer is supported. Closing or
+unmapping concurrently with an operation is unsupported.
+
+`dropped_count`, `last_insert_dropped`, and `failed_inserts` expose overwrite and
+insertion failures. Callers requiring stream continuity must handle losses.
+`consume_into` reuses private scratch after its maximum payload capacity has been
+established; a failed retirement does not modify the destination. `len` and
+snapshot inspection validate their copied record view and can retry under load.

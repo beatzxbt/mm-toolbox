@@ -50,7 +50,12 @@ def get_extension(name, sources, include_dirs=None):
         extra_link_args=EXTRA_LINK_ARGS,
     )
     if CYTHON_TRACE:
-        kwargs["define_macros"] = [("CYTHON_TRACE", "1")]
+        # Coverage plugins require the legacy C trace hooks on Python 3.13+.
+        # https://docs.cython.org/en/latest/src/userguide/source_files_and_compilation.html
+        kwargs["define_macros"] = [
+            ("CYTHON_TRACE", "1"),
+            ("CYTHON_USE_SYS_MONITORING", "0"),
+        ]
     return Extension(**kwargs)
 
 
@@ -227,6 +232,7 @@ def get_orderbook_extensions():
         get_extension(
             name="mm_toolbox.orderbook.advanced.ladder.ladder",
             sources=[
+                "src/mm_toolbox/orderbook/advanced/c/orderbook_helpers.c",
                 "src/mm_toolbox/orderbook/advanced/c/orderbook_ladder.c",
                 "src/mm_toolbox/orderbook/advanced/ladder/ladder.pyx",
             ],
@@ -234,17 +240,27 @@ def get_orderbook_extensions():
         ),
         get_extension(
             name="mm_toolbox.orderbook.advanced.core",
-            sources=["src/mm_toolbox/orderbook/advanced/core.pyx"],
+            sources=[
+                "src/mm_toolbox/orderbook/advanced/c/orderbook_helpers.c",
+                "src/mm_toolbox/orderbook/advanced/core.pyx",
+            ],
             include_dirs=base_include_dirs,
         ),
         get_extension(
             name="mm_toolbox.orderbook.advanced.cython",
-            sources=["src/mm_toolbox/orderbook/advanced/cython.pyx"],
+            sources=[
+                "src/mm_toolbox/orderbook/advanced/c/orderbook_helpers.c",
+                "src/mm_toolbox/orderbook/advanced/cython.pyx",
+            ],
             include_dirs=base_include_dirs,
         ),
         get_extension(
             name="mm_toolbox.orderbook.advanced.python",
-            sources=["src/mm_toolbox/orderbook/advanced/python.pyx"],
+            sources=[
+                "src/mm_toolbox/orderbook/advanced/c/orderbook_helpers.c",
+                "src/mm_toolbox/orderbook/advanced/c/orderbook_ladder.c",
+                "src/mm_toolbox/orderbook/advanced/python.pyx",
+            ],
             include_dirs=base_include_dirs,
         ),
     ]
@@ -439,6 +455,7 @@ setup(
     package_dir={"": "src"},
     package_data={
         "mm_toolbox": [
+            "py.typed",
             "**/*.pxd",
             "**/*.pyi",
         ]

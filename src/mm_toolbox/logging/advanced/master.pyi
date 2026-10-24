@@ -46,7 +46,7 @@ class MasterLogger:
         """Send an error-level log message."""
         ...
 
-    def shutdown(self) -> None:
+    def shutdown(self, timeout_s: float = 2.0) -> None:
         """Flush any remaining messages and shuts down the master logger.
 
         This method stops accepting new messages from worker loggers and
@@ -54,6 +54,10 @@ class MasterLogger:
 
         Warning:
             After calling shutdown(), this logger cannot be used again.
+
+        Args:
+            timeout_s: Total seconds allowed for the drain thread, transport,
+                and handlers to stop cooperatively.
         """
         ...
 

@@ -1,6 +1,5 @@
-# Re-export ladder types for cimport convenience
+"""Re-export ladder cdef types for Cython cimport convenience."""
+
 from .ladder cimport (
     OrderbookLadder,
-    OrderbookLadderView,
 )
-

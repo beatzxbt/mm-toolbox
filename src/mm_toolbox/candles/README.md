@@ -90,3 +90,21 @@ completed candles into a ring buffer.
 - `store_trades=True` keeps the trade list in each candle; tune `num_candles` for memory.
 - `initialize(trades)` explicitly sets the baseline from a non-empty list of `Trade` objects.
 - `Trade` and `Candle` are lightweight `msgspec.Struct` instances.
+
+## Delivery and replay guarantees
+
+Time buckets are anchored to the first accepted trade, so historical replay is
+independent of construction time. Reinitializing resets that anchor and cancels
+pending waits. Trades older than the last accepted stream timestamp are ignored,
+including immediately after a bucket closes; equal timestamps are accepted.
+
+Async iteration broadcasts a new closure to all currently waiting consumers.
+Otherwise closures wait in FIFO order, separately from retained history. Pending
+delivery is bounded by `num_candles`; an overrun raises `RuntimeError` on the next
+await before retained candles are delivered. Consumers requiring continuity must
+handle that error. Cancelling a wait does not consume a future candle.
+
+Volume and multi-trigger thresholds measure trade size, not price-times-size.
+Splits preserve size and notional, including quantities below `1e-12`. Nonfinite
+limits and invalid quantities fail explicitly; a threshold too small to make
+floating-point progress for an input trade raises rather than looping forever.

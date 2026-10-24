@@ -167,8 +167,9 @@ class TestWsSingleErrorScenarios:
                 await task
 
     async def test_send_data_no_op_when_none(self) -> None:
-        """Given a WsSingle with no underlying connection, When send_data is called, Then it is a no-op and does not raise."""
+        """Given a WsSingle with no underlying connection, When send_data is called, Then it raises a disconnected error."""
         config = WsConnectionConfig.default("wss://test.com")
         ws = WsSingle(config)
-        ws.send_data(b"no-op")
+        with pytest.raises(RuntimeError, match="disconnected"):
+            ws.send_data(b"no-op")
         assert ws._ws_conn is None

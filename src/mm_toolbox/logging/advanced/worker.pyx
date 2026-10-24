@@ -4,7 +4,9 @@ Lightweight per-thread logger that batches messages and forwards them
 via shared memory to the MasterLogger.  Enforces a singleton per thread.
 """
 
+import errno
 import os
+import sys
 import threading
 
 from libc.stdint cimport (
@@ -23,10 +25,18 @@ from mm_toolbox.logging.advanced.protocol cimport (
 )
 
 from mm_toolbox.logging.advanced.config cimport LoggerConfig
+from mm_toolbox.logging.advanced.config import _producer_ring_count
 
 
 # Per-thread singleton guard
 _worker_logger_local = threading.local()
+
+
+def _write_transport_diagnostic(name: bytes, message: str) -> None:
+    """Write transport loss details where they remain visible without handlers."""
+    worker_name = name.decode("utf-8", errors="replace")
+    sys.stderr.write(f"[WorkerLogger {worker_name}] {message}\n")
+    sys.stderr.flush()
 
 
 cdef class WorkerLogger:
@@ -62,13 +72,16 @@ cdef class WorkerLogger:
         Raises:
             RuntimeError: If another WorkerLogger is already active in this thread.
         """
-        cdef bint should_create = False
+        cdef int producer_ring_count
+        cdef u64 ring_budget
+        cdef object record_budget
 
         self._config = config if config else LoggerConfig() 
 
         self._name = (name if name else f"WORKER{os.getpid()}").encode('utf-8')
         self._len_name = len(self._name)
         self._name_as_chars = <unsigned char*>self._name
+        producer_ring_count = _producer_ring_count(self._config)
         
         self._num_pending_logs = 0
         self._batch_writer = BinaryWriter(initial_capacity=1*1024*1024)  # 1MB baseline
@@ -90,17 +103,42 @@ cdef class WorkerLogger:
             self._transport = ShmMpscProducer(
                 path=self._config.path,
                 capacity_bytes=self._config.shm_capacity_bytes,
-                num_rings=0,
+                num_rings=producer_ring_count,
                 create=False,
             )
-        except (OSError, RuntimeError):
-            self._transport = ShmMpscProducer(
-                path=self._config.path,
-                capacity_bytes=self._config.shm_capacity_bytes,
-                num_rings=0,
-                create=True,
-                unlink_on_close=False,
-            )
+        except OSError as exc:
+            if exc.errno != errno.ENOENT:
+                raise
+            try:
+                self._transport = ShmMpscProducer(
+                    path=self._config.path,
+                    capacity_bytes=self._config.shm_capacity_bytes,
+                    num_rings=producer_ring_count,
+                    create=True,
+                    unlink_on_close=False,
+                )
+            except FileExistsError:
+                # Another first producer created the mapping after our attach
+                # attempt. Reattach and claim an independent shard.
+                self._transport = ShmMpscProducer(
+                    path=self._config.path,
+                    capacity_bytes=self._config.shm_capacity_bytes,
+                    num_rings=producer_ring_count,
+                    create=False,
+                )
+
+        # The wire header needs 21 bytes plus the worker name beyond records.
+        # Use the conservative configured capacity per shard so a batch cannot
+        # grow beyond what the claimed ring is guaranteed to hold.
+        ring_budget = self._config.shm_capacity_bytes // self._transport.num_rings
+        # Eight bytes are reserved for the outer ring record length; its
+        # capacity is aligned, so payloads within this bound also fit padding.
+        record_budget = max(0, int(ring_budget) - (8 + 21 + self._len_name))
+        self._max_batch_data_bytes = <u32>min(
+            self._config.max_batch_bytes,
+            record_budget,
+            0xFFFFFFFF,
+        )
         
         self._stop_event = threading.Event()
         
@@ -128,8 +166,11 @@ cdef class WorkerLogger:
             try:
                 if self._num_pending_logs > 0:
                     self._flush_logs()
-            except Exception:
-                # Reset to prevent infinite retry / duplicate logs
+            except Exception as exc:
+                _write_transport_diagnostic(
+                    self._name,
+                    f"discarded pending batch after transport error: {exc}",
+                )
                 with self._batch_lock:
                     self._batch_writer.reset()
                     self._num_pending_logs = 0
@@ -139,33 +180,8 @@ cdef class WorkerLogger:
 
         Acquires ``_batch_lock`` before serializing and sending.
         """
-        cdef u32 batch_len
-        cdef u32 data_len
-        cdef BinaryWriter writer
         with self._batch_lock:
-            if self._num_pending_logs == 0:
-                return
-
-            batch_len = self._batch_writer.length()
-            # Check for overflow in data_len calculation
-            if batch_len > <u32>(0xFFFFFFFF) - (4 + self._len_name + 4):
-                raise ValueError("Batch data length would overflow")
-            data_len = 4 + self._len_name + 4 + batch_len
-            # Check for overflow in writer allocation size
-            if data_len > <u32>(0xFFFFFFFF) - (1 + 8 + 4):
-                raise ValueError("Writer allocation would overflow")
-            writer = BinaryWriter(1 + 8 + 4 + data_len)
-            writer.write_u8(<u8>MessageType.LOG)
-            writer.write_u64(time_ns())
-            writer.write_u32(data_len)
-            writer.write_u32(self._len_name)
-            writer.write_chars(self._name_as_chars, self._len_name)
-            writer.write_u32(self._num_pending_logs)
-            writer.write_chars(self._batch_writer._buffer, batch_len)
-            self._transport.insert(writer.finalize())
-
-            self._batch_writer.reset()
-            self._num_pending_logs = 0
+            self._flush_logs_locked()
     
     cdef void _add_log_to_batch(self, CLogLevel clevel, u32 message_len, unsigned char* message) except *:
         """Append a single log record to the batch.
@@ -176,7 +192,18 @@ cdef class WorkerLogger:
             message (unsigned char*): Pointer to the message bytes.
         """
         cdef u64 time_now_ns
+        cdef u64 record_size
         with self._batch_lock:
+            record_size = 13 + <u64>message_len
+            if record_size > self._max_batch_data_bytes:
+                _write_transport_diagnostic(
+                    self._name,
+                    f"dropped message of {message_len} bytes; maximum safe record batch is {self._max_batch_data_bytes} bytes",
+                )
+                return
+            if self._batch_writer.length() + record_size > self._max_batch_data_bytes:
+                self._flush_logs_locked()
+
             time_now_ns = time_ns()
             self._batch_writer.write_u64(time_now_ns)
             self._batch_writer.write_u8(<u8>clevel)
@@ -186,7 +213,7 @@ cdef class WorkerLogger:
 
             # Size-based flush trigger
             if (self._num_pending_logs >= self._config.max_batch_messages or
-                self._batch_writer.length() >= self._config.max_batch_bytes):
+                self._batch_writer.length() >= self._max_batch_data_bytes):
                 self._flush_logs_locked()
 
     cdef void _flush_logs_locked(self) except *:
@@ -194,6 +221,8 @@ cdef class WorkerLogger:
         cdef u32 batch_len
         cdef u32 data_len
         cdef BinaryWriter writer
+        cdef bint inserted
+        cdef u64 dropped
         if self._num_pending_logs == 0:
             return
 
@@ -213,7 +242,28 @@ cdef class WorkerLogger:
         writer.write_chars(self._name_as_chars, self._len_name)
         writer.write_u32(self._num_pending_logs)
         writer.write_chars(self._batch_writer._buffer, batch_len)
-        self._transport.insert(writer.finalize())
+        try:
+            inserted = self._transport.insert(writer.finalize())
+            dropped = self._transport.last_insert_dropped
+        except Exception as exc:
+            _write_transport_diagnostic(
+                self._name,
+                f"discarded {self._num_pending_logs} logs ({batch_len} record bytes) after insert error: {exc}",
+            )
+            self._batch_writer.reset()
+            self._num_pending_logs = 0
+            return
+
+        if not inserted:
+            _write_transport_diagnostic(
+                self._name,
+                f"discarded {self._num_pending_logs} logs ({batch_len} record bytes); transport rejected insert #{self._transport.failed_inserts}",
+            )
+        elif dropped:
+            _write_transport_diagnostic(
+                self._name,
+                f"SHM overwrite dropped {dropped} older log batches (cumulative {self._transport.dropped_count})",
+            )
 
         self._batch_writer.reset()
         self._num_pending_logs = 0
@@ -284,8 +334,11 @@ cdef class WorkerLogger:
         # point ensures that no more logs will be added into the batch.
         try:
             self._flush_logs()
-        except Exception:
-            pass
+        except Exception as exc:
+            _write_transport_diagnostic(
+                self._name,
+                f"discarded pending batch during shutdown after transport error: {exc}",
+            )
         
         # Wait for thread and cleanup
         try:

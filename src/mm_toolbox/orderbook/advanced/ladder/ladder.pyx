@@ -3,37 +3,19 @@
 # cython: wraparound=False
 # cython: cdivision=True
 # distutils: language = c
-# distutils: sources = src/mm_toolbox/orderbook/advanced/c/orderbook_ladder.c
+# distutils: sources = src/mm_toolbox/orderbook/advanced/c/orderbook_ladder.c src/mm_toolbox/orderbook/advanced/c/orderbook_helpers.c
 # distutils: include_dirs = src/mm_toolbox/orderbook/advanced/c
 
-"""
-Orderbook ladder management for bid/ask level arrays.
+"""Internal ring-backed normalized orderbook ladder."""
 
-This module provides the OrderbookLadder class which manages a single side
-(bids or asks) of an orderbook with fixed-size level storage. Performance-
-critical operations (roll_right, roll_left, insert_level) delegate to C
-implementations for optimal memory movement.
-"""
 from __future__ import annotations
 
-import numpy as np
-cimport numpy as cnp
-from cpython.ref cimport Py_INCREF
 from libc.stdint cimport uint64_t as u64
 from libc.stdlib cimport free, malloc
 from posix.stdlib cimport posix_memalign
 
-from ..level.level cimport OrderbookLevel
+from ..level.level cimport OrderbookEntry
 
-# Initialize NumPy C API
-cnp.import_array()
-
-# Extern declaration for setting array base object
-cdef extern from "numpy/arrayobject.h":
-    int PyArray_SetBaseObject(cnp.ndarray arr, object obj)
-
-
-# C declarations from orderbook headers
 cdef extern from "orderbook_types.h":
     u64 ORDERBOOK_MAX_LEVELS
 
@@ -41,190 +23,123 @@ cdef extern from "orderbook_ladder.h":
     ctypedef struct OrderbookLadderData:
         u64 num_levels
         u64 max_levels
-        OrderbookLevel* levels
+        OrderbookEntry* levels
+        u64 head
         int is_price_ascending
 
-    void c_ladder_roll_right(OrderbookLadderData* data, u64 start_index) nogil
-    void c_ladder_roll_left(OrderbookLadderData* data, u64 start_index) nogil
-    void c_ladder_insert_level(OrderbookLevel* levels, u64 index, const OrderbookLevel* level) nogil
+    OrderbookEntry* c_ladder_at(OrderbookLadderData* data, u64 index) noexcept nogil
+    OrderbookEntry* c_ladder_top(OrderbookLadderData* data) noexcept nogil
+    OrderbookEntry* c_ladder_bottom(OrderbookLadderData* data) noexcept nogil
+    void c_ladder_roll_right(OrderbookLadderData* data, u64 start_index) noexcept nogil
+    void c_ladder_roll_left(OrderbookLadderData* data, u64 start_index) noexcept nogil
+    void c_ladder_insert_entry(OrderbookLadderData* data, u64 index, const OrderbookEntry* entry) noexcept nogil
+    u64 c_ladder_ask_seek_start(OrderbookLadderData* data, u64 ticks) noexcept nogil
+    u64 c_ladder_bid_seek_start(OrderbookLadderData* data, u64 ticks) noexcept nogil
+    void c_ladder_apply_sorted_deltas(
+        OrderbookLadderData* data,
+        OrderbookEntry* updates,
+        u64 update_count,
+        OrderbookEntry* scratch,
+    ) noexcept nogil
 
 
 cdef class OrderbookLadder:
-    """Manages a single ladder (bids or asks) with fixed-size level storage."""
+    """Fixed-capacity ladder storing normalized OrderbookEntry values."""
 
     def __cinit__(self, u64 max_levels, bint is_price_ascending) -> None:
         if max_levels == 0:
             raise ValueError(f"Invalid max_levels; expected >0 but got {max_levels}")
         if max_levels > ORDERBOOK_MAX_LEVELS:
             raise ValueError(
-                f"Invalid max_levels; expected <={ORDERBOOK_MAX_LEVELS} but got {max_levels} "
-                f"(prevents integer overflow in memory allocation)"
+                f"Invalid max_levels; expected <={ORDERBOOK_MAX_LEVELS} but got {max_levels}"
             )
 
-        cdef void* raw_ptr
-        cdef int mem_align_errno = posix_memalign(&raw_ptr, 64, max_levels * sizeof(OrderbookLevel))
-        if mem_align_errno != 0:
-            raw_ptr = malloc(max_levels * sizeof(OrderbookLevel))
-            if raw_ptr == NULL:
-                raise MemoryError(f"Cannot allocate memory for levels; posix_memalign errno: {mem_align_errno}")
-        self._levels = <OrderbookLevel*> raw_ptr
+        cdef void* raw_levels
+        cdef void* raw_scratch
+        cdef int levels_errno = posix_memalign(&raw_levels, 64, max_levels * sizeof(OrderbookEntry))
+        if levels_errno != 0:
+            raw_levels = malloc(max_levels * sizeof(OrderbookEntry))
+            if raw_levels == NULL:
+                raise MemoryError(f"Cannot allocate ladder levels; posix_memalign errno: {levels_errno}")
 
-        levels_dtype = np.dtype(
-            [
-                ("price", np.double),
-                ("size", np.double),
-                ("norders", np.uint64),
-                ("ticks", np.uint64),
-                ("lots", np.uint64),
-                ("__padding1", np.uint64),
-                ("__padding2", np.uint64),
-                ("__padding3", np.uint64),
-            ],
-            align=True,
-        )
-        # Create numpy array from raw memory using PyArray_SimpleNewFromData
-        # This avoids Cython memoryview creating its own base reference
-        cdef cnp.npy_intp dims[1]
-        dims[0] = <cnp.npy_intp>(max_levels * sizeof(OrderbookLevel))
-        cdef cnp.ndarray base_array = cnp.PyArray_SimpleNewFromData(
-            1, dims, cnp.NPY_UINT8,
-            <void*>self._levels
-        )
-        # Set self as the base so that views keep self alive
-        Py_INCREF(self)  # PyArray_SetBaseObject steals a reference
-        PyArray_SetBaseObject(base_array, self)
-        # Create the structured view with proper dtype
-        self._levels_numpy = base_array.view(dtype=levels_dtype)
+        cdef int scratch_errno = posix_memalign(&raw_scratch, 64, max_levels * sizeof(OrderbookEntry))
+        if scratch_errno != 0:
+            raw_scratch = malloc(max_levels * sizeof(OrderbookEntry))
+            if raw_scratch == NULL:
+                free(raw_levels)
+                raise MemoryError(f"Cannot allocate ladder scratch; posix_memalign errno: {scratch_errno}")
 
-        self._data = OrderbookLadderData()
+        self._levels = <OrderbookEntry*>raw_levels
+        self._scratch = <OrderbookEntry*>raw_scratch
         self._data.num_levels = 0
         self._data.max_levels = max_levels
         self._data.levels = self._levels
+        self._data.head = 0
         self._data.is_price_ascending = is_price_ascending
 
     def __dealloc__(self):
         if self._levels != NULL:
-            free(<void*> self._levels)
+            free(<void*>self._levels)
+        if self._scratch != NULL:
+            free(<void*>self._scratch)
         self._levels = NULL
+        self._scratch = NULL
 
     cdef inline OrderbookLadderData* get_data(self) noexcept nogil:
-        """Return a pointer to the ladder data for read-only access.
-
-        Returns:
-            Pointer to the internal OrderbookLadderData struct.
-        """
         return &self._data
 
-    cdef void insert_level(self, u64 index, OrderbookLevel level) noexcept nogil:
-        """Insert a level at the specified index.
+    cdef inline void insert_entry(self, u64 index, const OrderbookEntry* entry) noexcept nogil:
+        c_ladder_insert_entry(&self._data, index, entry)
 
-        Args:
-            index: Position to insert at.
-            level: OrderbookLevel to insert.
-        """
-        c_ladder_insert_level(self._levels, index, &level)
+    cdef inline void assign_entry(self, u64 index, const OrderbookEntry* entry) noexcept nogil:
+        c_ladder_insert_entry(&self._data, index, entry)
 
-    cdef void roll_right(self, u64 start_index) noexcept nogil:
-        """Shift levels right starting from start_index to make room for insertion.
+    cdef inline void apply_sorted_deltas(self, OrderbookEntry* updates, u64 update_count) noexcept nogil:
+        c_ladder_apply_sorted_deltas(&self._data, updates, update_count, self._scratch)
 
-        Note: This only shifts data, it does NOT update the count. Caller must
-        call increment_count() separately if a new level is being added.
-        """
+    cdef inline void roll_right(self, u64 start_index) noexcept nogil:
         c_ladder_roll_right(&self._data, start_index)
 
-    cdef void roll_left(self, u64 start_index) noexcept nogil:
-        """Shift levels left starting from start_index to remove a level.
-
-        Note: This only shifts data, it does NOT update the count. Caller must
-        call decrement_count() separately after removing a level.
-        """
+    cdef inline void roll_left(self, u64 start_index) noexcept nogil:
         c_ladder_roll_left(&self._data, start_index)
 
     cdef inline void reset(self) noexcept nogil:
-        """Reset the ladder to empty state.
-
-        Sets the level count to zero without freeing memory.
-        """
         self._data.num_levels = 0
+        self._data.head = 0
+
+    cdef inline void set_count(self, u64 count) noexcept nogil:
+        self._data.num_levels = count if count <= self._data.max_levels else self._data.max_levels
 
     cdef inline void increment_count(self) noexcept nogil:
-        """Increment the level count if not at max capacity.
-
-        Safe to call after roll_right to reflect the new level.
-        """
         if self._data.num_levels < self._data.max_levels:
             self._data.num_levels += 1
 
     cdef inline void decrement_count(self) noexcept nogil:
-        """Decrement the level count if not empty.
-
-        Safe to call after roll_left to reflect the removed level.
-        """
         if self._data.num_levels > 0:
             self._data.num_levels -= 1
 
     cdef inline bint is_empty(self) noexcept nogil:
-        """Check if the ladder has no levels.
-
-        Returns:
-            True if the ladder is empty.
-        """
         return self._data.num_levels == 0
 
     cdef inline bint is_full(self) noexcept nogil:
-        """Check if the ladder is at max capacity.
-
-        Returns:
-            True if the ladder has reached its maximum number of levels.
-        """
         return self._data.num_levels == self._data.max_levels
 
-    cpdef get_levels(self, bint copy=False):
-        """Return a NumPy array of all levels.
+    cdef inline u64 count(self) noexcept nogil:
+        return self._data.num_levels
 
-        Args:
-            copy: If True, return a copy of the data. If False (default), return a view.
-                  WARNING: Views share memory with this OrderbookLadder. You must keep
-                  the OrderbookLadder object alive for as long as you use the view,
-                  otherwise you'll access freed memory.
+    cdef inline u64 capacity(self) noexcept nogil:
+        return self._data.max_levels
 
-        Returns:
-            NumPy structured array with fields: price, size, norders, ticks, lots
-        """
-        cdef object result = self._levels_numpy[: self._data.num_levels]
-        if copy:
-            return result.copy()
-        return result
+    cdef inline OrderbookEntry* at(self, u64 index) noexcept nogil:
+        return c_ladder_at(&self._data, index)
 
-    cpdef get_prices(self, bint copy=False):
-        """Return a NumPy array of prices.
+    cdef inline OrderbookEntry* top(self) noexcept nogil:
+        return c_ladder_top(&self._data)
 
-        Args:
-            copy: If True, return a copy. If False, return a view (see get_levels() for warnings).
-        """
-        cdef object result = self._levels_numpy["price"][: self._data.num_levels]
-        if copy:
-            return result.copy()
-        return result
+    cdef inline OrderbookEntry* bottom(self) noexcept nogil:
+        return c_ladder_bottom(&self._data)
 
-    cpdef get_sizes(self, bint copy=False):
-        """Return a NumPy array of sizes.
-
-        Args:
-            copy: If True, return a copy. If False, return a view (see get_levels() for warnings).
-        """
-        cdef object result = self._levels_numpy["size"][: self._data.num_levels]
-        if copy:
-            return result.copy()
-        return result
-
-    cpdef get_norders(self, bint copy=False):
-        """Return a NumPy array of norders.
-
-        Args:
-            copy: If True, return a copy. If False, return a view (see get_levels() for warnings).
-        """
-        cdef object result = self._levels_numpy["norders"][: self._data.num_levels]
-        if copy:
-            return result.copy()
-        return result
+    cdef inline u64 seek_start(self, u64 ticks) noexcept nogil:
+        if self._data.is_price_ascending:
+            return c_ladder_ask_seek_start(&self._data, ticks)
+        return c_ladder_bid_seek_start(&self._data, ticks)

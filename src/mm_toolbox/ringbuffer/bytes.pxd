@@ -15,7 +15,7 @@ cdef class BytesRingBuffer:
         bint        _disable_async
     cpdef list unwrapped(self)
     cpdef bint insert(self, bytes item)
-    cpdef bint insert_char(self, const char* data, Py_ssize_t n)
+    cdef bint insert_char(self, const char* data, Py_ssize_t n)
     cpdef int consume_into(self, bytearray dst)
     cpdef int consume_all_into(self, list buffers)
     cpdef bint insert_batch(self, list items)
@@ -55,7 +55,7 @@ cdef class BytesRingBufferFast:
         bint        _only_insert_unique
     cpdef list unwrapped(self)
     cpdef bint insert(self, bytes item)
-    cpdef bint insert_char(self, const char* item, Py_ssize_t item_len)
+    cdef bint insert_char(self, const char* item, Py_ssize_t item_len)
     cpdef int consume_into(self, bytearray dst)
     cpdef int consume_all_into(self, list buffers)
     cpdef bint insert_batch(self, list items)

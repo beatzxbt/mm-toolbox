@@ -496,7 +496,7 @@ class TestMpscSharedBytesRingBuffer:
             prod.close()
             # Global header (64) + sub header (64) + 1 byte data, aligned stride = 128
             # total = 64 + 128 = 192
-            assert os.path.getsize(shm_path) == 192
+            assert os.path.getsize(shm_path) == 256
         finally:
             if os.path.exists(shm_path):
                 os.unlink(shm_path)
@@ -1077,7 +1077,7 @@ class TestMpscMapAttachValidation:
 
     def test_map_attach_invalid_num_rings_zero(self, shm_path: str) -> None:
         """Given global header with num_rings=0, When consumer attaches, Then RuntimeError raised."""
-        _MPSC_MAGIC = 0x53484D50
+        _MPSC_MAGIC = 0x3253484D50
         fd = os.open(shm_path, os.O_CREAT | os.O_WRONLY, 0o600)
         try:
             header = struct.pack("QQQQQQQQ", _MPSC_MAGIC, 0, 1024, 0, 0, 0, 0, 0)
@@ -1089,7 +1089,7 @@ class TestMpscMapAttachValidation:
 
     def test_map_attach_invalid_ring_capacity(self, shm_path: str) -> None:
         """Given global header with ring_capacity=0, When consumer attaches, Then RuntimeError raised."""
-        _MPSC_MAGIC = 0x53484D50
+        _MPSC_MAGIC = 0x3253484D50
         fd = os.open(shm_path, os.O_CREAT | os.O_WRONLY, 0o600)
         try:
             header = struct.pack("QQQQQQQQ", _MPSC_MAGIC, 2, 0, 0, 0, 0, 0, 0)
@@ -1101,7 +1101,7 @@ class TestMpscMapAttachValidation:
 
     def test_map_attach_non_power_of_two_ring_capacity(self, shm_path: str) -> None:
         """Given global header with non-power-of-two ring_capacity, When consumer attaches, Then RuntimeError raised."""
-        _MPSC_MAGIC = 0x53484D50
+        _MPSC_MAGIC = 0x3253484D50
         fd = os.open(shm_path, os.O_CREAT | os.O_WRONLY, 0o600)
         try:
             header = struct.pack("QQQQQQQQ", _MPSC_MAGIC, 2, 100, 0, 0, 0, 0, 0)
@@ -1113,7 +1113,7 @@ class TestMpscMapAttachValidation:
 
     def test_map_attach_truncated_after_global_header(self, shm_path: str) -> None:
         """Given file with valid global header but too small for sub-rings, When consumer attaches, Then RuntimeError raised."""
-        _MPSC_MAGIC = 0x53484D50
+        _MPSC_MAGIC = 0x3253484D50
         fd = os.open(shm_path, os.O_CREAT | os.O_WRONLY, 0o600)
         try:
             header = struct.pack("QQQQQQQQ", _MPSC_MAGIC, 4, 1024, 0, 0, 0, 0, 0)
@@ -1151,7 +1151,7 @@ class TestMpscPerRingCapacity:
         try:
             prod.close()
             # global header (64) + 2 * align_up(64 + 1, 64) = 64 + 2*128 = 320
-            assert os.path.getsize(shm_path) == 320
+            assert os.path.getsize(shm_path) == 448
         finally:
             if os.path.exists(shm_path):
                 os.unlink(shm_path)
@@ -1167,9 +1167,9 @@ class TestMpscConsumerPeekEdgeCases:
         )
         try:
             prod.insert(b"x")
-            # MPSC global header = 64 bytes, sub-ring header = 64 bytes, data starts at 128
+            # MPSC global header = 64 bytes, sub-ring header = 64 bytes, data starts at 192
             with open(shm_path, "r+b") as f:
-                f.seek(128)
+                f.seek(192)
                 f.write(struct.pack("Q", 0xFFFFFFFFFFFFFFFF))
             cons = ShmMpscConsumer(shm_path)
             try:
@@ -1188,7 +1188,7 @@ class TestMpscConsumerPeekEdgeCases:
         try:
             prod.insert(b"x")  # actual total = 9 bytes in sub-ring
             with open(shm_path, "r+b") as f:
-                f.seek(128)
+                f.seek(192)
                 f.write(struct.pack("Q", 100))
             cons = ShmMpscConsumer(shm_path)
             try:

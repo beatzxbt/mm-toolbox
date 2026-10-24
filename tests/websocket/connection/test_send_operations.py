@@ -57,7 +57,7 @@ class TestWsConnectionSendOperations:
         basic_server,
         connection_factory,
     ) -> None:
-        """Given a disconnected connection, When send_data is called, Then it is a no-op and the server receives nothing.
+        """Given a disconnected connection, When send_data is called, Then it raises and the server receives nothing.
 
         This prevents crashes when application code sends during teardown
         or after an unexpected disconnect."""
@@ -65,7 +65,10 @@ class TestWsConnectionSendOperations:
             conn = await connection_factory(basic_server)
             conn.close()
             before = len(basic_server.get_received_messages())
-            conn.send_data(b"offline")
+            with pytest.raises(RuntimeError, match="disconnected"):
+                conn.send_data(b"offline")
+            with pytest.raises(RuntimeError, match="disconnected"):
+                conn.send_data_bytearray(bytearray(b"offline"))
             await asyncio.sleep(0.05)
             after = len(basic_server.get_received_messages())
             assert after == before

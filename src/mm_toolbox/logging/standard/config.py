@@ -47,9 +47,10 @@ class LoggerConfig:
                 immediate flush when flush_on_size is True. Must be > 0.
                 Defaults to 1000.
             flush_on_interval (bool): If True, flush after flush_interval_s
-                seconds regardless of buffer size. Defaults to False.
-            flush_interval_s (float): Maximum time (in seconds) before forcing
-                a buffer flush, when flush_on_interval is True. Must be > 0.
+                seconds have elapsed when a subsequent log call is processed.
+                There is no background interval timer. Defaults to False.
+            flush_interval_s (float): Elapsed-time threshold checked on each
+                log call when flush_on_interval is True. Must be > 0.
                 Defaults to 1.0.
             auto_flush_on_exit (bool): If True, registers an atexit hook to
                 flush remaining logs on interpreter shutdown. Defaults to True.

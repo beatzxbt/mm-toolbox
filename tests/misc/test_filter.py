@@ -44,6 +44,27 @@ class TestDataBoundsFilterBounds:
         filt.reset(100.0)
         assert filt.check_and_update(110.01) is True
 
+    def test_negative_reference_uses_symmetric_bounds(self) -> None:
+        """Negative references use their magnitude for the percentage radius."""
+        filt = DataBoundsFilter(1.0)
+        filt.reset(-100.0)
+
+        assert filt.check_and_update(-100.0) is False
+        assert filt.check_and_update(-100.5) is False
+        assert filt.check_and_update(-99.5) is False
+        assert filt.check_and_update(-98.99) is True
+        assert filt.check_and_update(-98.99) is False
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+    def test_nonfinite_values_are_rejected(self, value: float) -> None:
+        """Non-finite observations cannot poison bounds silently."""
+        filt = DataBoundsFilter(1.0)
+
+        with pytest.raises(ValueError, match="value must be finite"):
+            filt.reset(value)
+        with pytest.raises(ValueError, match="value must be finite"):
+            filt.check_and_update(value)
+
 
 class TestDataBoundsFilterResetFlag:
     """Layer 1 — Explicit reset-flag behaviour."""
@@ -60,7 +81,10 @@ class TestDataBoundsFilterResetFlag:
 class TestDataBoundsFilterThresholdValidation:
     """Layer 1 — Constructor threshold-validation tests."""
 
-    @pytest.mark.parametrize("threshold_pct", [0.0, 100.0, -1.0, 150.0])
+    @pytest.mark.parametrize(
+        "threshold_pct",
+        [0.0, 100.0, -1.0, 150.0, float("nan"), float("inf"), -float("inf")],
+    )
     def test_threshold_must_be_within_bounds(self, threshold_pct: float) -> None:
         """Given a threshold outside the open interval (0, 100), construction raises ``ValueError``."""
         with pytest.raises(ValueError):

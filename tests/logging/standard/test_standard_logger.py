@@ -345,6 +345,24 @@ class TestLoggerBufferManagement:
         all_msgs = "\n".join(entry for call in handler.invocations for entry in call)
         assert "interval message" in all_msgs
 
+    def test_interval_check_is_opportunistic_and_flush_is_explicit(self) -> None:
+        """An elapsed interval alone does not start a timer or flush a quiet logger."""
+        handler = RecordingHandler()
+        config = LoggerConfig(
+            do_stdout=False,
+            flush_on_size=False,
+            flush_on_interval=True,
+            flush_interval_s=0.02,
+        )
+        logger = Logger(config=config, handlers=[handler])
+        logger.info("quiet interval message")
+        time.sleep(0.05)
+        assert handler.invocations == []
+        logger.flush()
+        logger.shutdown()
+        assert len(handler.invocations) == 1
+        assert "quiet interval message" in handler.invocations[0][0]
+
     def test_flush_on_size_disabled(self) -> None:
         """Given both size and interval flushing disabled, messages remain buffered until ``flush()`` is called."""
         handler = RecordingHandler()

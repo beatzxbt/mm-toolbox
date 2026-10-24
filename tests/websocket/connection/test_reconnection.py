@@ -96,18 +96,11 @@ class TestWsConnectionReconnection:
         server_reject_connections,
         connection_config_factory,
     ) -> None:
-        """Given a server that rejects handshakes, When the reconnect generator runs, Then it yields a DISCONNECTED connection without crashing.
-
-        This validates that the generator tolerates hard failures and
-        surfaces them as state rather than unhandled exceptions."""
+        """A rejecting server is retried without yielding a dead connection."""
         async with server_reject_connections:
             ringbuffer = BytesRingBuffer(max_capacity=8, only_insert_unique=False)
             config = connection_config_factory(server_reject_connections)
             conn_iter = WsConnection.new_with_reconnect(ringbuffer, config)
-            iterator = conn_iter.__aiter__()
-
-            conn = await iterator.__anext__()
-            await asyncio.sleep(0.1)
-            assert conn.get_state() == ConnectionState.DISCONNECTED
-            conn.close()
-            await iterator.aclose()
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(anext(conn_iter), timeout=1.3)
+            await conn_iter.aclose()

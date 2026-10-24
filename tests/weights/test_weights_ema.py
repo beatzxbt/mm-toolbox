@@ -149,10 +149,12 @@ class TestEmaWeightsEdgeCases:
         assert result_one[-1] == pytest.approx(1.0, abs=1e-12)
         assert np.all(result_one[:-1] == pytest.approx(0.0, abs=1e-12))
 
-        # Note: Alpha = 0 creates division by zero, so we test a very small
-        # alpha instead
+        # A very small positive alpha approaches the uniform limiting case.
         result_small = ema_weights(5, alpha=0.001)
         assert pytest.approx(result_small.sum(), abs=1e-12) == 1.0
+
+        result_zero = ema_weights(5, alpha=0.0)
+        np.testing.assert_allclose(result_zero, np.full(5, 0.2))
 
 
 class TestEmaWeightsNumerical:
@@ -196,3 +198,18 @@ class TestEmaWeightsNumerical:
         for i in range(len(result) - 1):
             ratio = result[i + 1] / result[i]
             assert ratio == pytest.approx(2.0, rel=1e-10)
+
+    def test_zero_alpha_raw_weights_are_finite_zeros(self):
+        """Raw weights at alpha zero are defined as the zero vector."""
+        result = ema_weights(4, alpha=0.0, normalized=False)
+
+        np.testing.assert_array_equal(result, np.zeros(4, dtype=np.float64))
+        assert np.all(np.isfinite(result))
+
+    @pytest.mark.parametrize(
+        "alpha", [float("nan"), float("inf"), -float("inf"), -0.1, 1.1]
+    )
+    def test_alpha_must_be_finite_and_in_unit_interval(self, alpha: float) -> None:
+        """Non-finite and out-of-range smoothing factors are rejected."""
+        with pytest.raises(ValueError, match="alpha must be finite"):
+            ema_weights(4, alpha=alpha)

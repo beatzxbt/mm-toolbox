@@ -1,181 +1,143 @@
-/**
- * @file shm_core.c
- * @brief Implementation of core SHM ring buffer operations.
- *
- * High-performance producer/consumer operations with atomic synchronization
- * and integrated monotonic timestamping. Uses GCC atomic builtins for
- * lock-free memory ordering.
- */
-
 #include "shm_core.h"
 #include "shm_helpers.h"
-#include "../../time/ctime_impl.h"
+#include "../../../time/ctime_impl.h"
 
-/* Atomic operation memory orders (GCC builtin values) */
-#define ATOMIC_ACQUIRE 2
-#define ATOMIC_RELEASE 3
-#define ATOMIC_ACQ_REL 4
-#define ATOMIC_RELAXED 0
+uint64_t shm_record_span(uint64_t len) {
+    if (len > UINT64_MAX - 15) return 0;
+    return (len + 15) & ~7ULL;
+}
 
-/**
- * @brief Insert a message into the ring buffer (producer-side).
- *
- * This function combines reserve, write, and commit operations with
- * monotonic timestamping, all in C for maximum performance. If the buffer
- * is full, oldest messages are dropped to make room.
- *
- * @param ctx          Producer context.
- * @param payload      Payload data pointer.
- * @param payload_len  Payload length in bytes.
- * @param dropped_out  Output: number of dropped messages (if any).
- * @return             1 on success, 0 on failure (message too large or corruption detected).
- * @note Uses acquire/release semantics for safe lock-free synchronization.
- */
-int shm_producer_insert(ShmProducerContext* ctx, const unsigned char* payload,
-                        size_t payload_len, uint64_t* dropped_out) {
-    uint64_t capacity = ctx->capacity;
-    uint64_t mask = ctx->mask;
-    uint64_t write_pos = ctx->cached_write;
-    uint64_t read_pos;
-    uint64_t free_bytes;
-    size_t total_len = SHM_MSG_HEADER_SIZE + payload_len;
-    uint64_t msg_len;
-    uint64_t dropped_pos;
-    uint64_t now_ns;
+int shm_producer_claim(ShmHeader* hdr, uint64_t owner) {
+    uint64_t empty = 0;
+    return owner != 0 && __atomic_compare_exchange_n(&hdr->producer_claim,
+        &empty, owner, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+}
 
+void shm_producer_release(ShmHeader* hdr, uint64_t owner) {
+    if (owner) __atomic_compare_exchange_n(&hdr->producer_claim, &owner, 0,
+                                         0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+}
+
+int shm_producer_reserve(ShmProducerContext* ctx, uint64_t need, uint64_t* dropped_out) {
+    uint64_t write = ctx->cached_write;
     *dropped_out = 0;
-
-    /* Sanity check: message must fit in buffer */
-    if (total_len > capacity) {
+    if (!need || (need & 7) || need > ctx->capacity || write > UINT64_MAX - need)
         return 0;
-    }
-
-    /* Load current read position with acquire semantics */
-    read_pos = __atomic_load_n(&ctx->hdr->read_pos, ATOMIC_ACQUIRE);
-    ctx->cached_read = read_pos;
-
-    free_bytes = capacity - (write_pos - read_pos);
-
-    /* If not enough space, drop oldest messages until we have room */
-    if (free_bytes < total_len) {
-        dropped_pos = read_pos;
-        while (1) {
-            /* Read message length at current read position */
-            msg_len = shm_read_u64_le(ctx->data, dropped_pos & mask, mask);
-
-            /* Sanity check for corruption */
-            if (msg_len > capacity || (SHM_MSG_HEADER_SIZE + msg_len) > capacity) {
-                return 0;
-            }
-
-            dropped_pos += SHM_MSG_HEADER_SIZE + msg_len;
-            (*dropped_out)++;
-            free_bytes = capacity - (write_pos - dropped_pos);
-
-            if (free_bytes >= total_len) {
-                /* Update read position atomically and decrement message count */
-                __atomic_store_n(&ctx->hdr->read_pos, dropped_pos, ATOMIC_RELEASE);
-                if (*dropped_out > 0) {
-                    __atomic_sub_fetch(&ctx->hdr->msg_count, *dropped_out, ATOMIC_RELAXED);
-                }
-                ctx->cached_read = dropped_pos;
-                break;
-            }
+    for (;;) {
+        uint64_t read = __atomic_load_n(&ctx->hdr->read_pos, __ATOMIC_ACQUIRE);
+        uint64_t end = read, dropped = 0;
+        if (read > write || write - read > ctx->capacity || ((read | write) & 7))
+            return 0;
+        ctx->cached_read = read;
+        if (ctx->capacity - (write - read) >= need) return 1;
+        do {
+            uint64_t len = shm_read_u64_le(ctx->data, end, ctx->mask);
+            uint64_t span = shm_record_span(len);
+            if (!span || span > ctx->capacity || span > write - end) return 0;
+            end += span;
+            dropped++;
+        } while (ctx->capacity - (write - end) < need);
+        if (__atomic_compare_exchange_n(&ctx->hdr->read_pos, &read, end, 0,
+                                         __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+            __atomic_fetch_add(&ctx->hdr->dropped_count, dropped, __ATOMIC_RELAXED);
+            ctx->cached_read = end;
+            *dropped_out = dropped;
+            return 1;
         }
+        /* A failed CAS means the consumer retired at least one record. The
+         * old drop count is discarded; the next attempt starts from its cursor. */
     }
+}
 
-    /* Write message: length header + payload */
-    shm_write_u64_le(ctx->data, write_pos & mask, mask, (uint64_t)payload_len);
-    shm_copy_into_ring(ctx->data, write_pos + SHM_MSG_HEADER_SIZE, mask,
-                       payload, payload_len, capacity);
-    write_pos += total_len;
+void shm_producer_write(ShmProducerContext* ctx, const unsigned char* payload,
+                        size_t len, uint64_t pos) {
+    shm_write_u64_le(ctx->data, pos, ctx->mask, (uint64_t)len);
+    shm_copy_payload_into_ring(ctx->data, pos + 8, ctx->mask, payload, len);
+}
 
-    /* Get monotonic timestamp */
-    now_ns = c_time_monotonic_ns();
+void shm_producer_publish(ShmProducerContext* ctx, uint64_t end) {
+    __atomic_store_n(&ctx->hdr->write_pos, end, __ATOMIC_RELEASE);
+    __atomic_store_n(&ctx->hdr->latest_insert_time_ns,
+                     (uint64_t)c_time_monotonic_ns(), __ATOMIC_RELEASE);
+    ctx->cached_write = end;
+}
 
-    /* Commit: update write_pos, msg_count, timestamp atomically */
-    __atomic_store_n(&ctx->hdr->write_pos, write_pos, ATOMIC_RELEASE);
-    __atomic_add_fetch(&ctx->hdr->msg_count, 1, ATOMIC_RELAXED);
-    __atomic_store_n(&ctx->hdr->latest_insert_time_ns, now_ns, ATOMIC_RELEASE);
-
-    ctx->cached_write = write_pos;
+int shm_producer_insert(ShmProducerContext* ctx, const unsigned char* payload,
+                        size_t len, uint64_t* dropped_out) {
+    uint64_t span = shm_record_span((uint64_t)len);
+    if (!shm_producer_reserve(ctx, span, dropped_out)) return 0;
+    shm_producer_write(ctx, payload, len, ctx->cached_write);
+    shm_producer_publish(ctx, ctx->cached_write + span);
     return 1;
 }
 
-/**
- * @brief Check if a complete message is available (peek without consuming).
- *
- * Uses atomic acquire semantics to read producer's write position.
- *
- * @param ctx          Consumer context.
- * @param msg_len_out  Output: message length if available.
- * @param read_pos_out Output: read position if available.
- * @return             1 if message available, 0 otherwise.
- */
-int shm_consumer_peek_available(ShmConsumerContext* ctx, uint64_t* msg_len_out,
-                                uint64_t* read_pos_out) {
-    uint64_t read_pos = __atomic_load_n(&ctx->hdr->read_pos, ATOMIC_ACQUIRE);
-    uint64_t write_pos = __atomic_load_n(&ctx->hdr->write_pos, ATOMIC_ACQUIRE);
-    uint64_t avail = write_pos - read_pos;
-    uint64_t msg_len;
-
-    /* Need at least 8 bytes for message length header */
-    if (avail < SHM_MSG_HEADER_SIZE) {
-        return 0;
-    }
-
-    /* Read message length */
-    msg_len = shm_read_u64_le(ctx->data, read_pos & ctx->mask, ctx->mask);
-
-    /* Validate message length to prevent out-of-bounds access */
-    if (msg_len > ctx->capacity - SHM_MSG_HEADER_SIZE) {
-        return 0;
-    }
-    /* Check for overflow in header + msg_len */
-    if (msg_len > UINT64_MAX - SHM_MSG_HEADER_SIZE) {
-        return 0;
-    }
-
-    /* Check if complete message is available */
-    if (avail < SHM_MSG_HEADER_SIZE + msg_len) {
-        return 0;
-    }
-
-    *msg_len_out = msg_len;
-    *read_pos_out = read_pos;
+int shm_snapshot_begin(ShmConsumerContext* ctx, uint64_t* read_out, uint64_t* write_out) {
+    uint64_t read = __atomic_load_n(&ctx->hdr->read_pos, __ATOMIC_ACQUIRE);
+    uint64_t write = __atomic_load_n(&ctx->hdr->write_pos, __ATOMIC_ACQUIRE);
+    if (read > write || write - read > ctx->capacity || ((read | write) & 7)) return 0;
+    *read_out = read;
+    *write_out = write;
     return 1;
 }
 
-/**
- * @brief Consume a message from the ring buffer (consumer-side).
- *
- * Copies message data to destination buffer and commits the read position
- * with monotonic timestamping.
- *
- * @param ctx       Consumer context.
- * @param dst       Destination buffer (must be at least msg_len bytes).
- * @param msg_len   Message length (from peek_available).
- * @param read_pos  Read position (from peek_available).
- * @return          1 on success, 0 on failure.
- */
+int shm_snapshot_record(ShmConsumerContext* ctx, uint64_t pos, uint64_t write,
+                        uint64_t* len_out) {
+    uint64_t len, span;
+    if ((pos & 7) || pos > write || write - pos < 8 || write - pos > ctx->capacity)
+        return 0;
+    len = shm_read_u64_le(ctx->data, pos, ctx->mask);
+    span = shm_record_span(len);
+    if (!span || span > ctx->capacity || span > write - pos) return 0;
+    *len_out = len;
+    return 1;
+}
+
+int shm_snapshot_valid(ShmConsumerContext* ctx, uint64_t read) {
+    /* Any relaxed speculative word load that observes an overwriting release
+     * store synchronizes with this acquire fence. The producer's preceding
+     * retirement therefore happens before the following cursor load/CAS:
+     * atomic coherence prevents validating/retiring the obsolete read cursor.
+     * If no overwrite was observed, publication acquired in snapshot_begin
+     * orders every original word. No ordinary access races on shared storage. */
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    return __atomic_load_n(&ctx->hdr->read_pos, __ATOMIC_ACQUIRE) == read;
+}
+
+uint64_t shm_message_count(ShmConsumerContext* ctx) {
+    for (;;) {
+        uint64_t read, write, pos, len, count = 0;
+        int valid = 1;
+        if (!shm_snapshot_begin(ctx, &read, &write)) return 0;
+        for (pos = read; pos < write;) {
+            if (!shm_snapshot_record(ctx, pos, write, &len)) { valid = 0; break; }
+            pos += shm_record_span(len);
+            count++;
+        }
+        if (shm_snapshot_valid(ctx, read)) return valid ? count : 0;
+    }
+}
+
+int shm_consumer_peek_available(ShmConsumerContext* ctx, uint64_t* len_out,
+                                uint64_t* read_out) {
+    uint64_t read, write, len;
+    if (!shm_snapshot_begin(ctx, &read, &write) ||
+        !shm_snapshot_record(ctx, read, write, &len) ||
+        !shm_snapshot_valid(ctx, read)) return 0;
+    *len_out = len;
+    *read_out = read;
+    return 1;
+}
+
 int shm_consumer_consume(ShmConsumerContext* ctx, unsigned char* dst,
-                         uint64_t msg_len, uint64_t read_pos) {
-    uint64_t now_ns;
-
-    /* Copy payload from ring buffer */
-    shm_copy_from_ring(dst, ctx->data, read_pos + SHM_MSG_HEADER_SIZE,
-                       ctx->mask, (size_t)msg_len, ctx->capacity);
-
-    /* Advance read position past this message */
-    read_pos += SHM_MSG_HEADER_SIZE + msg_len;
-
-    /* Get monotonic timestamp */
-    now_ns = c_time_monotonic_ns();
-
-    /* Commit: update read_pos, msg_count, timestamp atomically */
-    __atomic_store_n(&ctx->hdr->read_pos, read_pos, ATOMIC_RELEASE);
-    __atomic_sub_fetch(&ctx->hdr->msg_count, 1, ATOMIC_RELAXED);
-    __atomic_store_n(&ctx->hdr->latest_consume_time_ns, now_ns, ATOMIC_RELEASE);
-
+                         uint64_t len, uint64_t read) {
+    uint64_t current, write, actual, expected = read;
+    if (!shm_snapshot_begin(ctx, &current, &write) || current != read ||
+        !shm_snapshot_record(ctx, read, write, &actual) || actual != len) return 0;
+    shm_copy_from_ring(dst, ctx->data, read + 8, ctx->mask, (size_t)len, ctx->capacity);
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    if (!__atomic_compare_exchange_n(&ctx->hdr->read_pos, &expected,
+        read + shm_record_span(len), 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return 0;
+    __atomic_store_n(&ctx->hdr->latest_consume_time_ns,
+                     (uint64_t)c_time_monotonic_ns(), __ATOMIC_RELEASE);
     return 1;
 }

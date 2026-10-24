@@ -1,6 +1,6 @@
 """Layer 1–3 — Tests for TimeExponentialMovingAverage (TEMA).
 
-TEMA uses elapsed wall-clock time to compute the exponential decay weight
+TEMA uses elapsed monotonic time to compute the exponential decay weight
 (alpha) of each new sample. Tests here cover constructor validation,
 initialisation semantics, the read-only nature of ``next()``, state mutation
 by ``update()``, and the fast-mode memory trade-off.
@@ -8,12 +8,12 @@ by ``update()``, and the fast-mode memory trade-off.
 
 from __future__ import annotations
 
-import time
-
 import numpy as np
 import pytest
 
 from mm_toolbox.moving_average import TimeExponentialMovingAverage
+from mm_toolbox.time import time_monotonic_ns
+from .tema_clock import last_time_ns, next_at, set_time_ns, update_at
 
 
 class TestTemaConstructorValidation:
@@ -34,9 +34,21 @@ class TestTemaConstructorValidation:
         with pytest.raises(ValueError, match="Half life must be positive"):
             TimeExponentialMovingAverage(window=2, half_life_s=-0.5)
 
+    @pytest.mark.parametrize("half_life_s", [float("nan"), float("inf"), -float("inf")])
+    def test_half_life_must_be_finite(self, half_life_s: float):
+        """Non-finite decay configuration is rejected before the first update."""
+        with pytest.raises(ValueError, match="finite"):
+            TimeExponentialMovingAverage(window=2, half_life_s=half_life_s)
+
 
 class TestTemaInitialize:
     """Layer 1 — Validation and warm-up behaviour of ``initialize()``."""
+
+    def test_initialize_uses_one_clock_origin(self):
+        """Untimed historical samples cannot acquire decay from CPU timing."""
+        tema = TimeExponentialMovingAverage(window=4, half_life_s=1e-9)
+        assert tema.initialize(np.array([10.0, 20.0, 30.0])) == 10.0
+        np.testing.assert_array_equal(tema.get_values(), [10.0, 10.0, 10.0])
 
     def test_initialize_too_short_raises(self):
         """Given arrays of length 0 or 1, ``initialize()`` raises ``ValueError``."""
@@ -69,6 +81,16 @@ class TestTemaInitialize:
         assert tema.get_value() != old_value
         assert tema.get_value() == pytest.approx(100.0, abs=1e-9)
 
+    def test_initialize_resets_elapsed_time_origin(self):
+        """Reinitialization starts a new elapsed-time baseline."""
+        tema = TimeExponentialMovingAverage(window=2, half_life_s=1.0)
+        set_time_ns(tema, 1)
+
+        result = tema.initialize(np.array([100.0, 0.0], dtype=np.float64))
+
+        assert last_time_ns(tema) > 1
+        assert result == pytest.approx(100.0, abs=0.1)
+
 
 class TestTemaNext:
     """Layer 2 — ``next()`` must be a pure projection without side effects."""
@@ -94,41 +116,46 @@ class TestTemaNext:
         value_before = tema.get_value()
         len_before = len(tema)
         values_before = tema.get_values().copy()
+        timestamp_before = time_monotonic_ns()
+        set_time_ns(tema, timestamp_before)
 
-        time.sleep(0.05)
         _ = tema.next(20.0)
 
         assert tema.get_value() == pytest.approx(value_before, abs=1e-12)
         assert len(tema) == len_before
         np.testing.assert_array_equal(tema.get_values(), values_before)
+        assert last_time_ns(tema) == timestamp_before
 
     def test_next_formula_is_consistent(self):
-        """Given a half-life delay, ``next()`` result matches the hand-calculated alpha blend."""
+        """A preview uses the exact subsecond interval supplied by the caller."""
         half_life = 1.0
         tema = TimeExponentialMovingAverage(window=2, half_life_s=half_life)
         tema.initialize(np.array([0.0, 0.0], dtype=np.float64))
+        set_time_ns(tema, 1_000_000_000)
 
-        time.sleep(half_life)
-        projected = tema.next(10.0)
+        projected = next_at(tema, 10.0, 1_500_000_000)
+        alpha = -np.expm1(-np.log(2.0) * 0.5 / half_life)
 
-        expected = 0.5 * 10.0 + 0.5 * 0.0
-        assert projected == pytest.approx(expected, abs=1e-3)
+        assert projected == pytest.approx(alpha * 10.0, abs=1e-12)
+        assert last_time_ns(tema) == 1_000_000_000
 
 
 class TestTemaUpdate:
     """Layer 2 — ``update()`` must advance time and mutate state correctly."""
 
     def test_update_advances_time_s_and_value(self):
-        """Given a half-life delay, ``update()`` produces alpha ~ 0.5 and advances the timestamp."""
+        """The native update helper applies an exact half-second interval."""
         half_life = 1.0
         tema = TimeExponentialMovingAverage(window=2, half_life_s=half_life)
         tema.initialize(np.array([0.0, 0.0], dtype=np.float64))
+        set_time_ns(tema, 1_000_000_000)
 
-        time.sleep(half_life)
-        result = tema.update(10.0)
+        result = update_at(tema, 10.0, 1_500_000_000)
+        alpha = -np.expm1(-np.log(2.0) * 0.5 / half_life)
 
-        assert result == pytest.approx(5.0, abs=1e-3)
-        assert tema.get_value() == pytest.approx(5.0, abs=1e-3)
+        assert result == pytest.approx(alpha * 10.0, abs=1e-12)
+        assert tema.get_value() == pytest.approx(result)
+        assert last_time_ns(tema) == 1_500_000_000
 
     def test_update_pushes_to_ringbuffer(self):
         """Given ``update()``, the new value appears in history."""
@@ -136,7 +163,6 @@ class TestTemaUpdate:
         tema.initialize(np.array([1.0, 1.0], dtype=np.float64))
         prev_len = len(tema)
 
-        time.sleep(0.01)
         tema.update(2.0)
 
         assert len(tema) == prev_len + 1
@@ -151,18 +177,17 @@ class TestTemaUpdate:
         assert tema.get_value() == pytest.approx(99.0)
 
     def test_update_alpha_accuracy(self):
-        """Given a 1-second sleep with half-life=1.0, alpha is exactly 0.5."""
+        """The update recurrence agrees with an exact monotonic interval."""
         half_life = 1.0
         tema = TimeExponentialMovingAverage(window=2, half_life_s=half_life)
         tema.initialize(np.array([10.0, 10.0], dtype=np.float64))
+        set_time_ns(tema, 2_000_000_000)
 
-        sleep_dt = 1.0
-        time.sleep(sleep_dt)
-        result = tema.update(20.0)
+        result = update_at(tema, 20.0, 2_500_000_000)
+        alpha = -np.expm1(-np.log(2.0) * 0.5 / half_life)
 
-        alpha = 1.0 - (2.0 ** (-sleep_dt / half_life))
-        expected = alpha * 20.0 + (1.0 - alpha) * 10.0
-        assert result == pytest.approx(expected, abs=1e-3)
+        assert result == pytest.approx(10.0 + alpha * 10.0, abs=1e-12)
+        assert last_time_ns(tema) == 2_500_000_000
 
 
 class TestTemaFastVsNormalMode:
@@ -201,12 +226,13 @@ class TestTemaFastVsNormalMode:
         tema_fast.initialize(init_vals.copy())
         tema_norm.initialize(init_vals.copy())
 
-        time.sleep(0.5)
-        fast_result = tema_fast.update(10.0)
-        norm_result = tema_norm.update(10.0)
+        set_time_ns(tema_fast, 1_000_000_000)
+        set_time_ns(tema_norm, 1_000_000_000)
+        fast_result = update_at(tema_fast, 10.0, 2_000_000_000)
+        norm_result = update_at(tema_norm, 10.0, 2_000_000_000)
 
-        assert fast_result == pytest.approx(norm_result, abs=1e-9)
-        assert tema_fast.get_value() == pytest.approx(tema_norm.get_value(), abs=1e-9)
+        assert fast_result == pytest.approx(norm_result, abs=1e-5)
+        assert tema_fast.get_value() == pytest.approx(tema_norm.get_value(), abs=1e-5)
 
 
 if __name__ == "__main__":

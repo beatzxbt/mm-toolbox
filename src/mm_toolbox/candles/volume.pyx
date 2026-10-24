@@ -4,7 +4,7 @@ Creates a new candle once the accumulated trade size reaches a
 fixed volume threshold.
 """
 
-from libc.math cimport fmax, fmin
+from libc.math cimport fmax, fmin, isfinite, nextafter
 from mm_toolbox.candles.base import Trade
 from mm_toolbox.candles.base cimport BaseCandles
 
@@ -28,7 +28,7 @@ cdef class VolumeCandles(BaseCandles):
         Raises:
             ValueError: If volume_per_bucket is not positive.
         """
-        if volume_per_bucket <= 0.0:
+        if not isfinite(volume_per_bucket) or volume_per_bucket <= 0.0:
             raise ValueError(
                 f"Invalid volume_per_bucket; expected >0 but got {volume_per_bucket}"
             )
@@ -50,12 +50,13 @@ cdef class VolumeCandles(BaseCandles):
             double available_size
             double chunk_size
             double volume
-            double eps = 1e-12
+            double next_remaining
 
+        self.validate_trade(price, remaining_size)
         if self.is_stale_trade(time_ms):
             return
 
-        while remaining_size > eps:
+        while remaining_size > 0.0:
             # Initialize a new candle if this is the first trade
             if self.latest_candle.num_trades == 0:
                 self.latest_candle.open_time_ms = time_ms
@@ -65,11 +66,14 @@ cdef class VolumeCandles(BaseCandles):
 
             total_size = self.latest_candle.buy_size + self.latest_candle.sell_size
             available_size = self.volume_per_bucket - total_size
-            if available_size <= eps:
+            if available_size <= 0.0:
                 self.insert_and_reset_candle()
                 continue
 
             chunk_size = remaining_size if remaining_size <= available_size else available_size
+            next_remaining = 0.0 if chunk_size == remaining_size else remaining_size - chunk_size
+            if next_remaining >= remaining_size:
+                raise ValueError("Bucket threshold is too small relative to trade size")
             volume = price * chunk_size
 
             # Update candle statistics
@@ -87,7 +91,7 @@ cdef class VolumeCandles(BaseCandles):
 
             self.latest_candle.vwap = self.calculate_vwap(price, chunk_size)
             if self._store_trades:
-                if chunk_size == remaining_size:
+                if chunk_size == trade.size:
                     self.latest_candle.trades.append(trade)
                 else:
                     self.latest_candle.trades.append(
@@ -101,9 +105,7 @@ cdef class VolumeCandles(BaseCandles):
             self.latest_candle.num_trades += 1
             self.latest_candle.close_time_ms = time_ms
 
-            remaining_size -= chunk_size
-            if remaining_size <= eps:
-                remaining_size = 0.0
+            remaining_size = next_remaining
 
-            if self.latest_candle.buy_size + self.latest_candle.sell_size >= self.volume_per_bucket - eps:
+            if self.latest_candle.buy_size + self.latest_candle.sell_size >= nextafter(self.volume_per_bucket, 0.0):
                 self.insert_and_reset_candle()

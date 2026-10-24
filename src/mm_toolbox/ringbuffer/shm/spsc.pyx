@@ -40,44 +40,14 @@ cdef extern from "../../time/ctime_impl.h":
     long long c_time_monotonic_ns() nogil
 
 from .header cimport ShmHeader
-
-cdef extern from "c/shm_helpers.h":
-    void shm_copy_from_ring(unsigned char* dst, const unsigned char* ring, u64 start,
-                           u64 mask, size_t n, u64 capacity) nogil
-
-cdef extern from "c/shm_core.h":
-    ctypedef struct ShmProducerContext:
-        ShmHeader* hdr
-        unsigned char* data
-        u64 capacity
-        u64 mask
-        u64 cached_read
-        u64 cached_write
-
-    ctypedef struct ShmConsumerContext:
-        ShmHeader* hdr
-        unsigned char* data
-        u64 capacity
-        u64 mask
-        int spin_wait
-
-    int shm_producer_insert(ShmProducerContext* ctx, const unsigned char* payload,
-                           size_t payload_len, u64* dropped_out) nogil
-    int shm_consumer_peek_available(ShmConsumerContext* ctx, u64* msg_len_out,
-                                   u64* read_pos_out) nogil
-    int shm_consumer_consume(ShmConsumerContext* ctx, unsigned char* dst,
-                             u64 msg_len, u64 read_pos) nogil
-
-from ._shm cimport _ShmRingBase, _MAGIC, _HEADER_SIZE, _HEADER_ALIGN
-from .atomics cimport atomic_add, atomic_load_acquire, atomic_store_release, atomic_sub
-from .memory cimport (
-    align_up,
-    copy_from_ring,
-    copy_into_ring,
-    pow2_at_least,
-    read_u64_le,
-    write_u64_le,
+from ._shm cimport (
+    _ShmRingBase, _MAGIC, _HEADER_SIZE, _HEADER_ALIGN,
+    ShmProducerContext, ShmConsumerContext, shm_producer_claim,
+    shm_producer_release, shm_producer_insert, _try_consume, _try_consume_into, _snapshot,
+    _insert_batch, _count, _full,
 )
+from .atomics cimport atomic_load_acquire, atomic_store_release
+from .memory cimport pow2_at_least
 
 
 cdef class _SharedBytesRing(_ShmRingBase):
@@ -106,7 +76,7 @@ cdef class _SharedBytesRing(_ShmRingBase):
         """Create and initialize a shared ring."""
         cdef:
             int fd
-            size_t cap = <size_t>pow2_at_least(capacity_bytes if capacity_bytes > 0 else 1)
+            size_t cap = <size_t>pow2_at_least(capacity_bytes if capacity_bytes >= 8 else 8)
             size_t total_len = _HEADER_SIZE + cap
             void* base
         fd = open(path_b, O_CREAT | O_RDWR | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
@@ -139,14 +109,15 @@ cdef class _SharedBytesRing(_ShmRingBase):
         self._cached_read = 0
         self._cached_write = 0
 
-        self._hdr.magic = _MAGIC
         self._hdr.capacity = <u64>cap
         self._hdr.mask = <u64>(cap - 1)
         self._hdr.write_pos = 0
         self._hdr.read_pos = 0
-        self._hdr.msg_count = 0
+        self._hdr.producer_claim = 0
+        self._hdr.dropped_count = 0
         self._hdr.latest_insert_time_ns = 0
         self._hdr.latest_consume_time_ns = 0
+        atomic_store_release(&self._hdr.magic, _MAGIC)
 
     cdef void _map_attach(self, bytes path_b, int spin_wait):
         """Attach to an existing shared ring."""
@@ -180,13 +151,13 @@ cdef class _SharedBytesRing(_ShmRingBase):
             close(fd)
             raise OSError(errno, "mmap header failed for shared ring")
         cdef ShmHeader* tmp_hdr = <ShmHeader*>base
-        if tmp_hdr.magic != _MAGIC:
+        if atomic_load_acquire(&tmp_hdr.magic) != _MAGIC:
             munmap(base, _HEADER_SIZE)
             close(fd)
             raise RuntimeError("Shared ring header mismatch")
         capacity = tmp_hdr.capacity
         mask = tmp_hdr.mask
-        if capacity == 0 or (capacity & (capacity - 1)) != 0 or mask != capacity - 1:
+        if capacity < 8 or (capacity & (capacity - 1)) != 0 or mask != capacity - 1:
             munmap(base, _HEADER_SIZE)
             close(fd)
             raise RuntimeError("Shared ring header invalid")
@@ -223,583 +194,225 @@ cdef class _SharedBytesRing(_ShmRingBase):
         self._spin_wait = spin_wait if spin_wait > 0 else 1024
         self._capacity = capacity
         self._mask = mask
-        self._cached_read = self._hdr.read_pos
-        self._cached_write = self._hdr.write_pos
+        self._cached_read = atomic_load_acquire(&self._hdr.read_pos)
+        self._cached_write = atomic_load_acquire(&self._hdr.write_pos)
 
     def __len__(self) -> int:
-        cdef u64 count
-        with nogil:
-            count = atomic_load_acquire(&self._hdr.msg_count)
-        return <Py_ssize_t>count
+        self._ensure_open()
+        return <Py_ssize_t>_count(self._hdr, self._data, self._capacity)
+
+    @property
+    def dropped_count(self) -> int:
+        """Number of records retired by overwrite since creation."""
+        self._ensure_open()
+        return atomic_load_acquire(&self._hdr.dropped_count)
 
     @property
     def latest_insert_time_ns(self) -> int:
-        cdef u64 ts
-        with nogil:
-            ts = atomic_load_acquire(&self._hdr.latest_insert_time_ns)
-        return ts
+        self._ensure_open()
+        return atomic_load_acquire(&self._hdr.latest_insert_time_ns)
 
     @property
     def latest_consume_time_ns(self) -> int:
-        cdef u64 ts
-        with nogil:
-            ts = atomic_load_acquire(&self._hdr.latest_consume_time_ns)
-        return ts
+        self._ensure_open()
+        return atomic_load_acquire(&self._hdr.latest_consume_time_ns)
 
 
 cdef class ShmSpscProducer(_SharedBytesRing):
-    """Shared-memory SPSC producer for bytes payloads.
+    """One exclusively leased writer. Close releases the lease for reuse.
 
-    Inserts variable-length byte messages into a shared-memory ring buffer
-    with atomic coordination via the header.
+    An instance is used by one thread/process at a time. A forked child must
+    attach its own producer; inherited producer objects cannot write/release.
+    Records overwrite the oldest entries and use eight-byte padded spans.
     """
-
     cdef ShmProducerContext _prod_ctx
+    cdef u64 _lease_owner
+    cdef u64 _last_insert_dropped
+    cdef u64 _failed_inserts
 
-    cdef inline void _init_prod_ctx(self):
-        """Initialize producer context for C functions."""
-        self._prod_ctx.hdr = self._hdr
-        self._prod_ctx.data = self._data
-        self._prod_ctx.capacity = self._capacity
-        self._prod_ctx.mask = self._mask
-        self._prod_ctx.cached_read = self._cached_read
-        self._prod_ctx.cached_write = self._cached_write
-
-    def __cinit__(
-        self,
-        path: str,
-        int capacity_bytes,
-        *,
-        bint create=True,
-        bint unlink_on_close=False,
-        int spin_wait=1024,
-    ) -> None:
+    def __cinit__(self, path: str, int capacity_bytes, *, bint create=True,
+                  bint unlink_on_close=False, int spin_wait=1024) -> None:
+        if capacity_bytes < 0:
+            raise ValueError("capacity_bytes must be >= 0")
         self._path_py = path
-        path_b = (<str>path).encode()
-        self._path = path_b
+        path_b = path.encode()
         if create:
             self._map_create(path_b, <u64>capacity_bytes, unlink_on_close, spin_wait)
         else:
             self._map_attach(path_b, spin_wait)
-        self._init_prod_ctx()
+        if not shm_producer_claim(self._hdr, <u64>os.getpid()):
+            raise RuntimeError("Shared ring already has an active producer")
+        self._lease_owner = <u64>os.getpid()
+        self._prod_ctx.hdr = self._hdr
+        self._prod_ctx.data = self._data
+        self._prod_ctx.capacity = self._capacity
+        self._prod_ctx.mask = self._mask
+        self._prod_ctx.cached_read = atomic_load_acquire(&self._hdr.read_pos)
+        self._prod_ctx.cached_write = atomic_load_acquire(&self._hdr.write_pos)
 
-    cdef inline bint _reserve(self, size_t need, u64* dropped_msgs):
-        """Ensure space; drop oldest messages if required."""
-        cdef u64 capacity = self._capacity
-        cdef u64 mask = self._mask
-        cdef u64 write_pos = self._cached_write
-        cdef u64 read_pos
-        cdef u64 free_bytes
-        cdef u64 msg_len
-        cdef u64 dropped_pos = 0
-        dropped_msgs[0] = 0
-        with nogil:
-            read_pos = atomic_load_acquire(&self._hdr.read_pos)
-        self._cached_read = read_pos
-        free_bytes = capacity - (write_pos - read_pos)
-        if free_bytes >= <u64>need:
-            return True
-        dropped_pos = read_pos
-        while True:
-            msg_len = read_u64_le(self._data, dropped_pos & mask, mask)
-            if msg_len > capacity or (8 + msg_len) > capacity:
-                return False
-            dropped_pos += 8 + msg_len
-            dropped_msgs[0] += 1
-            free_bytes = capacity - (write_pos - dropped_pos)
-            if free_bytes >= <u64>need:
-                with nogil:
-                    atomic_store_release(&self._hdr.read_pos, dropped_pos)
-                    if dropped_msgs[0]:
-                        atomic_sub(&self._hdr.msg_count, dropped_msgs[0])
-                self._cached_read = dropped_pos
-                return True
+    cdef void _release_lease(self) noexcept:
+        if self._base != NULL and self._lease_owner:
+            if self._lease_owner == <u64>os.getpid():
+                shm_producer_release(self._hdr, self._lease_owner)
+            self._lease_owner = 0
 
-    cdef inline bint _can_reserve_once(self, size_t need):
-        """Fast check that space is available without dropping."""
-        cdef u64 capacity = self._capacity
-        cdef u64 write_pos = self._cached_write
-        cdef u64 read_pos
-        with nogil:
-            read_pos = atomic_load_acquire(&self._hdr.read_pos)
-        self._cached_read = read_pos
-        return (capacity - (write_pos - read_pos)) >= <u64>need
+    def __dealloc__(self):
+        self._release_lease()
+
+    cdef inline void _ensure_writer(self):
+        self._ensure_open()
+        if self._lease_owner != <u64>os.getpid():
+            raise RuntimeError("Inherited producer cannot write; attach a new producer")
 
     cpdef bint insert(self, bytes item):
-        """Insert a single item.
-
-        Args:
-            item: Bytes payload to insert.
-
-        Returns:
-            True if insert succeeded, False if message too large.
-        """
-        cdef:
-            Py_ssize_t payload_len = len(item)
-            const unsigned char* payload_ptr = <const unsigned char*>item
-            u64 dropped = 0
-            int success
-
-        if payload_len < 0:
-            return False
-
-        with nogil:
-            success = shm_producer_insert(&self._prod_ctx, payload_ptr,
-                                         <size_t>payload_len, &dropped)
-
-        self._cached_read = self._prod_ctx.cached_read
-        self._cached_write = self._prod_ctx.cached_write
+        """Insert and report success. Inspect last_insert_dropped for loss."""
+        cdef int success
+        self._ensure_writer()
+        # Keep the GIL across the writer operation, so Python threads sharing
+        # this instance cannot become concurrent writers while a copy runs.
+        success = shm_producer_insert(&self._prod_ctx, <const unsigned char*>item,
+                                      len(item), &self._last_insert_dropped)
+        if not success:
+            self._failed_inserts += 1
         return success == 1
 
     cdef bint insert_char(self, const char* data, size_t n):
-        """Insert a raw buffer of length n from a char* pointer.
-
-        Args:
-            data: Pointer to raw buffer.
-            n: Length of buffer in bytes.
-
-        Returns:
-            True if insert succeeded, False if message too large.
-        """
-        cdef u64 dropped = 0
         cdef int success
-
-        if n == 0:
-            return True
-
-        with nogil:
-            success = shm_producer_insert(&self._prod_ctx, <const unsigned char*>data,
-                                         n, &dropped)
-
-        self._cached_read = self._prod_ctx.cached_read
-        self._cached_write = self._prod_ctx.cached_write
+        self._ensure_writer()
+        success = shm_producer_insert(&self._prod_ctx, <const unsigned char*>data,
+                                      n, &self._last_insert_dropped)
+        if not success:
+            self._failed_inserts += 1
         return success == 1
 
     cpdef bint insert_batch(self, list[bytes] items):
-        """Insert multiple items with a single commit of write_pos.
+        cdef bint success
+        self._ensure_writer()
+        success = _insert_batch(&self._prod_ctx, items, &self._last_insert_dropped)
+        if not success:
+            self._failed_inserts += 1
+        return success
 
-        Args:
-            items: List of bytes payloads to insert.
+    @property
+    def last_insert_dropped(self) -> int:
+        return self._last_insert_dropped
 
-        Returns:
-            True if all items inserted, False if total size exceeds capacity.
-        """
-        cdef:
-            Py_ssize_t i, n = len(items)
-            u64 capacity = self._capacity
-            u64 mask = self._mask
-            u64 write_pos = self._cached_write
-            size_t total = 0
-            bytes it
-            u64 msg_len
-            u64 dropped = 0
-            u64 now_ns
-
-        if n == 0:
-            return True
-        for i in range(n):
-            it = items[i]
-            msg_len = <u64>len(it)
-            if <u64>(8) + msg_len > capacity:
-                return False
-            total += <size_t>(8 + msg_len)
-        if <u64>total > capacity:
-            return False
-        if not self._reserve(total, &dropped):
-            return False
-        for i in range(n):
-            it = items[i]
-            msg_len = <u64>len(it)
-            write_u64_le(self._data, write_pos & mask, mask, msg_len)
-            copy_into_ring(self._data, write_pos + 8, mask, <const unsigned char*>it, <size_t>msg_len, capacity)
-            write_pos += 8 + msg_len
-        with nogil:
-            now_ns = <u64>c_time_monotonic_ns()
-            atomic_store_release(&self._hdr.write_pos, write_pos)
-            atomic_add(&self._hdr.msg_count, <u64>n)
-            atomic_store_release(&self._hdr.latest_insert_time_ns, now_ns)
-        self._cached_write = write_pos
-        self._prod_ctx.cached_read = self._cached_read
-        self._prod_ctx.cached_write = write_pos
-        return True
+    @property
+    def failed_inserts(self) -> int:
+        return self._failed_inserts
 
     cpdef bint is_empty(self):
-        """Check if the buffer is empty.
-
-        Returns:
-            True if no messages are available.
-        """
         return len(self) == 0
 
     cpdef bint is_full(self):
-        """Check if the buffer is full.
+        self._ensure_open()
+        return _full(self._hdr, self._capacity)
 
-        Returns:
-            True if no space for even a 0-byte message.
-        """
-        cdef u64 read_pos
-        with nogil:
-            read_pos = atomic_load_acquire(&self._hdr.read_pos)
-        self._cached_read = read_pos
-        return (self._capacity - (self._cached_write - read_pos)) < 8
 
 cdef class ShmSpscConsumer(_SharedBytesRing):
-    """Shared-memory SPSC consumer for bytes payloads.
-
-    Consumes variable-length byte messages from a shared-memory ring buffer
-    with atomic coordination via the header.
-    """
-
+    """Consumer returning only copies whose retirement CAS succeeded."""
     cdef ShmConsumerContext _cons_ctx
+    cdef bytearray _scratch
 
-    cdef inline void _init_cons_ctx(self):
-        """Initialize consumer context for C functions."""
+    def __cinit__(self, path: str, *, int spin_wait=1024) -> None:
+        self._path_py = path
+        self._map_attach(path.encode(), spin_wait)
         self._cons_ctx.hdr = self._hdr
         self._cons_ctx.data = self._data
         self._cons_ctx.capacity = self._capacity
         self._cons_ctx.mask = self._mask
         self._cons_ctx.spin_wait = self._spin_wait
-
-    def __cinit__(self, path: str, *, int spin_wait=1024) -> None:
-        self._path_py = path
-        path_b = (<str>path).encode()
-        self._path = path_b
-        self._map_attach(path_b, spin_wait)
-        self._init_cons_ctx()
-
-    cdef inline bint _peek_available(self, u64* out_len, u64* out_read_pos) nogil:
-        """Check availability of a complete message without advancing."""
-        cdef u64 read_pos = atomic_load_acquire(&self._hdr.read_pos)
-        cdef u64 write_pos = atomic_load_acquire(&self._hdr.write_pos)
-        cdef u64 avail = write_pos - read_pos
-        if avail < 8:
-            return False
-        cdef u64 msg_len = read_u64_le(self._data, read_pos & self._mask, self._mask)
-        if avail < 8 + msg_len:
-            return False
-        out_len[0] = <u64>msg_len
-        out_read_pos[0] = read_pos
-        return True
+        self._scratch = bytearray()
 
     cpdef bytes consume(self):
-        """Consume a single item, blocking until available.
-
-        Returns:
-            The next available bytes payload.
-        """
-        cdef:
-            u64 msg_len = 0
-            u64 read_pos = 0
-            u64 read_pos_check = 0
-            int spin_count = 0
-            int available = 0
-            bytearray buf
-            unsigned char* buf_ptr
-
+        cdef object result
+        cdef int spins = 0
         while True:
-            with nogil:
-                available = shm_consumer_peek_available(&self._cons_ctx, &msg_len, &read_pos)
-            if not available:
-                spin_count += 1
-                if spin_count < self._spin_wait:
-                    continue
+            self._ensure_open()
+            result = _try_consume(&self._cons_ctx)
+            if result is not None:
+                return result
+            spins += 1
+            if spins >= self._spin_wait:
                 _sched_yield()
-                spin_count = 0
-                continue
-            with nogil:
-                read_pos_check = atomic_load_acquire(&self._hdr.read_pos)
-            if read_pos_check != read_pos:
-                continue
-            break
-
-        buf = bytearray(<Py_ssize_t>msg_len)
-        buf_ptr = <unsigned char*>buf
-        with nogil:
-            shm_consumer_consume(&self._cons_ctx, buf_ptr, msg_len, read_pos)
-
-        self._cached_read = read_pos + 8 + msg_len
-        return bytes(buf)
+                spins = 0
 
     cpdef int consume_into(self, bytearray dst):
-        """Consume a single item into the provided bytearray.
-
-        Blocks until a message is available.
-
-        Args:
-            dst: Pre-allocated bytearray to copy the message into.
-
-        Returns:
-            Number of bytes copied.
-
-        Raises:
-            ValueError: If dst is too small to hold the message.
-        """
-        cdef:
-            u64 msg_len = 0
-            u64 read_pos = 0
-            u64 read_pos_check = 0
-            int spin_count = 0
-            int available = 0
-            unsigned char* buf_ptr
-
+        """Copy via reusable scratch; destination changes only after retirement."""
+        cdef int copied, spins = 0
         while True:
-            with nogil:
-                available = shm_consumer_peek_available(&self._cons_ctx, &msg_len, &read_pos)
-            if not available:
-                spin_count += 1
-                if spin_count < self._spin_wait:
-                    continue
+            self._ensure_open()
+            copied = _try_consume_into(&self._cons_ctx, dst, self._scratch)
+            if copied >= 0:
+                return copied
+            spins += 1
+            if spins >= self._spin_wait:
                 _sched_yield()
-                spin_count = 0
-                continue
-            with nogil:
-                read_pos_check = atomic_load_acquire(&self._hdr.read_pos)
-            if read_pos_check != read_pos:
-                continue
-            break
-
-        if msg_len > <u64>len(dst):
-            raise ValueError(
-                f"Message size {msg_len} exceeds buffer size {len(dst)}"
-            )
-
-        buf_ptr = <unsigned char*>dst
-        with nogil:
-            shm_consumer_consume(&self._cons_ctx, buf_ptr, msg_len, read_pos)
-
-        self._cached_read = read_pos + 8 + msg_len
-        return <int>msg_len
+                spins = 0
 
     cpdef int consume_all_into(self, list[bytearray] buffers):
-        """Consume all available items into the provided bytearrays.
-
-        Does not block. Copies as many available messages as there are
-        buffers provided.
-
-        Args:
-            buffers: List of pre-allocated bytearrays.
-
-        Returns:
-            Number of messages copied.
-
-        Raises:
-            ValueError: If any buffer is too small for its message.
-        """
-        cdef:
-            int total_copied = 0
-            int n = len(buffers)
-            int i
-            u64 msg_len = 0
-            u64 read_pos = 0
-            u64 read_pos_check = 0
-            int available = 0
-            bytearray buf
-            unsigned char* buf_ptr
-
-        for i in range(n):
-            with nogil:
-                available = shm_consumer_peek_available(&self._cons_ctx, &msg_len, &read_pos)
-                if available:
-                    read_pos_check = atomic_load_acquire(&self._hdr.read_pos)
-            if not available:
+        cdef bytearray dst
+        cdef int copied, total = 0
+        self._ensure_open()
+        for dst in buffers:
+            copied = _try_consume_into(&self._cons_ctx, dst, self._scratch)
+            if copied < 0:
                 break
-            if read_pos_check != read_pos:
-                continue
-
-            buf = buffers[i]
-            if msg_len > <u64>len(buf):
-                raise ValueError(
-                    f"Message size {msg_len} exceeds buffer size {len(buf)}"
-                )
-
-            buf_ptr = <unsigned char*>buf
-            with nogil:
-                shm_consumer_consume(&self._cons_ctx, buf_ptr, msg_len, read_pos)
-
-            total_copied += 1
-            self._cached_read = read_pos + 8 + msg_len
-
-        return total_copied
-
-    cpdef object peekleft(self):
-        """Peek at the next item without consuming; returns None if empty.
-
-        Returns:
-            The next bytes payload or None if buffer is empty.
-        """
-        cdef u64 msg_len = 0
-        cdef u64 read_pos = 0
-        cdef u64 read_pos_check = 0
-        cdef u64 mask = self._mask
-        cdef u64 cap = self._capacity
-        cdef int available = 0
-
-        with nogil:
-            available = shm_consumer_peek_available(&self._cons_ctx, &msg_len, &read_pos)
-            if available:
-                read_pos_check = atomic_load_acquire(&self._hdr.read_pos)
-        if not available:
-            return None
-        if read_pos_check != read_pos:
-            return None
-        cdef bytes out = bytes(<Py_ssize_t>msg_len)
-        shm_copy_from_ring(<unsigned char*>out, self._data, read_pos + 8, mask, <size_t>msg_len, cap)
-        return out
-
-    cpdef object peekright(self):
-        """Peek at the most recently inserted item; returns None if empty."""
-        cdef u64 w
-        cdef u64 r
-        cdef u64 msg_len
-        cdef u64 pos
-        cdef u64 next_pos
-        cdef u64 mask = self._mask
-        cdef u64 cap = self._capacity
-        cdef bytes out
-        with nogil:
-            w = atomic_load_acquire(&self._hdr.write_pos)
-            r = atomic_load_acquire(&self._hdr.read_pos)
-        if w - r < 8:
-            return None
-        pos = r
-        while pos < w:
-            msg_len = read_u64_le(self._data, pos & mask, mask)
-            if msg_len > cap or 8 + msg_len > cap:
-                return None
-            next_pos = pos + 8 + msg_len
-            if next_pos > w:
-                return None
-            if next_pos == w:
-                out = bytes(<Py_ssize_t>msg_len)
-                copy_from_ring(<unsigned char*>out, self._data, pos + 8, mask, <size_t>msg_len, cap)
-                return out
-            pos = next_pos
-        return None
+            total += 1
+        return total
 
     cpdef list consume_all(self):
-        """Drain all items currently available without blocking.
-
-        Returns:
-            List of all available bytes payloads (may be empty).
-        """
-        cdef list res = []
-        cdef u64 msg_len = 0
-        cdef u64 read_pos = 0
-        cdef u64 read_pos_check = 0
-        cdef int available = 0
-        cdef bytearray buf
-        cdef unsigned char* buf_ptr
-
+        cdef list result = []
+        cdef object item
+        self._ensure_open()
         while True:
-            with nogil:
-                available = shm_consumer_peek_available(&self._cons_ctx, &msg_len, &read_pos)
-                if available:
-                    read_pos_check = atomic_load_acquire(&self._hdr.read_pos)
-            if not available:
-                break
-            if read_pos_check != read_pos:
-                continue
-            buf = bytearray(<Py_ssize_t>msg_len)
-            buf_ptr = <unsigned char*>buf
-            with nogil:
-                shm_consumer_consume(&self._cons_ctx, buf_ptr, msg_len, read_pos)
-            res.append(bytes(buf))
-            self._cached_read = read_pos + 8 + msg_len
-        return res
+            item = _try_consume(&self._cons_ctx)
+            if item is None:
+                return result
+            result.append(item)
+
+    cpdef list unwrapped(self):
+        self._ensure_open()
+        return _snapshot(&self._cons_ctx)
+
+    cpdef object peekleft(self):
+        cdef list items = self.unwrapped()
+        return items[0] if items else None
+
+    cpdef object peekright(self):
+        cdef list items = self.unwrapped()
+        return items[len(items) - 1] if items else None
+
+    cpdef bint contains(self, bytes item):
+        return item in self.unwrapped()
+
+    def __contains__(self, bytes item):
+        return self.contains(item)
 
     def consume_iterable(self):
-        """Iterate over items, blocking until each is available."""
         while True:
             yield self.consume()
 
     async def aconsume(self):
-        """Async consume a single item."""
         import asyncio
-        cdef u64 msg_len = 0
-        cdef u64 read_pos = 0
-        cdef int spin_count = 0
-        cdef int available = 0
-        cdef bytearray buf
-        cdef unsigned char* buf_ptr
-
+        cdef object result
         while True:
-            with nogil:
-                available = shm_consumer_peek_available(&self._cons_ctx, &msg_len, &read_pos)
-            if available:
-                break
-            spin_count += 1
-            if spin_count >= self._spin_wait:
-                await asyncio.sleep(0)
-                spin_count = 0
-
-        buf = bytearray(<Py_ssize_t>msg_len)
-        buf_ptr = <unsigned char*>buf
-        with nogil:
-            shm_consumer_consume(&self._cons_ctx, buf_ptr, msg_len, read_pos)
-
-        self._cached_read = read_pos + 8 + msg_len
-        return bytes(buf)
+            self._ensure_open()
+            result = _try_consume(&self._cons_ctx)
+            if result is not None:
+                return result
+            await asyncio.sleep(0)
 
     async def aconsume_iterable(self):
-        """Async iterator over consumed items."""
         while True:
             yield await self.aconsume()
 
-    cpdef list unwrapped(self):
-        """Return a list of all logical contents without consuming."""
-        cdef list res = []
-        cdef u64 msg_len = 0
-        cdef u64 pos = 0
-        cdef u64 next_pos = 0
-        cdef u64 w = 0
-        cdef u64 r = 0
-        cdef u64 mask = self._mask
-        cdef u64 cap = self._capacity
-        cdef bytes out
-
-        with nogil:
-            w = atomic_load_acquire(&self._hdr.write_pos)
-            r = atomic_load_acquire(&self._hdr.read_pos)
-
-        pos = r
-        while pos < w:
-            msg_len = read_u64_le(self._data, pos & mask, mask)
-            if msg_len > cap or 8 + msg_len > cap:
-                break
-            next_pos = pos + 8 + msg_len
-            if next_pos > w:
-                break
-            out = bytes(<Py_ssize_t>msg_len)
-            copy_from_ring(<unsigned char*>out, self._data, pos + 8, mask, <size_t>msg_len, cap)
-            res.append(out)
-            pos = next_pos
-        return res
-
-    cpdef bint contains(self, bytes item):
-        """Check if item is present in the buffer."""
-        cdef bytes b
-        for b in self.unwrapped():
-            if b == item:
-                return True
-        return False
-
-    def __contains__(self, bytes item):
-        """Delegate to contains()."""
-        return self.contains(item)
-
     cpdef bint is_empty(self):
-        """Check if the buffer is empty."""
         return len(self) == 0
 
     cpdef bint is_full(self):
-        """Check if the buffer is full (no space for even a 0-byte message)."""
-        cdef u64 read_pos
-        cdef u64 write_pos
-        with nogil:
-            read_pos = atomic_load_acquire(&self._hdr.read_pos)
-            write_pos = atomic_load_acquire(&self._hdr.write_pos)
-        return (self._capacity - (write_pos - read_pos)) < 8
+        self._ensure_open()
+        return _full(self._hdr, self._capacity)
 
     cpdef void clear(self):
-        """Drain all available items from the buffer."""
         self.consume_all()

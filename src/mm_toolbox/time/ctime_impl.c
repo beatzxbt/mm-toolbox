@@ -161,6 +161,10 @@ int c_time_iso8601(double timestamp, char* buf, size_t buf_size) {
     if (buf == NULL || buf_size == 0) {
         return -1;
     }
+    if (!isfinite(timestamp) || timestamp < -9223372036854775808.0 ||
+        timestamp >= 9223372036854775808.0) {
+        return -1;
+    }
     
     if (timestamp == 0.0) {
         /* Fast path: get current time and format directly using manual arithmetic */
@@ -232,8 +236,17 @@ int c_time_iso8601(double timestamp, char* buf, size_t buf_size) {
             fractional_part = (int)((int64_t)timestamp % 1000);
             snprintf(fractional_str, sizeof(fractional_str), "%03d", fractional_part);
         } else {
-            seconds = (time_t)timestamp;
-            fractional_part = (int)((timestamp - (int64_t)timestamp) * 1000);
+            /* Split at the mathematical floor so pre-epoch fractions remain
+             * a positive subsecond component (e.g. -0.5 is second -1 plus
+             * 500 ms). C integer casts truncate toward zero. */
+            double whole_seconds = floor(timestamp);
+            double fractional_seconds = timestamp - whole_seconds;
+            if (whole_seconds < -9223372036854775808.0 ||
+                whole_seconds >= 9223372036854775808.0) {
+                return -1;
+            }
+            seconds = (time_t)(int64_t)whole_seconds;
+            fractional_part = (int)(fractional_seconds * 1000.0);
             snprintf(fractional_str, sizeof(fractional_str), "%03d", fractional_part);
         }
         

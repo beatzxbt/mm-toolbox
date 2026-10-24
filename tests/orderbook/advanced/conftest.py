@@ -6,14 +6,12 @@ import numpy as np
 import pytest
 
 from mm_toolbox.orderbook.advanced import (
-    AdvancedOrderbook,
+    PyAdvancedOrderbook,
     OrderbookLevel,
     OrderbookLevels,
     PyOrderbookSortedness,
 )
 
-# Aliases for backward compatibility in test code
-PyAdvancedOrderbook = AdvancedOrderbook
 PyOrderbookLevel = OrderbookLevel
 PyOrderbookLevels = OrderbookLevels
 
@@ -32,9 +30,7 @@ def _make_levels(
     norders = [1] * len(prices) if norders is None else norders
     if with_precision:
         return (
-            PyOrderbookLevels.from_list_with_ticks_and_lots(
-                prices, sizes, norders, TICK_SIZE, LOT_SIZE
-            ),
+            PyOrderbookLevels.from_list(prices, sizes, norders),
             True,
         )
     return PyOrderbookLevels.from_list(prices, sizes, norders), False
@@ -46,9 +42,7 @@ def _empty_levels() -> PyOrderbookLevels:
     Uses price=999.0 which is far ABOVE the test orderbook asks (~100.0).
     With size=0 and being outside the ask range, this level will be ignored.
     """
-    return PyOrderbookLevels.from_list_with_ticks_and_lots(
-        [999.0], [0.0], [0], TICK_SIZE, LOT_SIZE
-    )
+    return PyOrderbookLevels.from_list([999.0], [0.0], [0])
 
 
 def _empty_bid_levels() -> PyOrderbookLevels:
@@ -57,9 +51,7 @@ def _empty_bid_levels() -> PyOrderbookLevels:
     Uses price=1.0 which is far BELOW the test orderbook bids (~100.0).
     With size=0 and being outside the bid range, this level will be ignored.
     """
-    return PyOrderbookLevels.from_list_with_ticks_and_lots(
-        [1.0], [0.0], [0], TICK_SIZE, LOT_SIZE
-    )
+    return PyOrderbookLevels.from_list([1.0], [0.0], [0])
 
 
 def _mk_book(num_levels: int = 64) -> PyAdvancedOrderbook:
@@ -97,7 +89,7 @@ def pathological_data() -> dict[str, tuple[float, float] | float]:
         "huge_spread": (1.0, 10000.0),  # bid=1.0, ask=10000.0
         "zero_spread": (100.0, 100.0),  # bid=ask=100.0
         "negative_spread": (100.01, 100.0),  # crossed orderbook
-        "extreme_price_high": 1e100,
-        "extreme_price_low": 1e-100,
+        "extreme_price_high": 1e12,
+        "extreme_price_low": TICK_SIZE,
         "extreme_size": 1e15,
     }

@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import AsyncIterator, Callable
+import logging
+from collections.abc import Callable
 from inspect import get_annotations
 from typing import Self
 
@@ -22,6 +23,9 @@ from mm_toolbox.websocket.connection import (
     WsConnection,
     WsConnectionConfig,
 )
+
+
+_logger = logging.getLogger(__name__)
 
 
 class WsSingle:
@@ -49,7 +53,12 @@ class WsSingle:
         self._config = config
         self._ringbuffer = BytesRingBuffer(max_capacity=128, only_insert_unique=False)
         self._ws_conn: WsConnection | None = None
-        self._reconnect_iter: AsyncIterator[WsConnection] | None = None
+        self._closed = False
+        self._stop_event = asyncio.Event()
+        self._tasks: set[asyncio.Task] = set()
+        self._start_task: asyncio.Task | None = None
+        self._reconnect_task: asyncio.Task | None = None
+        self._connect_task: asyncio.Task[WsConnection] | None = None
 
         # Verify the signature of the on_message, must be a single bytes arg
         if on_message is not None:
@@ -96,8 +105,9 @@ class WsSingle:
             msg: Message to send
             only_fastest: Ignored for single connections (compatibility with WsPool)
         """
-        if self._ws_conn is not None:
-            self._ws_conn.send_data(msg)
+        if self._closed or self._ws_conn is None:
+            raise RuntimeError("WebSocket connection is disconnected")
+        self._ws_conn.send_data(msg)
 
     def _dispatch_message(self, msg: bytes) -> None:
         """Dispatches one message to the configured callback.
@@ -113,46 +123,121 @@ class WsSingle:
         except Exception as exc:
             print(f"Error in on_message callback: {exc}")
 
-    async def _consume_callbacks(self) -> None:
-        """Consumes ringbuffer messages and dispatches in arrival order.
+    def _track_task(self, task: asyncio.Task) -> asyncio.Task:
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return task
 
-        Returns:
-            None: This coroutine runs until cancelled or an error occurs.
-        """
-        while self._ws_conn is not None and self._ws_conn.is_connected():
-            try:
-                msg = await asyncio.wait_for(self._ringbuffer.aconsume(), timeout=1.0)
-            except asyncio.TimeoutError:
+    async def _connect(self) -> None:
+        if self._closed:
+            raise RuntimeError("WebSocket client is closed")
+        if self._connect_task is not None and not self._connect_task.done():
+            task = self._connect_task
+        else:
+            task = self._track_task(
+                asyncio.create_task(WsConnection.new(self._ringbuffer, self._config))
+            )
+            self._connect_task = task
+        try:
+            conn = await task
+        except BaseException:
+            # The connector may have completed just before its awaiting owner
+            # was cancelled. Its successful transport still needs an owner.
+            if task.done() and not task.cancelled() and task.exception() is None:
+                task.result().close()
+            raise
+        if self._closed:
+            conn.close()
+            raise RuntimeError("WebSocket client closed during connection")
+        self._ws_conn = conn
+
+    async def _maintain_connection(self) -> None:
+        """Monitor disconnects and retry failures without racing shutdown."""
+        delay = 1.0
+        while not self._closed:
+            if self._ws_conn is not None and self._ws_conn.is_connected():
+                await asyncio.sleep(0.1)
                 continue
-            self._dispatch_message(msg)
+            if not self._config.auto_reconnect:
+                self._stop_event.set()
+                return
+            await asyncio.sleep(delay)
+            if self._closed:
+                return
+            try:
+                await self._connect()
+            except Exception as exc:
+                _logger.warning("WebSocket reconnect failed; retrying: %s", exc)
+                delay = min(delay * 2.0, 30.0)
+            else:
+                delay = 1.0
+
+    def _start_monitor(self) -> None:
+        if self._reconnect_task is None or self._reconnect_task.done():
+            self._reconnect_task = self._track_task(
+                asyncio.create_task(self._maintain_connection())
+            )
+
+    async def _consume_callbacks(self) -> None:
+        """Dispatch queued messages until closed or reconnection is disabled."""
+        while not self._closed:
+            try:
+                msg = await self.__anext__()
+            except StopAsyncIteration:
+                return
+            if not self._closed:
+                self._dispatch_message(msg)
 
     async def start(self) -> None:
-        """Opens the WebSocket connection and sends any on_connect messages."""
-        if self._config.auto_reconnect:
-            self._reconnect_iter = WsConnection.new_with_reconnect(
-                self._ringbuffer, self._config
-            )
-            async for conn in self._reconnect_iter:
-                self._ws_conn = conn
+        """Connect and consume callbacks until close; retry if configured."""
+        if self._closed:
+            raise RuntimeError("WebSocket client is closed")
+        if self._start_task is not None and not self._start_task.done():
+            raise RuntimeError("WebSocket callback consumer is already running")
+        task = asyncio.current_task()
+        assert task is not None
+        self._start_task = task
+        self._track_task(task)
+        try:
+            if self._ws_conn is None or not self._ws_conn.is_connected():
                 try:
-                    await self._consume_callbacks()
-                except Exception as exc:
-                    print(f"Error consuming WebSocket messages: {exc}")
-        else:
-            self._ws_conn = await WsConnection.new(self._ringbuffer, self._config)
-            try:
-                await self._consume_callbacks()
-            except Exception as exc:
-                print(f"Error consuming WebSocket messages: {exc}")
+                    await self._connect()
+                except Exception:
+                    if not self._config.auto_reconnect:
+                        raise
+                    _logger.warning(
+                        "Initial WebSocket connection failed; retrying", exc_info=True
+                    )
+            self._start_monitor()
+            await self._consume_callbacks()
+        except asyncio.CancelledError:
+            if not self._closed:
+                raise
+        finally:
+            self.close()
+            self._tasks.discard(task)
 
     def close(self) -> None:
-        """Closes the WebSocket connection gracefully."""
+        """Permanently stop owned work and wake readers; queued bytes may drain.
+
+        Repeated close calls are safe. Use a new client to start another session.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        self._stop_event.set()
+        try:
+            current = asyncio.current_task()
+        except RuntimeError:
+            current = None
+        for task in tuple(self._tasks):
+            if task is not current and not task.done():
+                task.cancel()
         if self._ws_conn is not None:
             try:
                 self._ws_conn.close()
             except Exception as exc:
-                print(f"Error closing WebSocket connection: {exc}")
-        self._reconnect_iter = None
+                _logger.warning("Error closing WebSocket connection: %s", exc)
 
     def get_config(self) -> WsConnectionConfig:
         """Return the connection configuration.
@@ -170,7 +255,11 @@ class WsSingle:
             int: ``1`` if connected, otherwise ``0``.
 
         """
-        if self._ws_conn is not None and self._ws_conn.is_connected():
+        if (
+            not self._closed
+            and self._ws_conn is not None
+            and self._ws_conn.is_connected()
+        ):
             return 1
         return 0
 
@@ -206,40 +295,56 @@ class WsSingle:
             ``DISCONNECTED`` when none exists.
 
         """
-        if self._ws_conn is not None:
+        if not self._closed and self._ws_conn is not None:
             return self._ws_conn.get_state()
         return ConnectionState.DISCONNECTED
 
     async def __aenter__(self) -> Self:
-        """Async context manager entry. Opens the connection."""
-        if self._ws_conn is None:
-            if self._config.auto_reconnect:
-                self._reconnect_iter = WsConnection.new_with_reconnect(
-                    self._ringbuffer, self._config
-                )
-                try:
-                    self._ws_conn = await self._reconnect_iter.__anext__()
-                except Exception:
-                    # Fall back to single connection if reconnect fails
-                    self._reconnect_iter = None
-                    self._ws_conn = await WsConnection.new(
-                        self._ringbuffer, self._config
-                    )
-            else:
-                self._ws_conn = await WsConnection.new(self._ringbuffer, self._config)
+        """Open once, failing promptly, then monitor for configured reconnects."""
+        if self._closed:
+            raise RuntimeError("WebSocket client is closed")
+        try:
+            if self._ws_conn is None or not self._ws_conn.is_connected():
+                await self._connect()
+            self._start_monitor()
+        except BaseException:
+            self.close()
+            raise
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Async context manager exit. Closes the connection."""
+        """Close and wait for owned connection and callback work to terminate."""
         self.close()
+        current = asyncio.current_task()
+        await asyncio.gather(
+            *(task for task in tuple(self._tasks) if task is not current),
+            return_exceptions=True,
+        )
 
     def __aiter__(self) -> Self:
-        """Returns an async iterator over the connection."""
+        """Return the single-consumer message iterator."""
         return self
 
     async def __anext__(self) -> bytes:
-        """Returns the next message from the connection in arrival order."""
-        return await self._ringbuffer.aconsume()
+        """Drain queued bytes, then raise StopAsyncIteration after close."""
+        if len(self._ringbuffer):
+            return self._ringbuffer.consume()
+        if self._stop_event.is_set():
+            raise StopAsyncIteration
+        consume = asyncio.create_task(self._ringbuffer.aconsume())
+        stopped = asyncio.create_task(self._stop_event.wait())
+        try:
+            await asyncio.wait((consume, stopped), return_when=asyncio.FIRST_COMPLETED)
+            if consume.done() and not consume.cancelled():
+                return consume.result()
+            if len(self._ringbuffer):
+                return self._ringbuffer.consume()
+            raise StopAsyncIteration
+        finally:
+            for task in (consume, stopped):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(consume, stopped, return_exceptions=True)
 
 
 if __name__ == "__main__":

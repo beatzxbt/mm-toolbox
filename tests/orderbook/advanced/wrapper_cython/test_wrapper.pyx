@@ -2,7 +2,7 @@
 # cython: boundscheck=False
 # cython: wraparound=False
 """
-Minimal delegation tests for the Cython AdvancedOrderbook wrapper.
+Minimal delegation tests for the Cython CyAdvancedOrderbook wrapper.
 
 These tests verify that the wrapper correctly delegates to CoreAdvancedOrderbook.
 Core logic is tested exhaustively in engine/.
@@ -17,9 +17,8 @@ from mm_toolbox.orderbook.advanced.level.level cimport (
     OrderbookLevel,
     OrderbookLevels,
     create_orderbook_level,
-    create_orderbook_level_with_ticks_and_lots,
 )
-from mm_toolbox.orderbook.advanced.cython cimport AdvancedOrderbook
+from mm_toolbox.orderbook.advanced.cython cimport CyAdvancedOrderbook
 from mm_toolbox.orderbook.advanced.enum.enums cimport CyOrderbookSortedness
 
 
@@ -58,7 +57,23 @@ cdef void _free_levels(OrderbookLevels* levels):
         levels.num_levels = 0
 
 
-cdef OrderbookLevels _make_levels(double* prices, double* sizes, u64 count, double tick_size, double lot_size):
+cdef OrderbookLevel _make_level(
+    double price,
+    double size,
+    double tick_size,
+    double lot_size,
+    u64 norders=1,
+):
+    return create_orderbook_level(price, size, norders)
+
+
+cdef OrderbookLevels _make_levels(
+    double* prices,
+    double* sizes,
+    u64 count,
+    double tick_size,
+    double lot_size,
+):
     """Create OrderbookLevels from price/size arrays.
 
     Args:
@@ -69,12 +84,12 @@ cdef OrderbookLevels _make_levels(double* prices, double* sizes, u64 count, doub
         lot_size: Lot size for conversion.
 
     Returns:
-        OrderbookLevels populated with converted tick/lot values.
+        OrderbookLevels populated with raw price, size, and norders values.
     """
     cdef OrderbookLevels levels = _alloc_levels(count)
     cdef u64 i
     for i in range(count):
-        levels.levels[i] = create_orderbook_level_with_ticks_and_lots(
+        levels.levels[i] = _make_level(
             prices[i], sizes[i], tick_size, lot_size, 1
         )
     return levels
@@ -94,13 +109,13 @@ cdef bint _approx_eq(double a, double b, double tol=1e-9):
     return fabs(a - b) < tol
 
 
-cdef AdvancedOrderbook _create_book():
-    """Create an AdvancedOrderbook with standard test settings.
+cdef CyAdvancedOrderbook _create_book():
+    """Create an CyAdvancedOrderbook with standard test settings.
 
     Returns:
-        Initialized AdvancedOrderbook with TICK_SIZE, LOT_SIZE, and 64 levels.
+        Initialized CyAdvancedOrderbook with TICK_SIZE, LOT_SIZE, and 64 levels.
     """
-    return AdvancedOrderbook(
+    return CyAdvancedOrderbook(
         tick_size=TICK_SIZE,
         lot_size=LOT_SIZE,
         num_levels=64,
@@ -109,11 +124,11 @@ cdef AdvancedOrderbook _create_book():
     )
 
 
-cdef void _populate_book(AdvancedOrderbook book):
+cdef void _populate_book(CyAdvancedOrderbook book):
     """Populate book with standard 2-level snapshot for delegation tests.
 
     Args:
-        book: AdvancedOrderbook to populate with bids [100.00, 99.99] and asks [100.01, 100.02].
+        book: CyAdvancedOrderbook to populate with bids [100.00, 99.99] and asks [100.01, 100.02].
     """
     cdef double bid_prices[2]
     cdef double bid_sizes[2]
@@ -133,14 +148,14 @@ cdef void _populate_book(AdvancedOrderbook book):
 
 
 def test_wrapper_init():
-    """Test AdvancedOrderbook initializes without error."""
-    cdef AdvancedOrderbook book = _create_book()
+    """Test CyAdvancedOrderbook initializes without error."""
+    cdef CyAdvancedOrderbook book = _create_book()
     assert book is not None
 
 
 def test_wrapper_consume_snapshot_delegation():
     """Test consume_snapshot delegates correctly and mid price is computed."""
-    cdef AdvancedOrderbook book = _create_book()
+    cdef CyAdvancedOrderbook book = _create_book()
     _populate_book(book)
     cdef double mid = book.get_mid_price()
     assert _approx_eq(mid, 100.00)
@@ -148,7 +163,7 @@ def test_wrapper_consume_snapshot_delegation():
 
 def test_wrapper_consume_deltas_delegation():
     """Test consume_deltas delegates correctly and updates BBO size."""
-    cdef AdvancedOrderbook book = _create_book()
+    cdef CyAdvancedOrderbook book = _create_book()
     _populate_book(book)
     
     cdef double ask_prices[1]
@@ -169,13 +184,13 @@ def test_wrapper_consume_deltas_delegation():
 
 def test_wrapper_consume_bbo_delegation():
     """Test consume_bbo delegates correctly and updates BBO size."""
-    cdef AdvancedOrderbook book = _create_book()
+    cdef CyAdvancedOrderbook book = _create_book()
     _populate_book(book)
     
-    cdef OrderbookLevel new_ask = create_orderbook_level_with_ticks_and_lots(
+    cdef OrderbookLevel new_ask = _make_level(
         100.01, 5.0, TICK_SIZE, LOT_SIZE, 1
     )
-    cdef OrderbookLevel new_bid = create_orderbook_level_with_ticks_and_lots(
+    cdef OrderbookLevel new_bid = _make_level(
         100.00, 5.0, TICK_SIZE, LOT_SIZE, 1
     )
     
@@ -185,9 +200,29 @@ def test_wrapper_consume_bbo_delegation():
     assert _approx_eq(mid, 100.00)
 
 
+def test_wrapper_consume_bbo_rejects_crossed_input():
+    """Test consume_bbo rejects crossed incoming BBO levels."""
+    cdef CyAdvancedOrderbook book = _create_book()
+    _populate_book(book)
+
+    cdef OrderbookLevel crossed_ask = _make_level(
+        100.00, 1.0, TICK_SIZE, LOT_SIZE, 1
+    )
+    cdef OrderbookLevel crossed_bid = _make_level(
+        100.01, 1.0, TICK_SIZE, LOT_SIZE, 1
+    )
+
+    cdef bint raised = False
+    try:
+        book.consume_bbo(crossed_ask, crossed_bid)
+    except ValueError:
+        raised = True
+    assert raised
+
+
 def test_wrapper_calculation_delegation():
     """Test all price/spread/impact calculations delegate correctly."""
-    cdef AdvancedOrderbook book = _create_book()
+    cdef CyAdvancedOrderbook book = _create_book()
     _populate_book(book)
     
     assert _approx_eq(book.get_mid_price(), 100.00)
@@ -198,7 +233,7 @@ def test_wrapper_calculation_delegation():
 
 def test_wrapper_clear_delegation():
     """Test clear() empties book and subsequent operations raise RuntimeError."""
-    cdef AdvancedOrderbook book = _create_book()
+    cdef CyAdvancedOrderbook book = _create_book()
     _populate_book(book)
     book.clear()
     
