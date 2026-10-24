@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## 1.0.0b9 (Unreleased)
 
 ### Release hardening
+- Link native orderbook test extensions with their C implementations on Linux and remove the generated C test executable from version control.
+- Align picows build/runtime versions to prevent Cython object-layout mismatches; update the compiler and native dependencies for Python 3.15.
+- Validate tagged release commits and distribution metadata before publishing; build wheels in native platform/Python jobs.
+- Support standard GIL-enabled CPython 3.15 in validation and Linux/macOS wheel builds.
 - Preserve lock-free overwrite-oldest SHM queues with atomic word copies, CAS retirement, exact overwrite counts, and exclusive producer leases. Format 2 rejects old mappings; recreate mappings after stopping all users. Large payload copying has a throughput cost.
 - Hide unsafe raw-pointer byte insertion from Python and reject invalid native lengths.
 - Make WebSocket sends fail explicitly when disconnected, require complete pool startup, recover missing connections, terminate single-client reconnect work on close, and count receive overwrites. Missing PONGs close the connection.

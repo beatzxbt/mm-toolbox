@@ -39,6 +39,9 @@ mm-toolbox/
 
 ## Installation
 
+MM Toolbox supports standard GIL-enabled CPython 3.12 through 3.15. Prebuilt
+wheels target Linux x86_64 and aarch64, and macOS arm64.
+
 MM Toolbox is available on PyPI and can be installed using pip:
 
 ```bash

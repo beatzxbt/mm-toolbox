@@ -21,7 +21,7 @@ Thank you for contributing to MM Toolbox. This document covers everything you ne
 
 ## Prerequisites
 
-- **Python**: 3.12, 3.13, or 3.14 (CPython only)
+- **Python**: CPython 3.12 through 3.15 (standard GIL build)
 - **uv**: Modern Python package manager ([install guide](https://docs.astral.sh/uv/))
 - **C compiler**: GCC (for Cython/C extensions)
 - **Make**: For build automation
@@ -29,7 +29,7 @@ Thank you for contributing to MM Toolbox. This document covers everything you ne
 Verify your environment:
 
 ```bash
-python --version  # Should be 3.12+, 3.13+, or 3.14+
+python --version  # Should be CPython 3.12, 3.13, 3.14, or 3.15
 uv --version      # Should be 0.5+
 make --version    # Should be GNU Make 3.81+ or equivalent
 ```
@@ -692,9 +692,9 @@ uv add --group build cibuildwheel
 uv run cibuildwheel --platform auto
 ```
 
-Configured for:
+Configured for standard GIL-enabled CPython:
 
-- Python 3.12, 3.13, and 3.14
+- Python 3.12, 3.13, 3.14, and 3.15
 - Linux (x86_64, aarch64)
 - macOS (arm64)
 
@@ -711,6 +711,10 @@ make upload-test
 ```bash
 gh workflow run release.yml --ref <validated-tag> -f environment=pypi
 ```
+
+The release workflow accepts only a tag named `v<project version>` and verifies
+that the tag resolves to the exact commit used by the run. Dispatch it with the
+validated tag as `--ref`; running it from a branch will fail the release gate.
 
 ### Release Checklist
 

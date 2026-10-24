@@ -40,6 +40,18 @@ still require measurement.
 The remaining public release gates are listed below. The original findings
 are retained as historical context for reviewing the changes.
 
+## Python 3.15 and CI follow-up — 2026-10-24
+
+- Added ordinary GIL-enabled CPython 3.15 support to package metadata and the validation/wheel matrices.
+- Fixed the Linux native-test linkage failure by compiling the ladder and helper C sources into the test extensions that call them directly.
+- Removed the generated C test executable from version control.
+- Aligned picows build/runtime requirements at 2.3.1 and refreshed compiler/native dependencies; Cython 3.3.0 is now required.
+- Full Python 3.15.1 suite: **1,657 passed, eight live-network tests skipped**. Additional release-artifact validation and moving-average tests: **139 passed** after fixture cleanup.
+- Fresh Python 3.14.8 coverage build with the updated lock: **1,657 passed, eight skipped**, **85.17%** aggregate coverage.
+- Local TLS 1.3 probes on Python 3.15 passed default certificate rejection, hostname verification, process-local test trust, all three WebSocket interfaces, and task/socket cleanup.
+- Release checks require the version tag, workflow SHA, checked-out source and wheel/sdist metadata to agree.
+- CI wheel jobs use native Linux x86-64/aarch64 and macOS arm64 runners, split by Python version; fresh remote validation remains pending.
+
 ## Initial review at 02d239f
 
 Reviewed 2026-10-19 at `02d239f`, branch `perf/centralize-price-validation`, package version `1.0.0b9`.
