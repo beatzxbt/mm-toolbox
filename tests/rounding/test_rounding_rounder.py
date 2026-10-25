@@ -549,7 +549,6 @@ class TestRounderEdgeCases:
             assert abs(bid_result - tick_multiple_bid * 0.01) < 1e-12
             assert abs(ask_result - tick_multiple_ask * 0.01) < 1e-12
 
-
     @pytest.mark.parametrize("exponent", [-8, -5, -2, -1, 0, 1, 6])
     def test_decimal_reference_and_adjacent_values(self, exponent):
         """Canonical grid points stay fixed and neighboring floats keep direction."""

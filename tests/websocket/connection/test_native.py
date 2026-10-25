@@ -19,6 +19,8 @@ import os
 import sys
 
 import pytest
+from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
+from mm_toolbox.websocket.connection import WsConnection, WsConnectionConfig
 
 # Go up to tests/ directory to find the compiled .so files
 test_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -32,9 +34,6 @@ except ImportError as e:
         f"Native Cython test module not built: {e}. Run `make build-test`",
         allow_module_level=True,
     )
-
-from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
-from mm_toolbox.websocket.connection import WsConnection, WsConnectionConfig
 
 
 # --------------------------------------------------------------------------- #

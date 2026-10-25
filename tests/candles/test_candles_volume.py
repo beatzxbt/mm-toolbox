@@ -13,7 +13,7 @@ import pytest
 
 from mm_toolbox.candles import MultiCandles, VolumeCandles
 from mm_toolbox.candles.base import Trade
-from tests.candles.support import trade
+from tests.candles.support import trade as make_trade
 
 
 class TestVolumeCandlesSpecific:
@@ -164,7 +164,6 @@ class TestVolumeCandlesSpecific:
         assert volume_candles[0].buy_size == 10.0
         assert volume_candles.latest_candle.buy_size == 5.0
 
-
     @pytest.mark.parametrize("tiny", [False, True])
     @pytest.mark.parametrize("multi", [False, True])
     def test_split_conserves_stored_trade_quantities(self, tiny, multi):
@@ -174,7 +173,7 @@ class TestVolumeCandlesSpecific:
         candles = (
             MultiCandles(10.0, 100, threshold) if multi else VolumeCandles(threshold)
         )
-        candles.process_trade(trade(1000, size=size))
+        candles.process_trade(make_trade(1000, size=size))
         buckets = [candles[i] for i in range(len(candles))] + [candles.latest_candle]
         assert len(candles) == 2
         assert math.fsum(c.buy_size for c in buckets) == pytest.approx(

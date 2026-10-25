@@ -373,4 +373,3 @@ def _replay_interleaved_with_book_ticker(
                 )
 
     return stats, errors
-

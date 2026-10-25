@@ -497,6 +497,7 @@ class _Standard(BaseLogHandler):
     def push(self, buffer):
         pass
 
+
 def test_standard_immediate_close_drains_every_queued_delivery():
     handler = _Standard()
     delivered = []
@@ -509,6 +510,7 @@ def test_standard_immediate_close_drains_every_queued_delivery():
     handler.close()
     assert delivered == list(range(20))
     assert not handler._delivery_thread.is_alive()
+
 
 def test_standard_close_has_one_deadline_and_reports_queued_loss():
     handler = _Standard()

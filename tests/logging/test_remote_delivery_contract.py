@@ -1,7 +1,5 @@
 """Shared contract tests for remote log delivery behavior."""
 
-import asyncio
-
 import pytest
 
 from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler as AdvancedBase
@@ -12,9 +10,11 @@ class _Standard(StandardBase):
     def push(self, buffer):
         pass
 
+
 class _Advanced(AdvancedBase):
     def push(self, logs):
         pass
+
 
 class _Response:
     status = 429
@@ -29,6 +29,7 @@ class _Response:
     async def __aexit__(self, *args):
         pass
 
+
 class _Session:
     closed = False
 
@@ -41,6 +42,7 @@ class _Session:
 
     async def close(self):
         self.closed = True
+
 
 @pytest.mark.parametrize("handler_type", [_Standard, _Advanced])
 @pytest.mark.asyncio

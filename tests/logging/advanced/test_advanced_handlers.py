@@ -577,6 +577,7 @@ class _Advanced(BaseLogHandler):
     def push(self, logs):
         pass
 
+
 def test_advanced_close_bounds_total_wait_across_many_futures():
     handler = _Advanced()
     total_futures = 20

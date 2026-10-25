@@ -1247,6 +1247,7 @@ def _competing_producer(path, barrier, release, results):
     finally:
         producer.close()
 
+
 def test_mpsc_exhaustion_release_and_writer_churn(tmp_path):
     path = str(tmp_path / "leases.bin")
     with ShmMpscProducer(path, 4096, num_rings=2) as owner:
@@ -1269,6 +1270,7 @@ def test_mpsc_exhaustion_release_and_writer_churn(tmp_path):
                 str(i).encode() for i in range(20)
             }
             assert owner.dropped_count == 0
+
 
 def test_mpsc_simultaneous_process_claims_are_exclusive(tmp_path):
     path = str(tmp_path / "competing.bin")

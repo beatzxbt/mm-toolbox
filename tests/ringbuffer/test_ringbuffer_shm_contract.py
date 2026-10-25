@@ -47,6 +47,7 @@ def test_exact_overwrite_accounting_and_insert_status(tmp_path, ring_types):
             assert consumer.consume() == b"kept"
             assert consumer.dropped_count == 3
 
+
 def test_oversized_padded_batch_is_rejected_before_mutation(tmp_path, ring_types):
     producer_type, consumer_type, kwargs = ring_types
     path = str(tmp_path / "batch.bin")
@@ -57,6 +58,7 @@ def test_oversized_padded_batch_is_rejected_before_mutation(tmp_path, ring_types
             assert producer.dropped_count == 0
             assert producer.failed_inserts == 1
             assert consumer.consume_all() == [b"keep"]
+
 
 def test_into_preserves_destination_when_too_small(tmp_path, ring_types):
     producer_type, consumer_type, kwargs = ring_types
@@ -74,6 +76,7 @@ def test_into_preserves_destination_when_too_small(tmp_path, ring_types):
             assert larger == b"eight123" + b"z" * 8
             assert len(consumer) == 0
 
+
 @pytest.mark.asyncio
 async def test_async_idle_consumer_yields_to_producer(tmp_path, ring_types):
     producer_type, consumer_type, kwargs = ring_types
@@ -87,6 +90,7 @@ async def test_async_idle_consumer_yields_to_producer(tmp_path, ring_types):
             assert await asyncio.wait_for(pending, timeout=2) == b"wake"
             assert consumer.is_empty()
 
+
 def test_producer_finalizer_releases_claim(tmp_path, ring_types):
     producer_type, consumer_type, kwargs = ring_types
     path = str(tmp_path / "finalizer.bin")
@@ -98,6 +102,7 @@ def test_producer_finalizer_releases_claim(tmp_path, ring_types):
         assert replacement.insert(b"after")
         with consumer_type(path) as consumer:
             assert consumer.consume_all() == [b"before", b"after"]
+
 
 def test_into_reuses_capacity_across_payload_sizes_and_empty_records(
     tmp_path, ring_types

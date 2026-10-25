@@ -188,6 +188,7 @@ async def test_pool_recovers_after_every_socket_is_lost(monkeypatch):
     assert not pool._replacement_tasks
     assert pool._eviction_task is None
 
+
 @pytest.mark.asyncio
 async def test_pool_no_recovery_when_disabled(monkeypatch):
     attempts = 0

@@ -192,6 +192,7 @@ async def test_single_close_wakes_reader_and_is_terminal():
     with pytest.raises(RuntimeError, match="closed"):
         await ws.__aenter__()
 
+
 @pytest.mark.asyncio
 async def test_single_close_during_connect_cancels_connector(monkeypatch):
     entered = asyncio.Event()
@@ -213,6 +214,7 @@ async def test_single_close_during_connect_cancels_connector(monkeypatch):
     assert cancelled.is_set()
     assert ws.get_state() == ConnectionState.DISCONNECTED
     assert all(task.done() for task in ws._tasks)
+
 
 @pytest.mark.asyncio
 async def test_single_close_during_retry_prevents_further_attempts(monkeypatch):

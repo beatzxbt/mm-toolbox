@@ -625,6 +625,7 @@ async def _until(predicate, timeout=3.0):
         while not predicate():
             await asyncio.sleep(0.01)
 
+
 class _Connection:
     def __init__(self, config):
         self.config = config

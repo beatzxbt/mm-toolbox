@@ -170,7 +170,6 @@ class TestCandlesModuleIntegration:
             assert sum(c.buy_size for c in buckets) == 6.0
             assert sum(c.sell_size for c in buckets) == 4.0
 
-
     @pytest.mark.parametrize("limit", [0.0, -1.0, math.nan, math.inf])
     def test_invalid_limits(self, limit):
         """Nonpositive and nonfinite limits cannot enter processing loops."""
