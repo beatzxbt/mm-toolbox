@@ -201,8 +201,23 @@ async def test_pool_no_recovery_when_disabled(monkeypatch):
     config = WsConnectionConfig.default("ws://localhost")
     config.auto_reconnect = False
     async with WsPool(config, pool_config=WsPoolConfig(2, 60)) as pool:
+        assert attempts == 2
         for conn in pool._conns.values():
             conn.close()
-        await asyncio.sleep(0.25)
+
+        tick_seen = asyncio.Event()
+        original_sleep = asyncio.sleep
+
+        async def hold_after_pool_tick(delay):
+            if asyncio.current_task() is pool._eviction_task:
+                tick_seen.set()
+                await asyncio.Future()
+            await original_sleep(delay)
+
+        with monkeypatch.context() as patcher:
+            patcher.setattr(pool_module.asyncio, "sleep", hold_after_pool_tick)
+            await asyncio.wait_for(tick_seen.wait(), timeout=1.0)
+            assert pool.get_connection_count() == 0
+            assert pool.get_state() == ConnectionState.DISCONNECTED
+            assert not pool._replacement_tasks
         assert attempts == 2
-        assert pool.get_state() == ConnectionState.DISCONNECTED

@@ -598,6 +598,44 @@ class TestRounderEdgeCases:
         assert rounder.bid(step) == step
         assert rounder.ask(step) == step
 
+    @pytest.mark.parametrize("exponent", [-308, -100, -15, 15, 100, 308])
+    def test_adjacent_representable_extreme_grid_values(self, exponent):
+        """Neighbors round in the correct direction, including finite-range limits."""
+        step = float(f"1e{exponent}")
+        below = math.nextafter(step, -math.inf)
+        above = math.nextafter(step, math.inf)
+        values = np.array([below, step, above], dtype=np.float64)
+        rounder = Rounder(RounderConfig.default(step, step))
+
+        expected_down = [0.0, step, step]
+        assert [rounder.bid(value) for value in values] == expected_down
+        assert rounder.bids(values).tolist() == expected_down
+
+        assert rounder.ask(below) == step
+        assert rounder.ask(step) == step
+        assert rounder.size(below) == step
+        assert rounder.size(step) == step
+        assert rounder.asks(values[:2]).tolist() == [step, step]
+        assert rounder.sizes(values[:2]).tolist() == [step, step]
+
+        if exponent == 308:
+            # The next grid point is 2e308, outside the finite float range.
+            with pytest.raises(ValueError, match="finite float range"):
+                rounder.ask(above)
+            with pytest.raises(ValueError, match="finite float range"):
+                rounder.size(above)
+            with pytest.raises(ValueError, match="finite float range"):
+                rounder.asks(values[2:])
+            with pytest.raises(ValueError, match="finite float range"):
+                rounder.sizes(values[2:])
+        else:
+            next_step = float(f"2e{exponent}")
+            expected_up = [step, step, next_step]
+            assert rounder.ask(above) == next_step
+            assert rounder.size(above) == next_step
+            assert rounder.asks(values).tolist() == expected_up
+            assert rounder.sizes(values).tolist() == expected_up
+
     @pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf, 1e100])
     def test_unrepresentable_inputs_fail_explicitly(self, value):
         """Nonfinite or excessive tick counts cannot silently misround."""
