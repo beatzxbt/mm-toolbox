@@ -6,7 +6,7 @@ Usage:
 
 Measures NumericRingBuffer operations:
 - insert, insert_batch, consume, consume_all
-- contains, peekright, peekleft, __getitem__
+- contains, peekright, peekleft, unwrapped
 - Async operations: aconsume, aconsume_iterable (when async is enabled)
 - Comparison: disable_async=True vs False
 """
@@ -117,7 +117,7 @@ class NumericRingBufferBenchmark(BenchmarkRunner[NumericBenchmarkConfig]):
         self._benchmark_consume_all(self._new_buffer())
         self._benchmark_contains(self._new_buffer())
         self._benchmark_peek(self._new_buffer())
-        self._benchmark_getitem(self._new_buffer())
+        self._benchmark_unwrapped(self._new_buffer())
 
     async def _run_async_suite(self) -> None:
         """Run all asynchronous benchmark operations."""
@@ -138,8 +138,12 @@ class NumericRingBufferBenchmark(BenchmarkRunner[NumericBenchmarkConfig]):
     def _benchmark_insert_batch(self, rb: NumericRingBuffer) -> None:
         """Benchmark batch insert operations."""
         for batch_size in self.config.batch_sizes:
-            warmup_batches = max(1, self.config.warmup_operations // batch_size)
-            num_batches = max(1, self.config.num_operations // batch_size)
+            warmup_batches = (
+                self.config.warmup_operations + batch_size - 1
+            ) // batch_size
+            num_batches = max(
+                1, (self.config.num_operations + batch_size - 1) // batch_size
+            )
             batch_idx = 0
 
             def operation() -> None:
@@ -171,18 +175,18 @@ class NumericRingBufferBenchmark(BenchmarkRunner[NumericBenchmarkConfig]):
         self.measure_operation("consume", operation)
 
     def _benchmark_consume_all(self, rb: NumericRingBuffer) -> None:
-        """Benchmark consume_all operation."""
+        """Benchmark the combined buffer refill and consume_all workload."""
         fill_size = min(self.config.buffer_size, 1000)
-        num_iterations = max(1, self.config.num_operations // 100)
+        num_iterations = max(1, self.config.num_operations)
 
         def operation() -> None:
             rb.insert_batch(self.data[:fill_size])
             rb.consume_all()
 
         self.measure_operation(
-            "consume_all",
+            "fill+consume_all",
             operation,
-            warmup_count=1,
+            warmup_count=self.config.warmup_operations,
             measure_count=num_iterations,
         )
 
@@ -208,16 +212,12 @@ class NumericRingBufferBenchmark(BenchmarkRunner[NumericBenchmarkConfig]):
             method = getattr(rb, name)
             self.measure_operation(name, method)
 
-    def _benchmark_getitem(self, rb: NumericRingBuffer) -> None:
-        """Benchmark random access via __getitem__."""
+    def _benchmark_unwrapped(self, rb: NumericRingBuffer) -> None:
+        """Benchmark exporting the buffer contents as a NumPy array."""
         fill_size = min(self.config.buffer_size, 100)
         rb.insert_batch(self.data[:fill_size])
 
-        def operation() -> None:
-            idx = np.random.randint(0, fill_size)
-            _ = rb[idx]
-
-        self.measure_operation("__getitem__", operation)
+        self.measure_operation("unwrapped", rb.unwrapped)
 
     async def _benchmark_aconsume(self, rb: NumericRingBuffer) -> None:
         """Benchmark async consume operation."""
@@ -318,7 +318,7 @@ def run_multi_size(base_config: NumericBenchmarkConfig, disable_async: bool) -> 
     )
     reporter.print_comparative_table(
         results,
-        ["insert", "consume", "contains", "peekright"],
+        ["insert", "consume", "contains", "peekright", "unwrapped"],
     )
 
 

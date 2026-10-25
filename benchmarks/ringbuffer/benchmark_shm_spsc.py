@@ -13,6 +13,7 @@ from __future__ import annotations
 import atexit
 import multiprocessing
 import os
+import queue
 import time
 from dataclasses import dataclass, field
 from multiprocessing import Queue
@@ -144,7 +145,8 @@ def _producer_process(
 
         start_ns = time.perf_counter_ns()
         for _ in range(num_messages):
-            producer.insert(payload)
+            if not producer.insert(payload):
+                raise RuntimeError("SPSC producer rejected an in-capacity message")
         actual_end_ns = time.perf_counter_ns()
 
         result_queue.put(("producer", actual_end_ns - start_ns, num_messages))
@@ -211,27 +213,60 @@ def throughput_benchmark(
         ),
     )
 
-    prod_proc.start()
-    cons_proc.start()
-
+    processes = (prod_proc, cons_proc)
     try:
-        prod_proc.join(timeout=30)
-        cons_proc.join(timeout=30)
-    finally:
-        if prod_proc.is_alive():
-            prod_proc.terminate()
-            prod_proc.join(timeout=1)
-        if cons_proc.is_alive():
-            cons_proc.terminate()
-            cons_proc.join(timeout=1)
+        for process in processes:
+            process.start()
 
-    results = {}
-    for _ in range(2):
-        tag, duration_ns, count = result_queue.get()
-        results[tag] = (duration_ns, count)
+        deadline = time.monotonic() + 30
+        for process in processes:
+            process.join(timeout=max(0.0, deadline - time.monotonic()))
+
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
+                if process.is_alive():
+                    process.kill()
+                    process.join(timeout=5)
+
+        if any(process.is_alive() for process in processes):
+            raise RuntimeError("SPSC throughput worker did not stop after termination")
+
+        failed_processes = [
+            (process.name, process.exitcode)
+            for process in processes
+            if process.exitcode != 0
+        ]
+        if failed_processes:
+            raise RuntimeError(f"SPSC throughput worker failed: {failed_processes}")
+
+        results = {}
+        for _ in processes:
+            tag, duration_ns, count = result_queue.get(timeout=5)
+            results[tag] = (duration_ns, count)
+    except queue.Empty as exc:
+        raise RuntimeError(
+            "SPSC throughput workers did not return both results"
+        ) from exc
+    finally:
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
+            if not process.is_alive() and process.exitcode is not None:
+                process.close()
+        result_queue.close()
+        result_queue.join_thread()
 
     prod_ns, prod_count = results["producer"]
     cons_ns, cons_count = results["consumer"]
+
+    if prod_count != num_messages or cons_count != num_messages:
+        raise RuntimeError(
+            "SPSC throughput message count mismatch: "
+            f"producer={prod_count}, consumer={cons_count}, expected={num_messages}"
+        )
 
     return prod_ns, cons_ns, prod_count, cons_count
 

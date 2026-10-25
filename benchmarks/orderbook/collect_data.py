@@ -202,8 +202,11 @@ def main() -> None:
     parser.add_argument(
         "--output",
         "-o",
-        default="benchmarks/orderbook/data/btcusdt_100k.jsonl",
-        help="Output file path (default: benchmarks/orderbook/data/btcusdt_100k.jsonl)",
+        default="benchmarks/orderbook/data/btcusdt_capture.jsonl",
+        help=(
+            "Output file path "
+            "(default: benchmarks/orderbook/data/btcusdt_capture.jsonl)"
+        ),
     )
     parser.add_argument(
         "--max-messages",

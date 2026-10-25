@@ -195,9 +195,7 @@ def _build_config(args: argparse.Namespace) -> MovingAverageBenchmarkConfig:
     Returns:
         Configured MovingAverageBenchmarkConfig.
     """
-    num_ops = (
-        args.num_operations if args.num_operations is not None else args.operations
-    )
+    num_ops = args.operations
     return MovingAverageBenchmarkConfig(
         window=max(2, int(args.window)),
         is_fast=args.fast,
@@ -279,9 +277,10 @@ def main() -> None:
     )
     cli.parser.add_argument(
         "--num-operations",
+        dest="operations",
         type=int,
-        default=None,
-        help="Number of operations to benchmark (default: 100000)",
+        default=argparse.SUPPRESS,
+        help="Alias for --operations/-n",
     )
 
     args = cli.parse()

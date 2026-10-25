@@ -14,8 +14,6 @@ from typing import Callable, Generic, TypeVar
 
 from .stats import BenchmarkStatistics
 
-TConfig = TypeVar("TConfig")
-
 
 @dataclass
 class BaseBenchmarkConfig(ABC):
@@ -28,6 +26,9 @@ class BaseBenchmarkConfig(ABC):
 
     num_operations: int = 100_000
     warmup_operations: int = 1_000
+
+
+TConfig = TypeVar("TConfig", bound=BaseBenchmarkConfig)
 
 
 class BenchmarkRunner(ABC, Generic[TConfig]):
@@ -93,8 +94,8 @@ class BenchmarkRunner(ABC, Generic[TConfig]):
         if self.stats is None:
             raise RuntimeError("Statistics not initialized")
 
-        warmup = warmup_count or self.config.warmup_operations
-        measure = measure_count or self.config.num_operations
+        warmup = self.config.warmup_operations if warmup_count is None else warmup_count
+        measure = self.config.num_operations if measure_count is None else measure_count
 
         # Warmup phase
         for _ in range(warmup):
@@ -123,7 +124,10 @@ class BenchmarkRunner(ABC, Generic[TConfig]):
         self._run_benchmark_suite(subject)
         end = time.perf_counter_ns()
 
-        self.stats.total_time_ns = end - start
+        # Replay suites can supply the measured interval without file loading
+        # and warmup. Preserve it instead of replacing it with driver overhead.
+        if self.stats.total_time_ns == 0:
+            self.stats.total_time_ns = end - start
         return self.stats
 
 

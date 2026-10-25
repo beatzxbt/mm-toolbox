@@ -134,6 +134,7 @@ class CountingLogHandler(BaseLogHandler):
         self._count = 0
         self._batches = 0
         self._lock = threading.Lock()
+        self._closed_event = threading.Event()
 
     def push(self, logs) -> None:
         with self._lock:
@@ -149,6 +150,15 @@ class CountingLogHandler(BaseLogHandler):
     def batches(self) -> int:
         with self._lock:
             return self._batches
+
+    def close(self, timeout_s: float = 2.0) -> None:
+        """Signal completion after the master's final transport drain."""
+        super().close(timeout_s)
+        self._closed_event.set()
+
+    def wait_closed(self, timeout_s: float) -> bool:
+        """Wait until the master finishes draining and closes this handler."""
+        return self._closed_event.wait(timeout_s)
 
 
 def _worker_emit_burst(
@@ -210,6 +220,7 @@ class ScenarioSample:
     consumed_count: int
     worker_errors: int
     forced_terminations: int
+    drain_timeouts: int
 
     @property
     def produced_msgs_per_sec(self) -> float:
@@ -258,6 +269,7 @@ class AxisSummary:
     loss_pct: float
     worker_errors: int
     forced_terminations: int
+    drain_timeouts: int
 
 
 def _summarize_samples(axis_value: int, samples: list[ScenarioSample]) -> AxisSummary:
@@ -272,6 +284,7 @@ def _summarize_samples(axis_value: int, samples: list[ScenarioSample]) -> AxisSu
     consumed = sum(sample.consumed_count for sample in samples)
     worker_errors = sum(sample.worker_errors for sample in samples)
     forced_terminations = sum(sample.forced_terminations for sample in samples)
+    drain_timeouts = sum(sample.drain_timeouts for sample in samples)
     lost = max(0, produced - consumed)
     loss_pct = (lost / produced * 100.0) if produced > 0 else 0.0
 
@@ -295,6 +308,7 @@ def _summarize_samples(axis_value: int, samples: list[ScenarioSample]) -> AxisSu
         loss_pct=loss_pct,
         worker_errors=worker_errors,
         forced_terminations=forced_terminations,
+        drain_timeouts=drain_timeouts,
     )
 
 
@@ -359,6 +373,7 @@ class AdvancedLoggingBenchmark(BenchmarkRunner[AdvancedLoggingBenchmarkConfig]):
 
         worker_errors = 0
         forced_terminations = 0
+        drain_timeouts = 0
         produced_total = 0
         worker_durations: list[int] = []
 
@@ -415,13 +430,13 @@ class AdvancedLoggingBenchmark(BenchmarkRunner[AdvancedLoggingBenchmarkConfig]):
             if received < workers:
                 worker_errors += workers - received
 
-            drain_deadline = time.monotonic() + max(0.1, self.config.drain_timeout_s)
-            while time.monotonic() < drain_deadline:
-                if handler.count >= produced_total:
-                    break
-                time.sleep(0.002)
-
-            master.shutdown()
+            # All workers have joined and flushed. MasterLogger performs a
+            # final transport drain during shutdown; waiting for every
+            # attempted message to arrive would poll until timeout after any
+            # documented ring overwrite.
+            master.shutdown(timeout_s=self.config.drain_timeout_s)
+            if not handler.wait_closed(self.config.drain_timeout_s):
+                drain_timeouts = 1
 
             duration_ns = max(worker_durations) if worker_durations else 1
             consumed_count = handler.count
@@ -434,11 +449,12 @@ class AdvancedLoggingBenchmark(BenchmarkRunner[AdvancedLoggingBenchmarkConfig]):
                 consumed_count=consumed_count,
                 worker_errors=worker_errors,
                 forced_terminations=forced_terminations,
+                drain_timeouts=drain_timeouts,
             )
         finally:
             with contextlib.suppress(Exception):
                 if master.is_running():
-                    master.shutdown()
+                    master.shutdown(timeout_s=self.config.drain_timeout_s)
 
             for proc in processes:
                 if proc.is_alive():
@@ -471,6 +487,7 @@ class AdvancedLoggingBenchmark(BenchmarkRunner[AdvancedLoggingBenchmarkConfig]):
             lost_messages=sample.lost_messages,
             worker_errors=sample.worker_errors,
             forced_terminations=sample.forced_terminations,
+            drain_timeouts=sample.drain_timeouts,
         )
 
         consumed_metrics = _get_or_add_operation(stats, consumed_operation)
@@ -485,6 +502,7 @@ class AdvancedLoggingBenchmark(BenchmarkRunner[AdvancedLoggingBenchmarkConfig]):
             lost_messages=sample.lost_messages,
             worker_errors=sample.worker_errors,
             forced_terminations=sample.forced_terminations,
+            drain_timeouts=sample.drain_timeouts,
         )
 
     def _run_axis_sweep(
@@ -584,26 +602,31 @@ def _print_axis_summary(
     if not rows:
         return
 
-    print("=" * 132)
+    print("=" * 168)
     print(title)
-    print("=" * 132)
+    print("=" * 168)
     print(
-        f"{axis_label:>10} {'Workers':>8} {'MsgB':>8} {'Produced':>12} "
-        f"{'Consumed':>12} {'Prod msg/s':>12} {'Cons msg/s':>12} "
-        f"{'Prod ns/msg':>12} {'Cons ns/msg':>12} {'Loss%':>8} {'Err':>6}"
+        f"{axis_label:>10} {'Workers':>8} {'MsgB':>8} {'Attempted':>12} "
+        f"{'Consumed':>12} {'Lost':>12} {'Attempt msg/s':>14} "
+        f"{'Cons msg/s':>12} {'Attempt ns/msg':>14} {'Cons ns/msg':>12} "
+        f"{'Loss%':>8} {'WorkerErr':>10} {'Forced':>8} {'DrainTmo':>9}"
     )
-    print("-" * 132)
+    print("-" * 168)
 
     for row in rows:
         print(
             f"{row.axis_value:>10} {row.workers:>8} {row.message_size:>8} "
             f"{row.produced_count:>12} {row.consumed_count:>12} "
-            f"{row.produced_msgs_per_sec:>12.0f} {row.consumed_msgs_per_sec:>12.0f} "
-            f"{row.produced_ns_per_msg:>12.1f} {row.consumed_ns_per_msg:>12.1f} "
-            f"{row.loss_pct:>8.2f} {row.worker_errors + row.forced_terminations:>6}"
+            f"{row.lost_messages:>12} "
+            f"{row.produced_msgs_per_sec:>14.0f} "
+            f"{row.consumed_msgs_per_sec:>12.0f} "
+            f"{row.produced_ns_per_msg:>14.1f} "
+            f"{row.consumed_ns_per_msg:>12.1f} {row.loss_pct:>8.2f} "
+            f"{row.worker_errors:>10} {row.forced_terminations:>8} "
+            f"{row.drain_timeouts:>9}"
         )
 
-    print("=" * 132)
+    print("=" * 168)
 
 
 def main() -> None:
@@ -712,21 +735,28 @@ def main() -> None:
     benchmark = AdvancedLoggingBenchmark(config)
     stats = benchmark.run()
 
-    reporter = BenchmarkReporter(
-        "Advanced Logging Benchmark Results",
-        {
-            "Architecture": "1 master + N workers",
-            "Axis": config.axis,
-            "Fixed workers": config.fixed_workers,
-            "Fixed message size (B)": config.fixed_message_size,
-            "Duration per run (s)": config.duration_sec,
-            "Repeats": config.num_operations,
-            "Warmup repeats": config.warmup_operations,
-            "Flush interval (s)": config.flush_interval_s,
-            "IPC dir": config.ipc_dir,
-        },
-    )
-    reporter.print_full_report(stats, warmup=config.warmup_operations)
+    print("=" * 100)
+    print("Advanced Logging Benchmark Results")
+    print("=" * 100)
+    report_metadata = {
+        "Architecture": "1 master + N workers",
+        "Axis": config.axis,
+        "Fixed workers": config.fixed_workers,
+        "Fixed message size (B)": config.fixed_message_size,
+        "Duration per run (s)": config.duration_sec,
+        "Repeats": config.num_operations,
+        "Warmup repeats": config.warmup_operations,
+        "Rate interval": "worker-active time; excludes startup and drain",
+        "Latency sample": "one scenario repeat; ns per attempted/consumed message",
+        "Percentile sample count per operation": config.num_operations,
+        "Drain": "joined workers, then bounded MasterLogger final drain",
+        "Flush interval (s)": config.flush_interval_s,
+        "IPC dir": config.ipc_dir,
+    }
+    for key, value in report_metadata.items():
+        print(f"{key}: {value}")
+    print()
+    BenchmarkReporter("", {}).print_operation_table(stats)
 
     if benchmark.message_size_axis_rows:
         _print_axis_summary(
