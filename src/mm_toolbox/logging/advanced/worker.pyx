@@ -84,6 +84,10 @@ cdef class WorkerLogger:
         producer_ring_count = _producer_ring_count(self._config)
         
         self._num_pending_logs = 0
+        self._rejected_messages = 0
+        self._transport_errors = 0
+        self._overwritten_batches = 0
+        self._overwrite_events = 0
         self._batch_writer = BinaryWriter(initial_capacity=1*1024*1024)  # 1MB baseline
         self._batch_lock = threading.Lock()
 
@@ -172,6 +176,8 @@ cdef class WorkerLogger:
                     f"discarded pending batch after transport error: {exc}",
                 )
                 with self._batch_lock:
+                    self._transport_errors += 1
+                    self._rejected_messages += self._num_pending_logs
                     self._batch_writer.reset()
                     self._num_pending_logs = 0
             
@@ -196,6 +202,7 @@ cdef class WorkerLogger:
         with self._batch_lock:
             record_size = 13 + <u64>message_len
             if record_size > self._max_batch_data_bytes:
+                self._rejected_messages += 1
                 _write_transport_diagnostic(
                     self._name,
                     f"dropped message of {message_len} bytes; maximum safe record batch is {self._max_batch_data_bytes} bytes",
@@ -246,6 +253,8 @@ cdef class WorkerLogger:
             inserted = self._transport.insert(writer.finalize())
             dropped = self._transport.last_insert_dropped
         except Exception as exc:
+            self._transport_errors += 1
+            self._rejected_messages += self._num_pending_logs
             _write_transport_diagnostic(
                 self._name,
                 f"discarded {self._num_pending_logs} logs ({batch_len} record bytes) after insert error: {exc}",
@@ -255,18 +264,37 @@ cdef class WorkerLogger:
             return
 
         if not inserted:
+            self._rejected_messages += self._num_pending_logs
             _write_transport_diagnostic(
                 self._name,
                 f"discarded {self._num_pending_logs} logs ({batch_len} record bytes); transport rejected insert #{self._transport.failed_inserts}",
             )
         elif dropped:
-            _write_transport_diagnostic(
-                self._name,
-                f"SHM overwrite dropped {dropped} older log batches (cumulative {self._transport.dropped_count})",
-            )
+            self._overwritten_batches += dropped
+            self._overwrite_events += 1
+            # Avoid amplifying saturation with a diagnostic on every flush.
+            if (self._overwrite_events & (self._overwrite_events - 1)) == 0:
+                _write_transport_diagnostic(
+                    self._name,
+                    f"SHM overwrite dropped {self._overwritten_batches} older log batches "
+                    f"(cumulative; diagnostics sampled)",
+                )
 
         self._batch_writer.reset()
         self._num_pending_logs = 0
+
+    cpdef dict get_transport_stats(self):
+        """Return cumulative loss/error counts, retained after shutdown.
+
+        Overwrites describe batches, not individual messages. These counts
+        do not promise downstream handler delivery.
+        """
+        with self._batch_lock:
+            return {
+                "rejected_messages": self._rejected_messages,
+                "transport_errors": self._transport_errors,
+                "overwritten_batches": self._overwritten_batches,
+            }
 
     cpdef void trace(self, bytes msg_bytes=b""):
         """Send a trace-level log message to the master.
@@ -335,6 +363,11 @@ cdef class WorkerLogger:
         try:
             self._flush_logs()
         except Exception as exc:
+            with self._batch_lock:
+                self._transport_errors += 1
+                self._rejected_messages += self._num_pending_logs
+                self._batch_writer.reset()
+                self._num_pending_logs = 0
             _write_transport_diagnostic(
                 self._name,
                 f"discarded pending batch during shutdown after transport error: {exc}",
@@ -343,13 +376,15 @@ cdef class WorkerLogger:
         # Wait for thread and cleanup
         try:
             self._timed_operations_thread.join()
-        except Exception:
-            pass
+        except Exception as exc:
+            self._transport_errors += 1
+            _write_transport_diagnostic(self._name, f"flush thread join failed: {exc}")
         
         try:
             self._transport.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            self._transport_errors += 1
+            _write_transport_diagnostic(self._name, f"transport close failed: {exc}")
 
         # Remove singleton registration — MUST always run
         if hasattr(_worker_logger_local, 'logger'):

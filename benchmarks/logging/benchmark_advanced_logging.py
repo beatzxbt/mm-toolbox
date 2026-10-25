@@ -1,4 +1,4 @@
-"""Benchmarks advanced multi-process logging throughput and per-message latency.
+"""Benchmark advanced logging throughput and scenario-average compute cost.
 
 Usage:
     uv run python benchmarks/logging/benchmark_advanced_logging.py --help
@@ -18,6 +18,7 @@ import contextlib
 import hashlib
 import multiprocessing
 import os
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -161,6 +162,70 @@ class CountingLogHandler(BaseLogHandler):
         return self._closed_event.wait(timeout_s)
 
 
+@dataclass
+class WorkerResult:
+    """A worker reports only after its final flush and transport cleanup."""
+
+    name: str
+    produced_count: int
+    duration_ns: int
+    error: str = ""
+    rejected_messages: int = 0
+    transport_errors: int = 0
+    overwritten_batches: int = 0
+
+
+def _collect_worker_results(processes, result_queue, timeout_s):
+    """Reject missing, duplicate, failed and success-before-crash workers."""
+    names = {proc.name for proc in processes}
+    results: dict[str, WorkerResult] = {}
+    deadline = time.monotonic() + max(0.0, timeout_s)
+    while len(results) < len(processes) and time.monotonic() < deadline:
+        try:
+            result = result_queue.get(
+                timeout=min(0.05, max(0.0, deadline - time.monotonic()))
+            )
+        except QueueEmpty:
+            continue
+        if not isinstance(result, WorkerResult) or result.name not in names:
+            raise RuntimeError(f"Invalid logging worker result: {result!r}")
+        counts = (
+            result.produced_count,
+            result.duration_ns,
+            result.rejected_messages,
+            result.transport_errors,
+            result.overwritten_batches,
+        )
+        if not isinstance(result.error, str) or any(
+            type(count) is not int or count < 0 for count in counts
+        ):
+            raise RuntimeError(f"Invalid logging worker accounting: {result!r}")
+        if result.name in results:
+            raise RuntimeError(f"Duplicate logging worker result: {result.name}")
+        results[result.name] = result
+
+    # Joined workers have flushed their queue feeders. Extra statuses are a
+    # broken protocol even if every expected worker already reported once.
+    try:
+        extra = result_queue.get_nowait()
+    except QueueEmpty:
+        pass
+    else:
+        raise RuntimeError(f"Duplicate or extra logging worker result: {extra!r}")
+
+    failed = 0
+    for proc in processes:
+        result = results.get(proc.name)
+        if proc.exitcode != 0 or result is None or result.error:
+            failed += 1
+            error = result.error if result is not None else "missing final accounting"
+            print(
+                f"Logging worker {proc.name}: exitcode={proc.exitcode}; {error}",
+                file=sys.stderr,
+            )
+    return list(results.values()), failed
+
+
 def _worker_emit_burst(
     path: str,
     worker_name: str,
@@ -173,20 +238,23 @@ def _worker_emit_burst(
     result_queue: multiprocessing.Queue,
 ) -> None:
     """Worker process: emit INFO logs as fast as possible for fixed duration."""
-    logger = WorkerLogger(
-        config=LoggerConfig(
-            path=path,
-            do_stdout=False,
-            flush_interval_s=flush_interval_s,
-            emit_internal=False,
-        ),
-        name=worker_name,
-    )
-    payload = b"x" * message_size
+    logger = None
     produced = 0
     elapsed_ns = 0
+    error = ""
+    transport_stats = {}
 
     try:
+        logger = WorkerLogger(
+            config=LoggerConfig(
+                path=path,
+                do_stdout=False,
+                flush_interval_s=flush_interval_s,
+                emit_internal=False,
+            ),
+            name=worker_name,
+        )
+        payload = b"x" * message_size
         start_barrier.wait(timeout=startup_timeout_s)
         if not start_event.wait(timeout=startup_timeout_s):
             raise TimeoutError("Worker start event wait timed out")
@@ -199,14 +267,28 @@ def _worker_emit_burst(
             produced += 1
 
         elapsed_ns = time.perf_counter_ns() - start_ns
-        result_queue.put(("ok", produced, elapsed_ns))
     except BaseException as exc:
-        result_queue.put(
-            ("error", produced, elapsed_ns, f"{type(exc).__name__}: {exc}")
-        )
+        error = f"{type(exc).__name__}: {exc}"
+        start_barrier.abort()
     finally:
-        with contextlib.suppress(Exception):
-            logger.shutdown()
+        if logger is not None:
+            try:
+                logger.shutdown()
+            except BaseException as exc:
+                error += f"; shutdown {type(exc).__name__}: {exc}"
+            try:
+                transport_stats = logger.get_transport_stats()
+            except BaseException as exc:
+                error += f"; accounting {type(exc).__name__}: {exc}"
+        result_queue.put(
+            WorkerResult(
+                name=worker_name,
+                produced_count=produced,
+                duration_ns=elapsed_ns,
+                error=error,
+                **transport_stats,
+            )
+        )
 
 
 @dataclass
@@ -221,6 +303,9 @@ class ScenarioSample:
     worker_errors: int
     forced_terminations: int
     drain_timeouts: int
+    rejected_messages: int = 0
+    transport_errors: int = 0
+    overwritten_batches: int = 0
 
     @property
     def produced_msgs_per_sec(self) -> float:
@@ -250,6 +335,11 @@ class ScenarioSample:
     def lost_messages(self) -> int:
         return max(0, self.produced_count - self.consumed_count)
 
+    @property
+    def unexplained_messages(self) -> int:
+        """Missing delivery needs recorded overwrite evidence for this run."""
+        return self.lost_messages if self.overwritten_batches == 0 else 0
+
 
 @dataclass
 class AxisSummary:
@@ -270,6 +360,10 @@ class AxisSummary:
     worker_errors: int
     forced_terminations: int
     drain_timeouts: int
+    rejected_messages: int = 0
+    transport_errors: int = 0
+    overwritten_batches: int = 0
+    unexplained_messages: int = 0
 
 
 def _summarize_samples(axis_value: int, samples: list[ScenarioSample]) -> AxisSummary:
@@ -309,7 +403,39 @@ def _summarize_samples(axis_value: int, samples: list[ScenarioSample]) -> AxisSu
         worker_errors=worker_errors,
         forced_terminations=forced_terminations,
         drain_timeouts=drain_timeouts,
+        rejected_messages=sum(sample.rejected_messages for sample in samples),
+        transport_errors=sum(sample.transport_errors for sample in samples),
+        overwritten_batches=sum(sample.overwritten_batches for sample in samples),
+        unexplained_messages=sum(sample.unexplained_messages for sample in samples),
     )
+
+
+def _require_valid_delivery(sample: ScenarioSample | AxisSummary) -> None:
+    """Overwrite is a measured outcome; broken lifecycle/accounting is failure."""
+    unexplained_messages = sample.unexplained_messages
+    if sample.overwritten_batches == 0:
+        unexplained_messages = max(
+            unexplained_messages, sample.produced_count - sample.consumed_count
+        )
+    if (
+        sample.worker_errors
+        or sample.forced_terminations
+        or sample.drain_timeouts
+        or sample.rejected_messages
+        or sample.transport_errors
+        or sample.consumed_count > sample.produced_count
+        or unexplained_messages
+    ):
+        raise RuntimeError(
+            "Invalid logging benchmark: "
+            f"worker_errors={sample.worker_errors}, forced={sample.forced_terminations}, "
+            f"drain_timeouts={sample.drain_timeouts}, rejected={sample.rejected_messages}, "
+            f"transport_errors={sample.transport_errors}, "
+            f"overwritten_batches={sample.overwritten_batches}, "
+            f"unexplained_messages={unexplained_messages}, "
+            f"attempted={sample.produced_count}, consumed={sample.consumed_count}; "
+            "counts/rates are incomplete when a worker fails"
+        )
 
 
 @dataclass
@@ -361,15 +487,7 @@ class AdvancedLoggingBenchmark(BenchmarkRunner[AdvancedLoggingBenchmarkConfig]):
 
         handler = CountingLogHandler()
         shm_path = str(_to_socket_path(ipc_path))
-        master = MasterLogger(
-            config=LoggerConfig(
-                path=shm_path,
-                do_stdout=False,
-                flush_interval_s=self.config.flush_interval_s,
-                emit_internal=False,
-            ),
-            log_handlers=[handler],
-        )
+        master = None
 
         worker_errors = 0
         forced_terminations = 0
@@ -378,8 +496,18 @@ class AdvancedLoggingBenchmark(BenchmarkRunner[AdvancedLoggingBenchmarkConfig]):
         worker_durations: list[int] = []
 
         try:
+            master = MasterLogger(
+                config=LoggerConfig(
+                    path=shm_path,
+                    do_stdout=False,
+                    flush_interval_s=self.config.flush_interval_s,
+                    emit_internal=False,
+                ),
+                log_handlers=[handler],
+            )
             for worker_idx in range(workers):
                 proc = multiprocessing.Process(
+                    name=f"W{worker_idx}",
                     target=_worker_emit_burst,
                     args=(
                         shm_path,
@@ -396,7 +524,12 @@ class AdvancedLoggingBenchmark(BenchmarkRunner[AdvancedLoggingBenchmarkConfig]):
                 proc.start()
                 processes.append(proc)
 
-            start_barrier.wait(timeout=self.config.startup_timeout_s)
+            try:
+                start_barrier.wait(timeout=self.config.startup_timeout_s)
+            except threading.BrokenBarrierError:
+                # A constructor/startup failure aborts the barrier. Join and
+                # collect all worker failures instead of losing their details.
+                pass
             start_event.set()
 
             join_timeout = (
@@ -407,28 +540,11 @@ class AdvancedLoggingBenchmark(BenchmarkRunner[AdvancedLoggingBenchmarkConfig]):
             )
             forced_terminations = _join_processes(processes, join_timeout)
 
-            collect_deadline = time.monotonic() + max(1.0, self.config.drain_timeout_s)
-            received = 0
-            while received < workers and time.monotonic() < collect_deadline:
-                try:
-                    record = result_queue.get(timeout=0.05)
-                except QueueEmpty:
-                    continue
-
-                received += 1
-                status = record[0]
-                if status == "ok":
-                    _, produced, duration_ns = record
-                    produced_total += int(produced)
-                    worker_durations.append(max(1, int(duration_ns)))
-                else:
-                    _, produced, duration_ns, _err = record
-                    produced_total += int(produced)
-                    worker_durations.append(max(1, int(duration_ns)))
-                    worker_errors += 1
-
-            if received < workers:
-                worker_errors += workers - received
+            results, worker_errors = _collect_worker_results(
+                processes, result_queue, max(1.0, self.config.drain_timeout_s)
+            )
+            produced_total = sum(result.produced_count for result in results)
+            worker_durations = [max(1, result.duration_ns) for result in results]
 
             # All workers have joined and flushed. MasterLogger performs a
             # final transport drain during shutdown; waiting for every
@@ -450,10 +566,15 @@ class AdvancedLoggingBenchmark(BenchmarkRunner[AdvancedLoggingBenchmarkConfig]):
                 worker_errors=worker_errors,
                 forced_terminations=forced_terminations,
                 drain_timeouts=drain_timeouts,
+                rejected_messages=sum(result.rejected_messages for result in results),
+                transport_errors=sum(result.transport_errors for result in results),
+                overwritten_batches=sum(
+                    result.overwritten_batches for result in results
+                ),
             )
         finally:
             with contextlib.suppress(Exception):
-                if master.is_running():
+                if master is not None and master.is_running():
                     master.shutdown(timeout_s=self.config.drain_timeout_s)
 
             for proc in processes:
@@ -488,6 +609,9 @@ class AdvancedLoggingBenchmark(BenchmarkRunner[AdvancedLoggingBenchmarkConfig]):
             worker_errors=sample.worker_errors,
             forced_terminations=sample.forced_terminations,
             drain_timeouts=sample.drain_timeouts,
+            rejected_messages=sample.rejected_messages,
+            transport_errors=sample.transport_errors,
+            overwritten_batches=sample.overwritten_batches,
         )
 
         consumed_metrics = _get_or_add_operation(stats, consumed_operation)
@@ -503,6 +627,9 @@ class AdvancedLoggingBenchmark(BenchmarkRunner[AdvancedLoggingBenchmarkConfig]):
             worker_errors=sample.worker_errors,
             forced_terminations=sample.forced_terminations,
             drain_timeouts=sample.drain_timeouts,
+            rejected_messages=sample.rejected_messages,
+            transport_errors=sample.transport_errors,
+            overwritten_batches=sample.overwritten_batches,
         )
 
     def _run_axis_sweep(
@@ -535,11 +662,12 @@ class AdvancedLoggingBenchmark(BenchmarkRunner[AdvancedLoggingBenchmarkConfig]):
             print(f"\n{scenario_label}")
 
             for warmup_idx in range(warmups):
-                _ = self._run_scenario_once(
+                warmup_sample = self._run_scenario_once(
                     workers,
                     message_size,
                     scope_tag=f"{axis}:warmup:{value}:{warmup_idx}",
                 )
+                _require_valid_delivery(warmup_sample)
 
             scenario_samples: list[ScenarioSample] = []
             scenario_stats = BenchmarkStatistics()
@@ -624,6 +752,11 @@ def _print_axis_summary(
             f"{row.consumed_ns_per_msg:>12.1f} {row.loss_pct:>8.2f} "
             f"{row.worker_errors:>10} {row.forced_terminations:>8} "
             f"{row.drain_timeouts:>9}"
+        )
+
+        print(
+            f"  transport counts: rejected_messages={row.rejected_messages}, "
+            f"transport_errors={row.transport_errors}, overwritten_batches={row.overwritten_batches}"
         )
 
     print("=" * 168)
@@ -787,6 +920,9 @@ def main() -> None:
             benchmark.worker_count_axis_stats,
             ["produced_ns_per_msg", "consumed_ns_per_msg"],
         )
+
+    for row in [*benchmark.message_size_axis_rows, *benchmark.worker_count_axis_rows]:
+        _require_valid_delivery(row)
 
 
 if __name__ == "__main__":
