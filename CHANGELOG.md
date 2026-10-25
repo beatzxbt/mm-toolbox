@@ -2,7 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
-## 1.0.0b10 (2026-10-25)
+## Unreleased
+
+- Retain exact WebSocket receive-overwrite totals across startup, reconnects, retired connections and close; sample overload diagnostics at powers of two. The concrete single/pool getters are additive and the public client protocol is unchanged.
+- Stop market-data examples on lost continuity, disconnects or rejected SHM writes; propagate processing and child failures, and follow Binance futures snapshot/`pu` sequencing. Rebuild the whole example after a failure.
+- Expose cumulative worker-logger transport counters after shutdown, report startup loss at the master, and reject benchmark runs with worker/shutdown errors or unexplained missing deliveries. Intentional overwrite stress remains explicitly counted.
+- Repair example and benchmark API calls, accounting, workload labels, bounded cleanup and input filtering; record the measured workloads in `EXAMPLES_BENCHMARK_REVIEW.md`.
+- Move release-named test collections into ordinary component suites, share replay helpers, make shutdown checks deterministic and extend extreme power-of-ten rounding boundaries. Preserve native and cross-backend contracts in source and installed-wheel tests.
+- Rebuild the library and any dependent Cython extensions together when upgrading this candidate; native layouts have changed.
+
+## 1.0.0b10 (2026-10-25, unpublished candidate)
 
 - Validate live orderbook replay against an exact decimal reference so floating-point representation does not turn valid prices or one-lot quantities into incorrect reference ticks.
 - Check logging shutdown's shared deadline deterministically instead of relying on a tight elapsed-time threshold on shared CI runners.

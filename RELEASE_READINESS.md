@@ -1,5 +1,36 @@
 # Public release readiness and hardening
 
+## Current review candidate — 2026-10-25
+
+[Draft PR #31](https://github.com/beatzxbt/mm-toolbox/pull/31) contains the
+approved example/benchmark repairs, component test organization and remaining
+receive-loss/logging accounting fixes. Exact WebSocket loss totals survive
+startup, reconnect and close; overload diagnostics are sampled. Market-data
+examples now stop on unproven continuity and propagate processing/child
+failure. Worker transport statistics include shutdown, and the logging
+benchmark rejects lifecycle errors and unexplained missing deliveries.
+
+Final local clean-source and installed-wheel suites each passed **1,740 tests,
+eight skipped**, on Python 3.14.4 and 3.15.1 respectively, requiring all seven
+native test extensions. Cython-aware coverage is **85.55%** against the
+unchanged 85% gate; the standalone C orderbook suite passed **33/33**. Isolated
+distributions, metadata, lint/format and source type checks passed. The draft
+PR carries the Python 3.12–3.15 and cross-platform wheel matrix results.
+
+All four bounded live examples exited 0. A longer MPSC run detected real
+receive overload, exited nonzero and cleaned up as designed. This machine
+has therefore not established loss-free operation for that workload.
+[The example and benchmark report](EXAMPLES_BENCHMARK_REVIEW.md) records the
+limits, prior performance measurements and final evidence;
+[the test-structure report](TEST_STRUCTURE_REVIEW.md) records the preserved
+scenarios and their destinations. Native layouts changed, requiring a clean
+library and dependent-extension rebuild.
+
+Publication remains held for user review. The existing b9/b10 tags remain
+unchanged and unpublished; the fixes are untagged. Select and validate the
+release revision after review. Earlier sections below are dated historical
+evidence, not the current candidate's results.
+
 ## Initial hardening status — 2026-10-19
 
 The fixes are implemented on `fix/b9-release-hardening` for review against

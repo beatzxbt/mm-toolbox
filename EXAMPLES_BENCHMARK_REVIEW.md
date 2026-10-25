@@ -1,20 +1,86 @@
 # Examples, benchmarks and release review — 2026-10-25
 
-Publication remains on hold for review. Two GPT-6 Luna max agents exercised the
-examples and benchmarks; a GPT-6 Sol xhigh agent reviewed test organization.
-The parent agent completed the remaining capture and analytics runs after a
-worker quota stopped the final agent turns.
+Publication remains on hold in [draft PR #31](https://github.com/beatzxbt/mm-toolbox/pull/31).
+Two GPT-6 Luna max agents exercised the examples and benchmarks; a GPT-6 Sol
+xhigh agent reviewed test organization. After approval, two GPT-6 Luna max
+agents implemented that organization and assertion work, and a GPT-6.1 Sol
+max agent implemented the remaining reliability fixes. The parent reviewed
+the changes and ran the final integration checks.
 
 All four examples and all 13 benchmark entry points have now executed real
-work successfully with bounded settings after the repairs below. The data
+work successfully with bounded settings during the initial audit. The data
 collector also captured ten public messages without changing the tracked
 100,000-line orderbook fixture. This establishes basic execution and cleanup;
-the live integration still needs an agreed response to receive loss.
+the approved follow-up below adds explicit failure on unproven continuity.
 
-The library under test was a freshly built, installed `1.0.0b10` wheel from
+The historical performance measurements below used a freshly built, installed `1.0.0b10` wheel from
 `e4ec6c84958d1a4a6797005254e36558ed8724c7`, with locked runtime dependencies.
-These follow-up edits affect examples, benchmark drivers and review documents;
-production library code and its public API are unchanged.
+Those measurements predate the current reliability changes; they are retained
+as audit evidence, not presented as new performance measurements of this PR's
+final revision.
+
+## Approved reliability and test follow-up
+
+- WebSocket single/pool wrappers expose exact lifetime receive-overwrite
+  totals, including startup, failed handshakes and replaced/retired sockets.
+  Close preserves the totals. Native overwrite warnings are sampled at
+  counts 1, 2, 4, 8, ... while exact counters remain available. The public
+  runtime-checkable client protocol is unchanged; the concrete getters are
+  additive. The receive path adds no locks.
+- The examples stop on receive/SHM overwrite, rejected SHM writes, disconnects
+  or sequence gaps, including loss before the first state update. They disable
+  automatic reconnect, propagate candle/processor/child failure and clean up
+  owned tasks, processes and files. Restart the whole example after failure;
+  a book snapshot alone cannot repair missing candle or moving-average input.
+- The Binance futures adapter follows the exchange's snapshot bridge
+  (`U <= lastUpdateId <= u`) and subsequent `pu == previous u` rule. Buffered
+  updates start before the snapshot fetch, and no book state is published
+  before the initial bridge. MPSC readiness waits for every snapshot; its BBO
+  streams update the touch of seed depth rather than maintaining full depth.
+- Worker logging exposes cumulative rejected-message, transport-error and
+  overwritten-batch counters after shutdown. The master reports loss that
+  occurred before consumer attachment. The benchmark waits for shutdown
+  before worker success, verifies worker identity/status/exit and fails on
+  lifecycle errors or unexplained missing consumption. Intentional overwrite
+  rows remain supported, with batch units made explicit.
+- Test scenarios now live beside their components, with shared replay helpers,
+  deterministic deadline checks and six additional extreme rounding-boundary
+  cases. New continuity/accounting tests use the normal source and wheel
+  gates. See [the completed test-structure review](TEST_STRUCTURE_REVIEW.md).
+- Installed-wheel tests copy example/benchmark helpers outside the checkout;
+  those helpers and native test sources are present in the sdist. Native
+  library layouts changed, so rebuild the library and dependent Cython
+  extensions together. The SHM core and overwrite-oldest policy are unchanged.
+
+The adapter sequencing follows the [Binance futures local-book guide](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/websocket-market-streams/How-to-manage-a-local-order-book-correctly).
+
+### Final follow-up validation
+
+The final source suite on Python 3.14.4 passed **1,740 tests, eight skipped**
+with all seven native test modules required; the standalone C orderbook suite
+passed **33/33**. The final collection has 1,748 cases: the prior 1,682, one
+split backend check, six rounding boundary cases and 59 reliability cases.
+The draft PR shows the cross-platform CI status.
+
+| Check | Final local result |
+| --- | --- |
+| Python 3.14.4 source, clean native rebuild | **1,740 passed, eight skipped**, 72.59 s. |
+| Python 3.15.1 installed wheel, isolated test tree | **1,740 passed, eight skipped**, 85.86 s; all seven native test modules rebuilt against installed headers. |
+| Python 3.14 Cython-aware coverage | **85.55%**, passing the unchanged 85% threshold; **1,740 passed, eight skipped**. |
+| Distribution checks | Isolated wheel and sdist builds, a separate wheel build from the sdist, twine and version validation passed. The wheel contains 36 native modules, typing metadata and native SHM sources; the sdist contains example/benchmark helpers and the native test harness. |
+| Opt-in live integration tests | **Three passed** against the installed Python 3.15 wheel, including single/pool WebSockets and exact-reference orderbook replay. |
+| Live examples against the final Python 3.15 wheel | Candles 6 s, averages 6 s, stream 8 s and MPSC 5 s exited 0 with no stderr. Candles/averages/stream processed live updates; the short MPSC run established all four snapshots and started workers. |
+| Extended MPSC live check | The 12 s run processed live trades/BBO, then detected receive overwrites and exited **1**, reporting child failure. This is the intended stop-on-loss result; it demonstrates a workload limitation on this machine, not loss-free operation. Owned temporary files were removed. |
+| Native receive-loss fault injection | A localhost burst into a one-slot test buffer makes the real multiprocess stream fail before state output and removes owned files. Included in both full suites. |
+| Advanced logging final-status smoke | One worker, 32-byte messages, one 50 ms window: **144,976 attempted/consumed**, no rejected messages, transport errors, overwrites, worker errors, forced exits or drain timeouts. Exit 0; functional evidence rather than a new performance measurement. |
+| Ruff lint/format, configured source typing, whitespace | Passed. |
+
+The eight default skips are the three opt-in live tests and five legacy Python
+checks that cannot mutate Cython fields; no required native module was skipped.
+Workload processes, owned example paths and logging IPC files were absent
+after the final runs. Evidence: `/tmp/mm-review-full314-final.log`,
+`/tmp/mm-review-wheel315-tests.log`, `/tmp/mm-review-final-coverage314-tests.log`,
+`/tmp/mm-review-final-dist315-build.log` and `/tmp/mm-review-final-live315/`.
 
 ## Environment and interpretation
 
@@ -28,7 +94,7 @@ Most per-call rows use 100,000 measurements after 1,000 warmup calls.
 and timer overhead remain in the samples. Inverse mean latency is not treated
 as end-to-end delivery throughput.
 
-## Examples
+## Historical example measurements
 
 | Example | Final bounded check | Result and limits |
 | --- | --- | --- |
@@ -45,7 +111,7 @@ The general `Trade`/candle API explicitly accepts zero values; the Binance
 execution examples now skip and report nonpositive/nonfinite execution inputs.
 No candle-core initialization change was made.
 
-## Repairs made
+## Initial driver repairs
 
 - Bring standard logging benchmark configuration, handler push and shutdown
   calls into line with the synchronous API; verify produced/consumed counts.
@@ -127,14 +193,14 @@ p99 delivery latency.
 These saturated rows intentionally exercise overwrite-oldest transport.
 Accepted/attempted throughput must not be presented as loss-free delivery.
 
-## Validation and evidence
+## Historical benchmark validation and evidence
 
 All 17 canonical native/transport smoke/timed commands and all 11 final
 analytics commands exited 0. The final four example commands and the default
 candle benchmark exited 0. Ruff lint/format, configured source type checking
-and diff whitespace checks pass. No production library changes require a
-new native build for these driver fixes; the eventual release revision still
-needs its normal release gates after review.
+and diff whitespace checks pass. These were driver-only repairs at the audit
+point. The approved follow-up above changes native library layouts and
+requires a clean rebuild.
 
 Raw local evidence and exact commands:
 
@@ -151,11 +217,10 @@ removed. Final child processes and owned temporary paths were checked.
 
 ## Way forward
 
-Keep publication held until the review is accepted. Apply the focused test
-organization described in [TEST_STRUCTURE_REVIEW.md](TEST_STRUCTURE_REVIEW.md)
-without removing stronger failure cases. Decide the live integration's
-receive-loss response: restarting/resnapshotting or stopping is needed for
-sequence-dependent use. Successful process exit alone is insufficient.
+Keep publication held until the review is accepted. The focused test
+organization and explicit stop-on-lost-continuity policy are now implemented.
+Review the changes and final validation in the draft PR before choosing a new
+release revision. Existing candidate tags remain unchanged and unpublished.
 
 The detailed native/transport measurements follow.
 
