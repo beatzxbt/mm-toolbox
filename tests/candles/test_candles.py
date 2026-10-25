@@ -7,11 +7,18 @@ patterns.
 """
 
 import asyncio
+import math
 
 import mm_toolbox.candles as candles_module
 import pytest
 
-from mm_toolbox.candles import PriceCandles, TickCandles, TimeCandles, VolumeCandles
+from mm_toolbox.candles import (
+    MultiCandles,
+    PriceCandles,
+    TickCandles,
+    TimeCandles,
+    VolumeCandles,
+)
 from mm_toolbox.candles.base import Trade
 
 
@@ -162,6 +169,19 @@ class TestCandlesModuleIntegration:
             assert sum(c.num_trades for c in buckets) == 10
             assert sum(c.buy_size for c in buckets) == 6.0
             assert sum(c.sell_size for c in buckets) == 4.0
+
+
+    @pytest.mark.parametrize("limit", [0.0, -1.0, math.nan, math.inf])
+    def test_invalid_limits(self, limit):
+        """Nonpositive and nonfinite limits cannot enter processing loops."""
+        for factory in (
+            lambda: TimeCandles(limit),
+            lambda: VolumeCandles(limit),
+            lambda: MultiCandles(1.0, 10, limit),
+            lambda: MultiCandles(limit, 10, 1.0),
+        ):
+            with pytest.raises(ValueError):
+                factory()
 
 
 class TestCandlesAsyncIntegration:

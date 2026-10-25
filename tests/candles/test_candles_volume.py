@@ -7,11 +7,13 @@ and boundary conditions.
 """
 
 import asyncio
+import math
 
 import pytest
 
-from mm_toolbox.candles import VolumeCandles
+from mm_toolbox.candles import MultiCandles, VolumeCandles
 from mm_toolbox.candles.base import Trade
+from tests.candles.support import trade
 
 
 class TestVolumeCandlesSpecific:
@@ -161,6 +163,30 @@ class TestVolumeCandlesSpecific:
         assert len(volume_candles) == 1
         assert volume_candles[0].buy_size == 10.0
         assert volume_candles.latest_candle.buy_size == 5.0
+
+
+    @pytest.mark.parametrize("tiny", [False, True])
+    @pytest.mark.parametrize("multi", [False, True])
+    def test_split_conserves_stored_trade_quantities(self, tiny, multi):
+        """Splits terminate below the old epsilon and retain correct last chunks."""
+        threshold = 1e-13 if tiny else 1.0
+        size = threshold * 2.5
+        candles = (
+            MultiCandles(10.0, 100, threshold) if multi else VolumeCandles(threshold)
+        )
+        candles.process_trade(trade(1000, size=size))
+        buckets = [candles[i] for i in range(len(candles))] + [candles.latest_candle]
+        assert len(candles) == 2
+        assert math.fsum(c.buy_size for c in buckets) == pytest.approx(
+            size, rel=1e-14, abs=0
+        )
+        assert math.fsum(c.buy_volume for c in buckets) == pytest.approx(
+            size * 100, rel=1e-14, abs=0
+        )
+        assert math.fsum(t.size for c in buckets for t in c.trades) == pytest.approx(
+            size, rel=1e-14, abs=0
+        )
+        assert all(c.num_trades == 1 for c in buckets)
 
 
 if __name__ == "__main__":

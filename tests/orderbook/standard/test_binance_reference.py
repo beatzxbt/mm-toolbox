@@ -2,7 +2,7 @@
 
 import pytest
 
-from tests.orderbook.standard.test_live_binance import (
+from tests.orderbook.standard.binance_replay import (
     BookTickerEvent,
     DepthEvent,
     _apply_depth_to_reference,
