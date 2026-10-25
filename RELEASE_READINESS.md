@@ -77,6 +77,37 @@ validation. Seven offline regressions preserve the decimal-boundary cases.
 The b9 tag remains unchanged. These validation corrections are prepared as
 `1.0.0b10` and must pass the tagged release workflow before publication.
 
+### Dependency advisory follow-up
+
+A version-based advisory check found affected dependencies in the beta lock
+as well as in the older default branch. The metadata now excludes the known
+affected versions, and targeted upgrades preserve the other locked packages.
+The final OSV check of all 67 external locked packages returned no findings
+on 2026-10-25. The six minimum versions were also checked independently.
+
+| Dependency | Scope | Minimum | Locked version |
+| --- | --- | --- | --- |
+| idna | Runtime hostname handling | 3.15 | 3.20 |
+| multidict | Runtime via aiohttp | 6.9.1 | 7.2.1 |
+| setuptools | Build backend, development and native tests | 84.1.0 | 84.2.1 |
+| cryptography | Linux release tooling | 50.0.0 | 50.0.2 |
+| urllib3 | Release tooling | 2.8.0 | 2.8.0 |
+| filelock | Release tooling | 4.2.1 | 4.2.4 |
+
+Upstream advisories include [idna hostname processing](https://github.com/kjd/idna/security/advisories/GHSA-65pc-fj4g-8rjx),
+[multidict reference leaks](https://github.com/aio-libs/multidict/security/advisories/GHSA-54p9-h82j-f925),
+[cryptography PKCS7 handling](https://github.com/pyca/cryptography/security/advisories/GHSA-g6cj-pr64-35w5),
+[setuptools wheel paths](https://github.com/pypa/setuptools/security/advisories/GHSA-xmj3-9gf7-h52w),
+[urllib3 streaming](https://github.com/urllib3/urllib3/security/advisories/GHSA-vxq7-64xx-v4gw)
+and [filelock](https://github.com/tox-dev/filelock/security/advisories/GHSA-v4x8-3wr5-3wq8).
+This is an advisory-version check; it does not establish reachability of every
+reported API or cover system libraries and unpublished vulnerabilities.
+
+The installed-wheel suite with the updated runtime dependencies and all live
+checks enabled passed **1,677 tests, five skipped** on Python 3.15.1. The
+remaining skips are legacy Python tests for inaccessible Cython fields;
+all seven required native test extensions loaded successfully.
+
 ## Initial review at 02d239f
 
 Reviewed 2026-10-19 at `02d239f`, branch `perf/centralize-price-validation`, package version `1.0.0b9`.
