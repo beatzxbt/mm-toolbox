@@ -25,8 +25,8 @@ the checkout and gates publishing on validation of the candidate revision.
 | Isolated distributions | Wheel built from sdist with current build dependencies; wheel and sdist pass twine check. Wheel contains 36 native modules, typing metadata and native SHM sources. |
 | Ruff format/lint, ty, actionlint, diff whitespace | Passed. |
 
-The skips are opt-in live-network cases. No native test module was silently
-skipped. Tests with the locked development environment and a separate fresh
+The skips include opt-in live-network cases and Python tests for inaccessible
+Cython fields. No native test module was silently skipped. Tests with the locked development environment and a separate fresh
 environment with current dependencies cover two dependency configurations;
 they do not establish every minimum-version combination.
 
@@ -46,13 +46,67 @@ are retained as historical context for reviewing the changes.
 - Fixed the Linux native-test linkage failure by compiling the ladder and helper C sources into the test extensions that call them directly.
 - Removed the generated C test executable from version control.
 - Aligned picows build/runtime requirements at 2.3.1 and refreshed compiler/native dependencies; Cython 3.3.0 is now required.
-- Final Python 3.15.1 source and installed-wheel suites: **1,667 passed, eight live-network tests skipped**, including artifact-version regressions and fixture cleanup.
+- Final Python 3.15.1 source and installed-wheel suites: **1,667 passed, eight skipped**, including artifact-version regressions and fixture cleanup. Three skips require live-network opt-in; five legacy Python tests cannot mutate Cython fields. All seven native test extensions are required separately.
 - Fresh Python 3.14.8 coverage build with the updated lock: **1,657 passed, eight skipped**, **85.17%** aggregate coverage.
 - Local TLS 1.3 probes on Python 3.15 passed default certificate rejection, hostname verification, process-local test trust, all three WebSocket interfaces, and task/socket cleanup.
 - Release checks require the version tag, workflow SHA, checked-out source and wheel/sdist metadata to agree.
 - [Remote CI passed](https://github.com/beatzxbt/mm-toolbox/actions/runs/40128764089) on Python 3.12–3.15 with **85.20%** coverage and all **20 wheels** across native Linux x86-64/aarch64 (glibc and musl) and macOS arm64.
 - Bounded follow-up validation passed 2.4 million native SHM insertions with sanitizer checks, plus 10,000 Python producer attachments across 100 mapping cycles; observed memory and file descriptors remained stable.
 - [PR #29](https://github.com/beatzxbt/mm-toolbox/pull/29) is merged into v1.0b9. Release publication is performed separately by the tag-validated workflow.
+
+## Release rehearsal follow-up — 2026-10-25
+
+The unpublished b9 TestPyPI rehearsal exposed a timing-sensitive logging test:
+a 50 ms close call took 201.6 ms on a shared macOS runner, narrowly exceeding
+the test's 200 ms wall-clock limit. One hundred local probes completed in
+54–56 ms. The replacement test controls elapsed time and verifies that waiting
+for pending work and joining the handler thread share one remaining budget,
+while retaining cancellation and thread-cleanup checks.
+
+Opt-in Binance WebSocket single-client and pool checks passed. The live
+orderbook replay exposed truncation in its reference calculation: an exact
+one-lot quantity could multiply to `0.9999999999999999` and become zero in the
+oracle. Exact decimal arithmetic agrees with the library's corrected grid
+conversion. The oracle now uses decimal grid values and has deterministic
+price, quantity and deletion regressions.
+
+All three live checks passed against the unchanged installed library after
+correcting the oracle, including depth replay and interleaved bookTicker
+validation. Seven offline regressions preserve the decimal-boundary cases.
+
+The b9 tag remains unchanged. These validation corrections are prepared as
+`1.0.0b10` and must pass the tagged release workflow before publication.
+
+### Dependency advisory follow-up
+
+A version-based advisory check found affected dependencies in the beta lock
+as well as in the older default branch. The metadata now excludes the known
+affected versions, and targeted upgrades preserve the other locked packages.
+The final OSV check of all 67 external locked packages returned no findings
+on 2026-10-25. The six minimum versions were also checked independently.
+
+| Dependency | Scope | Minimum | Locked version |
+| --- | --- | --- | --- |
+| idna | Runtime hostname handling | 3.15 | 3.20 |
+| multidict | Runtime via aiohttp | 6.9.1 | 7.2.1 |
+| setuptools | Build backend, development and native tests | 84.1.0 | 84.2.1 |
+| cryptography | Linux release tooling | 50.0.0 | 50.0.2 |
+| urllib3 | Release tooling | 2.8.0 | 2.8.0 |
+| filelock | Release tooling | 4.2.1 | 4.2.4 |
+
+Upstream advisories include [idna hostname processing](https://github.com/kjd/idna/security/advisories/GHSA-65pc-fj4g-8rjx),
+[multidict reference leaks](https://github.com/aio-libs/multidict/security/advisories/GHSA-54p9-h82j-f925),
+[cryptography PKCS7 handling](https://github.com/pyca/cryptography/security/advisories/GHSA-g6cj-pr64-35w5),
+[setuptools wheel paths](https://github.com/pypa/setuptools/security/advisories/GHSA-xmj3-9gf7-h52w),
+[urllib3 streaming](https://github.com/urllib3/urllib3/security/advisories/GHSA-vxq7-64xx-v4gw)
+and [filelock](https://github.com/tox-dev/filelock/security/advisories/GHSA-v4x8-3wr5-3wq8).
+This is an advisory-version check; it does not establish reachability of every
+reported API or cover system libraries and unpublished vulnerabilities.
+
+The installed-wheel suite with the updated runtime dependencies and all live
+checks enabled passed **1,677 tests, five skipped** on Python 3.15.1. The
+remaining skips are legacy Python tests for inaccessible Cython fields;
+all seven required native test extensions loaded successfully.
 
 ## Initial review at 02d239f
 
@@ -206,10 +260,13 @@ CI builds only library extensions before `test-all`, so the six native test modu
 
 ## Remaining gates before a public production release
 
-The implementation PR targets **v1.0b9** from **fix/b9-release-hardening**. It includes the reviewed normalization commit and the native-test build prerequisite. Earlier PRs remain open for their owner to reconcile; nothing has been merged or published.
+The implementation in PR #29 is merged into the canonical **v1.0b9** branch,
+including the normalization from PR #27. Superseded PR #25 is closed; older
+release-line PRs #18 and #24 remain separate. The b9 tag is an unpublished
+candidate; publication of the corrected b10 candidate is gated separately.
 
 1. Review the fixes and compatibility changes: SHM format 2 requires recreated mappings; each producer requires its own shard; crashed claims are not automatically stolen; rounding accepts powers of ten only; disconnected sends raise; closing WsSingle is terminal; oversized log records are explicitly dropped within the configured batch limit.
-2. Obtain green CI and installed-wheel validation for the exact reviewed commit on Python 3.12–3.14, Linux x86-64/aarch64 and macOS arm64. Verify both minimum supported and current dependency versions before promising compatibility across that range.
+2. Obtain green CI and installed-wheel validation for the exact release commit on Python 3.12–3.15, Linux x86-64/aarch64 and macOS arm64. The b9 implementation passed this matrix; repeat it for b10's validation corrections. Verify both minimum supported and current dependency versions before promising compatibility across that range.
 3. Run a production-shaped soak covering saturation, producer churn/crashes, reconnect outages, half-open sockets, TLS, slow handlers and shutdown under load. Record bounded memory, drop/error counts, recovery times, throughput and tail latency. Atomic payload copying costs more for large SHM records; assess representative trading payloads against the actual latency budget.
 4. Verify exchange-sequence gap detection and resnapshot behavior in the consuming integration. Payload-hash deduplication and overwrite diagnostics alone do not establish feed continuity.
 5. Freeze the accepted SHA, reconcile the older release branches/PRs, update stable version/tag metadata when appropriate, rehearse TestPyPI installation and verify artifacts before a PyPI release.
@@ -220,4 +277,9 @@ No finite test run establishes complete absence of bugs. The PR is ready for cod
 
 Focused scripts and outputs are in `/tmp/mm-release-review-analytics.py`, `/tmp/mm-release-review-native.py`, and `/tmp/mm-release-review-streaming/`. The deterministic SHM harness is `/tmp/mm-release-shm-interleaving.c`. Local suite/build logs use `/tmp/mm-release-*`; fresh distributions are in `/tmp/mm-release-artifacts/`. These are temporary review artifacts.
 
-The review did not exercise live exchanges, the full supported wheel matrix, all dependency versions, long-duration production load, or every native extension under sanitizers. It found no need to expand the feature set. The release decision should be based on closing the reproducible failures and obtaining the missing validation evidence for a fixed candidate.
+The initial review did not exercise live exchanges or the full wheel matrix;
+follow-up validation above expands that evidence. All dependency versions,
+long-duration production load and every native extension under sanitizers
+remain outside the completed checks. It found no need to expand the feature
+set. The release decision should be based on closing reproducible failures
+and obtaining validation evidence for a fixed candidate.

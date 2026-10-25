@@ -15,8 +15,8 @@ import os
 import shutil
 import tempfile
 import threading
-import time
 from concurrent.futures import Future
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -110,25 +110,63 @@ class TestBaseLogHandler:
         assert handler._loop_thread is None or not handler._loop_thread.is_alive()
 
     def test_close_uses_one_bounded_deadline(self):
-        """A stalled coroutine is cancelled when the shared close deadline expires."""
+        """Wait and loop-thread join share the remaining close timeout."""
         handler = FileLogHandler("test.txt")
         started = threading.Event()
+        cancelled = threading.Event()
 
         async def stalled():
             started.set()
-            await asyncio.sleep(60)
+            try:
+                await asyncio.sleep(60)
+            finally:
+                cancelled.set()
 
         fut = handler._run_coro(stalled())
         handler._track_future(fut)
         assert started.wait(1.0)
-        began = time.monotonic()
-        handler.close(timeout_s=0.05)
-        elapsed = time.monotonic() - began
+        thread = handler._loop_thread
+        assert thread is not None
 
-        assert elapsed < 0.2
-        assert fut.cancelled() or fut.done()
-        if handler._loop_thread is not None:
-            handler._loop_thread.join(timeout=0.5)
+        timeout_s = 0.05
+        wait_elapsed_s = 0.03
+        clock = [10.0]
+        wait_timeouts = []
+
+        def wait_until_deadline(futures, timeout):
+            wait_timeouts.append(timeout)
+            clock[0] += wait_elapsed_s
+            return set(), set(futures)
+
+        original_join = thread.join
+        try:
+            with (
+                patch(
+                    "mm_toolbox.logging.advanced.handlers.base.wait",
+                    side_effect=wait_until_deadline,
+                ),
+                patch(
+                    "mm_toolbox.logging.advanced.handlers.base.time",
+                    new=SimpleNamespace(monotonic=lambda: clock[0]),
+                ),
+                patch.object(thread, "join", wraps=original_join) as thread_join,
+            ):
+                handler.close(timeout_s=timeout_s)
+
+            assert wait_timeouts == [pytest.approx(timeout_s)]
+            assert thread_join.call_count == 1
+            assert thread_join.call_args.kwargs["timeout"] == pytest.approx(
+                timeout_s - wait_elapsed_s
+            )
+            assert thread_join.call_args.kwargs["timeout"] < timeout_s
+            assert fut.cancelled()
+        finally:
+            if thread.is_alive():
+                handler.close(timeout_s=1.0)
+                original_join(timeout=1.0)
+
+        assert not thread.is_alive()
+        assert cancelled.is_set()
 
     def test_future_trim_at_4096(self):
         """Given more than 4096 tracked futures, the list is trimmed to 2048 to bound memory."""

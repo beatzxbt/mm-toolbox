@@ -1,6 +1,6 @@
 [project]
 name = "mm-toolbox"
-version = "1.0.0b9"
+version = "1.0.0b10"
 description = "High-performance Python tools for market making systems"
 readme = "README.md"
 authors = [
@@ -37,12 +37,15 @@ dependencies = [
     "ciso8601",
     "msgspec",
     "aiohttp",
+    # Security floors for aiohttp's transitive dependencies.
+    "idna>=3.15",
+    "multidict>=6.9.1",
     "xxhash>=3.6.0",
 ]
 
 [build-system]
 requires = [
-    "setuptools>=75",
+    "setuptools>=84.1.0",
     "wheel",
     "Cython>=3.3.0",
     "numpy>=1.26",
@@ -60,7 +63,7 @@ where = ["src"]
 build = "cp312-* cp313-* cp314-* cp315-*"
 skip = "*-win* *-manylinux_i686"
 test-command = "python {project}/scripts/test_wheel.py {project}"
-test-requires = ["pytest", "pytest-asyncio", "pytest-timeout", "websockets", "Cython>=3.3.0", "numpy", "setuptools>=75"]
+test-requires = ["pytest", "pytest-asyncio", "pytest-timeout", "websockets", "Cython>=3.3.0", "numpy", "setuptools>=84.1.0"]
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64", "aarch64"]
@@ -76,7 +79,7 @@ dev = [
     "ruff>=0.14.9",
     "cython>=3.3.0",
     "uv>=0.13.4",
-    "setuptools>=80.9.0",
+    "setuptools>=84.1.0",
     "pytest-asyncio>=1.1.0",
     "pytest-cov>=6.0",
     "pytest-timeout>=2.3",
@@ -86,6 +89,9 @@ build = [
     "build>=1.0.0",
     "twine>=5.0.0",
     "cibuildwheel>=4.3.4,<5",
+    "cryptography>=50.0.0; sys_platform == 'linux'",
+    "filelock>=4.2.1",
+    "urllib3>=2.8.0",
 ]
 
 [tool.coverage.run]

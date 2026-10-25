@@ -2,7 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
-## 1.0.0b9 (2026-10-24)
+## 1.0.0b10 (2026-10-25)
+
+- Validate live orderbook replay against an exact decimal reference so floating-point representation does not turn valid prices or one-lot quantities into incorrect reference ticks.
+- Check logging shutdown's shared deadline deterministically instead of relying on a tight elapsed-time threshold on shared CI runners.
+- Require patched IDNA and multidict handling at runtime; update setuptools and the release-tooling dependency floors for known security fixes.
+- Preserve the unpublished b9 candidate tag and publish the corrected validation sources under a new version.
+
+## 1.0.0b9 (2026-10-24, unpublished candidate)
 
 ### Release hardening
 - Link native orderbook test extensions with their C implementations on Linux and remove the generated C test executable from version control.

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 import aiohttp
@@ -39,10 +40,10 @@ class BookTickerEvent:
 
     seq: int
     u: int
-    bid_price: float
-    bid_qty: float
-    ask_price: float
-    ask_qty: float
+    bid_price: str
+    bid_qty: str
+    ask_price: str
+    ask_qty: str
 
 
 @dataclass(slots=True)
@@ -57,20 +58,20 @@ class ReplayStats:
     raised_errors: int = 0
 
 
-def _ticks(price: float, inv_tick_size: float) -> int:
-    """Convert price to tick integer."""
-    return int(price * inv_tick_size)
+def _ticks(price: str, tick_size: str) -> int:
+    """Convert original exchange decimal strings without binary rounding."""
+    return int(Decimal(price) / Decimal(tick_size))
 
 
-def _lots(size: float, inv_lot_size: float) -> int:
-    """Convert size to lot integer."""
-    return int(size * inv_lot_size)
+def _lots(size: str, lot_size: str) -> int:
+    """Convert original exchange decimal strings without binary rounding."""
+    return int(Decimal(size) / Decimal(lot_size))
 
 
 async def _fetch_exchange_filters(
     session: aiohttp.ClientSession,
     symbol: str,
-) -> tuple[float, float]:
+) -> tuple[str, str]:
     """Fetch tick_size and lot_size from Binance exchange info.
 
     Args:
@@ -98,10 +99,10 @@ async def _fetch_exchange_filters(
     assert price_filter is not None, "Missing PRICE_FILTER"
     assert lot_filter is not None, "Missing LOT_SIZE"
 
-    tick_size = float(price_filter["tickSize"])
-    lot_size = float(lot_filter["stepSize"])
-    assert tick_size > 0.0
-    assert lot_size > 0.0
+    tick_size = price_filter["tickSize"]
+    lot_size = lot_filter["stepSize"]
+    assert Decimal(tick_size) > 0
+    assert Decimal(lot_size) > 0
     return tick_size, lot_size
 
 
@@ -141,8 +142,8 @@ async def _capture_events(
     snapshot_limit: int,
 ) -> tuple[
     dict[str, Any],
-    float,
-    float,
+    str,
+    str,
     list[DepthEvent],
     list[BookTickerEvent],
     list[DepthEvent | BookTickerEvent],
@@ -211,10 +212,10 @@ async def _capture_events(
                         evt = BookTickerEvent(
                             seq=seq,
                             u=int(data["u"]),
-                            bid_price=float(data["b"]),
-                            bid_qty=float(data["B"]),
-                            ask_price=float(data["a"]),
-                            ask_qty=float(data["A"]),
+                            bid_price=data["b"],
+                            bid_qty=data["B"],
+                            ask_price=data["a"],
+                            ask_qty=data["A"],
                         )
                         ticker_events.append(evt)
                         ordered_events.append(evt)
@@ -236,8 +237,8 @@ async def _capture_events_with_retries(
     max_attempts: int = 3,
 ) -> tuple[
     dict[str, Any],
-    float,
-    float,
+    str,
+    str,
     list[DepthEvent],
     list[BookTickerEvent],
     list[DepthEvent | BookTickerEvent],
@@ -297,15 +298,15 @@ def _snapshot_levels(
 
 def _snapshot_reference(
     snapshot: dict[str, Any],
-    inv_tick_size: float,
-    inv_lot_size: float,
+    tick_size: str,
+    lot_size: str,
 ) -> tuple[dict[int, int], dict[int, int]]:
     """Build reference bid/ask dictionaries from snapshot.
 
     Args:
         snapshot: Binance depth snapshot.
-        inv_tick_size: Inverse tick size.
-        inv_lot_size: Inverse lot size.
+        tick_size: Original exchange tick-size decimal string.
+        lot_size: Original exchange lot-size decimal string.
 
     Returns:
         Tuple of (bids_dict, asks_dict) mapping ticks to lots.
@@ -314,14 +315,14 @@ def _snapshot_reference(
     asks: dict[int, int] = {}
 
     for price, size in snapshot["bids"]:
-        t = _ticks(float(price), inv_tick_size)
-        lots = _lots(float(size), inv_lot_size)
+        t = _ticks(price, tick_size)
+        lots = _lots(size, lot_size)
         if lots > 0:
             bids[t] = lots
 
     for price, size in snapshot["asks"]:
-        t = _ticks(float(price), inv_tick_size)
-        lots = _lots(float(size), inv_lot_size)
+        t = _ticks(price, tick_size)
+        lots = _lots(size, lot_size)
         if lots > 0:
             asks[t] = lots
 
@@ -332,8 +333,8 @@ def _apply_depth_to_reference(
     event: DepthEvent,
     bids: dict[int, int],
     asks: dict[int, int],
-    inv_tick_size: float,
-    inv_lot_size: float,
+    tick_size: str,
+    lot_size: str,
 ) -> None:
     """Apply depth event to reference dictionaries.
 
@@ -341,20 +342,20 @@ def _apply_depth_to_reference(
         event: DepthEvent to apply.
         bids: Reference bids dictionary (modified in-place).
         asks: Reference asks dictionary (modified in-place).
-        inv_tick_size: Inverse tick size.
-        inv_lot_size: Inverse lot size.
+        tick_size: Original exchange tick-size decimal string.
+        lot_size: Original exchange lot-size decimal string.
     """
     for price, size in event.bids:
-        t = _ticks(float(price), inv_tick_size)
-        lots = _lots(float(size), inv_lot_size)
+        t = _ticks(price, tick_size)
+        lots = _lots(size, lot_size)
         if lots == 0:
             bids.pop(t, None)
         else:
             bids[t] = lots
 
     for price, size in event.asks:
-        t = _ticks(float(price), inv_tick_size)
-        lots = _lots(float(size), inv_lot_size)
+        t = _ticks(price, tick_size)
+        lots = _lots(size, lot_size)
         if lots == 0:
             asks.pop(t, None)
         else:
@@ -382,8 +383,8 @@ def _apply_depth_to_orderbook(ob: Orderbook, event: DepthEvent) -> None:
 def _replay_depth_with_reference(
     snapshot: dict[str, Any],
     depth_events: list[DepthEvent],
-    tick_size: float,
-    lot_size: float,
+    tick_size: str,
+    lot_size: str,
 ) -> tuple[ReplayStats, list[str]]:
     """Replay depth events and validate against reference state.
 
@@ -396,14 +397,11 @@ def _replay_depth_with_reference(
     Returns:
         Tuple of (stats, errors).
     """
-    inv_tick_size = 1.0 / tick_size
-    inv_lot_size = 1.0 / lot_size
-
-    ob = Orderbook(tick_size=tick_size, lot_size=lot_size, size=1)
+    ob = Orderbook(tick_size=float(tick_size), lot_size=float(lot_size), size=1)
     asks_levels, bids_levels = _snapshot_levels(snapshot)
     ob.consume_snapshot(asks=asks_levels, bids=bids_levels)
 
-    ref_bids, ref_asks = _snapshot_reference(snapshot, inv_tick_size, inv_lot_size)
+    ref_bids, ref_asks = _snapshot_reference(snapshot, tick_size, lot_size)
     stats = ReplayStats()
     errors: list[str] = []
 
@@ -490,9 +488,7 @@ def _replay_depth_with_reference(
                 break
 
         try:
-            _apply_depth_to_reference(
-                event, ref_bids, ref_asks, inv_tick_size, inv_lot_size
-            )
+            _apply_depth_to_reference(event, ref_bids, ref_asks, tick_size, lot_size)
             _apply_depth_to_orderbook(ob, event)
             stats.applied_depth_events += 1
             last_update_id = event.u
@@ -510,8 +506,8 @@ def _replay_depth_with_reference(
 def _replay_interleaved_with_book_ticker(
     snapshot: dict[str, Any],
     ordered_events: list[DepthEvent | BookTickerEvent],
-    tick_size: float,
-    lot_size: float,
+    tick_size: str,
+    lot_size: str,
 ) -> tuple[dict[str, int], list[str]]:
     """Replay interleaved depth and bookTicker events.
 
@@ -524,9 +520,7 @@ def _replay_interleaved_with_book_ticker(
     Returns:
         Tuple of (stats, errors).
     """
-    inv_tick_size = 1.0 / tick_size
-    inv_lot_size = 1.0 / lot_size
-    ob = Orderbook(tick_size=tick_size, lot_size=lot_size, size=1)
+    ob = Orderbook(tick_size=float(tick_size), lot_size=float(lot_size), size=1)
     asks_levels, bids_levels = _snapshot_levels(snapshot)
     ob.consume_snapshot(asks=asks_levels, bids=bids_levels)
 
@@ -552,18 +546,22 @@ def _replay_interleaved_with_book_ticker(
         last_ticker_u = max(last_ticker_u, event.u)
 
         ob.consume_bbo(
-            ask=OrderbookLevel(price=event.ask_price, size=event.ask_qty, norders=0),
-            bid=OrderbookLevel(price=event.bid_price, size=event.bid_qty, norders=0),
+            ask=OrderbookLevel(
+                price=float(event.ask_price), size=float(event.ask_qty), norders=0
+            ),
+            bid=OrderbookLevel(
+                price=float(event.bid_price), size=float(event.bid_qty), norders=0
+            ),
         )
 
-        bid_lots = _lots(event.bid_qty, inv_lot_size)
-        ask_lots = _lots(event.ask_qty, inv_lot_size)
+        bid_lots = _lots(event.bid_qty, lot_size)
+        ask_lots = _lots(event.ask_qty, lot_size)
         if bid_lots <= 0 or ask_lots <= 0:
             continue
 
         stats["book_ticker_checked"] += 1
-        expected_bid_tick = _ticks(event.bid_price, inv_tick_size)
-        expected_ask_tick = _ticks(event.ask_price, inv_tick_size)
+        expected_bid_tick = _ticks(event.bid_price, tick_size)
+        expected_ask_tick = _ticks(event.ask_price, tick_size)
 
         try:
             best_bid, best_ask = ob.get_bbo()
