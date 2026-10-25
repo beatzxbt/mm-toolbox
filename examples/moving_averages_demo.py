@@ -11,6 +11,7 @@ This example shows:
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import signal
 import sys
@@ -208,7 +209,7 @@ async def _print_loop(
             print(preview_row, flush=True)
 
 
-async def main() -> None:
+async def main(duration_s: float | None = None) -> None:
     """Set up WsPool and run the event loop."""
     symbol = "BTCUSDT"
     suite = MovingAverageSuite(window=20, half_life_s=1.0)
@@ -217,28 +218,61 @@ async def main() -> None:
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, shutdown_event.set)
+    duration_handle = (
+        loop.call_later(duration_s, shutdown_event.set)
+        if duration_s is not None
+        else None
+    )
 
     config = WsConnectionConfig.default(
         wss_url=f"wss://fstream.binance.com/ws/{symbol.lower()}@bookTicker"
     )
+    pool_config = WsPoolConfig(
+        num_connections=2,
+        evict_interval_s=60,
+        hash_capacity=16_384,
+    )
     pool = await WsPool.new(
         config=config,
-        pool_config=WsPoolConfig.default(),
+        pool_config=pool_config,
     )
+
+    bbo_task = asyncio.create_task(_consume_bbo(suite, pool, shutdown_event))
+    print_task = asyncio.create_task(_print_loop(suite, shutdown_event))
+    shutdown_task = asyncio.create_task(shutdown_event.wait())
+    tasks = (bbo_task, print_task, shutdown_task)
 
     try:
         async with pool:
             print(f"Connected to Binance futures {symbol} @bookTicker")
             print("Press Ctrl+C to stop...")
-
-            bbo_task = asyncio.create_task(_consume_bbo(suite, pool, shutdown_event))
-            print_task = asyncio.create_task(_print_loop(suite, shutdown_event))
-            await asyncio.gather(bbo_task, print_task)
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                if task is not shutdown_task:
+                    task.result()
     finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        if duration_handle is not None:
+            duration_handle.cancel()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.remove_signal_handler(sig)
         pool.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(
+        description="Compute moving averages from public Binance futures BBO data"
+    )
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="Stop after this many seconds (default: run until interrupted)",
+    )
+    args = parser.parse_args()
+    if args.duration is not None and args.duration <= 0:
+        parser.error("--duration must be > 0")
+    asyncio.run(main(args.duration))

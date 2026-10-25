@@ -14,11 +14,13 @@ This example demonstrates:
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import multiprocessing
 import os
 import signal
 import sys
+import tempfile
 import time
 import urllib.request
 from typing import Any
@@ -251,6 +253,7 @@ class WorkerProcess:
         self.encoder = msgspec.json.Encoder()
         self.ws_trade: WsSingle | None = None
         self.ws_bbo: WsSingle | None = None
+        self._shutdown = False
 
     def _process_trade_message(self, msg: bytes) -> None:
         """Decode a Binance @trade message and push it to the MPSC ring."""
@@ -317,6 +320,9 @@ class WorkerProcess:
 
     def shutdown(self) -> None:
         """Close WebSockets, ringbuffer, and logger."""
+        if self._shutdown:
+            return
+        self._shutdown = True
         if self.ws_trade is not None:
             self.ws_trade.close()
         if self.ws_bbo is not None:
@@ -367,7 +373,9 @@ class MasterProcess:
         self._data_producer = ShmMpscProducer(
             path=data_path,
             capacity_bytes=SHM_CAPACITY_BYTES,
-            num_rings=len(symbols),
+            # The master keeps one producer attached to own the shared file,
+            # so reserve a shard for it in addition to one per worker.
+            num_rings=len(symbols) + 1,
             create=True,
             unlink_on_close=True,
         )
@@ -386,6 +394,7 @@ class MasterProcess:
             )
 
         self._trade_counts: dict[str, int] = {s: 0 for s in symbols}
+        self._shutdown = False
 
     def _load_snapshots(self) -> None:
         """Fetch and apply initial orderbook snapshots via REST."""
@@ -495,6 +504,9 @@ class MasterProcess:
 
     def shutdown(self) -> None:
         """Close consumer, producer, and logger."""
+        if self._shutdown:
+            return
+        self._shutdown = True
         self.data_consumer.close()
         self._data_producer.close()
         self.logger.shutdown()
@@ -573,25 +585,17 @@ def master_entry(
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
-    """Orchestrate master and worker processes."""
-    logger_path = "/tmp/binance_mpsc_logger"
-    data_path = "/tmp/binance_mpsc_data"
-    startup_event_path = "/tmp/binance_mpsc_startup"
-
-    # Clean up stale files.
-    for p in (logger_path, data_path, startup_event_path):
-        try:
-            os.remove(p)
-        except FileNotFoundError:
-            pass
+def _run_pipeline(duration_s: float | None, runtime_dir: str) -> None:
+    """Run workers and master with shared files owned by runtime_dir."""
+    logger_path = os.path.join(runtime_dir, "binance_mpsc_logger")
+    data_path = os.path.join(runtime_dir, "binance_mpsc_data")
+    startup_event_path = os.path.join(runtime_dir, "binance_mpsc_startup")
 
     print("Fetching symbol info from Binance...")
     symbol_info = fetch_symbol_info(SYMBOLS)
     for symbol in SYMBOLS:
         if symbol not in symbol_info:
-            print(f"Failed to retrieve info for {symbol}", file=sys.stderr)
-            sys.exit(1)
+            raise RuntimeError(f"Failed to retrieve info for {symbol}")
         tick, lot = symbol_info[symbol]
         print(f"  {symbol}: tick={tick}, lot={lot}")
 
@@ -605,41 +609,88 @@ def main() -> None:
 
     # Wait for master to initialize before spawning workers.
     startup = StartupEvent(startup_event_path)
-    if not startup.wait(timeout=30.0):
-        print("Timeout waiting for master to start", file=sys.stderr)
-        master_proc.terminate()
-        sys.exit(1)
-
-    # Spawn workers.
     workers: list[multiprocessing.Process] = []
-    for symbol in SYMBOLS:
-        proc = multiprocessing.Process(
-            target=worker_entry,
-            args=(symbol, logger_path, data_path, startup_event_path),
-            daemon=True,
-        )
-        proc.start()
-        workers.append(proc)
-        print(f"Started worker for {symbol}")
-
-    print("All processes running. Press Ctrl+C to stop...")
-
+    startup_deadline = time.monotonic() + 30.0
     try:
+        ready = False
+        while time.monotonic() < startup_deadline:
+            if startup.wait(timeout=0.05):
+                ready = True
+                break
+            if not master_proc.is_alive():
+                break
+        if not ready:
+            raise TimeoutError("Timed out waiting for the master to start")
+
+        # Spawn workers only after the master has created logger and data SHM.
+        for symbol in SYMBOLS:
+            proc = multiprocessing.Process(
+                target=worker_entry,
+                args=(symbol, logger_path, data_path, startup_event_path),
+                daemon=True,
+            )
+            proc.start()
+            workers.append(proc)
+            print(f"Started worker for {symbol}")
+
+        print("All processes running. Press Ctrl+C to stop...")
+        start = time.monotonic()
         while master_proc.is_alive():
+            if duration_s is not None and time.monotonic() - start >= duration_s:
+                print(f"Duration limit reached ({duration_s:g}s).")
+                break
+            if any(proc.exitcode not in (None, 0) for proc in workers):
+                print("A worker exited with an error; stopping the example.")
+                break
             time.sleep(0.1)
     except KeyboardInterrupt:
-        pass
-    finally:
         print("\nShutting down...")
+    finally:
+        # Stop the WebSocket workers first so the master can drain final logs.
         for w in workers:
-            if w.is_alive():
-                w.terminate()
-        if master_proc.is_alive():
-            master_proc.terminate()
+            if w.is_alive() and w.pid is not None:
+                try:
+                    os.kill(w.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
         for w in workers:
-            w.join(timeout=2)
-        master_proc.join(timeout=2)
+            w.join(timeout=5)
+        if master_proc.is_alive() and master_proc.pid is not None:
+            try:
+                os.kill(master_proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        master_proc.join(timeout=5)
+
+        for proc in [*workers, master_proc]:
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=2)
+
+    failed = [
+        proc.name for proc in [master_proc, *workers] if proc.exitcode not in (0, None)
+    ]
+    if failed:
+        raise RuntimeError(f"Example child process failed: {', '.join(failed)}")
+
+
+def main(duration_s: float | None = None) -> None:
+    """Run the pipeline in a temporary directory owned by this invocation."""
+    with tempfile.TemporaryDirectory(prefix="mm-binance-mpsc-") as runtime_dir:
+        _run_pipeline(duration_s, runtime_dir)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Stream public Binance futures market data with SHM MPSC"
+    )
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="Stop after this many seconds (default: run until interrupted)",
+    )
+    args = parser.parse_args()
+    if args.duration is not None and args.duration <= 0:
+        parser.error("--duration must be > 0")
+    main(duration_s=args.duration)

@@ -1,8 +1,8 @@
 """Comprehensive example demonstrating multi-process Binance streaming with SHM SPSC.
 
 This example shows:
-- Using WsPool for BBO, orderbook depth, and trade streams
-- Building time-based candles on mid price
+- Using WsSingle for each BBO, orderbook depth, and trade stream
+- Building time-based candles on executed trades
 - Building standard orderbook from snapshot + deltas
 - Computing TEMA on mid price with tick-size rounding
 - SHM SPSC communication between processes
@@ -11,10 +11,14 @@ This example shows:
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import math
 import multiprocessing
 import os
+import signal
 import sys
+import tempfile
 import time
 import urllib.request
 from typing import Any
@@ -37,7 +41,7 @@ from mm_toolbox.ringbuffer.shm.spsc import (
     ShmSpscProducer,
 )
 from mm_toolbox.rounding import Rounder, RounderConfig
-from mm_toolbox.websocket import WsConnectionConfig, WsPool, WsPoolConfig
+from mm_toolbox.websocket import WsConnectionConfig, WsSingle
 
 
 class StartupEvent:
@@ -138,32 +142,45 @@ class BinanceStreamProcessor:
         self.symbol = symbol
         self.logger_path = logger_path
         self.data_path = data_path
-
-        # Initialize worker logger
-        logger_config = LoggerConfig(
-            base_level=LogLevel.INFO,
-            path=logger_path,
-            flush_interval_s=0.5,
-            emit_internal=False,
-        )
-        self.logger = WorkerLogger(config=logger_config, name="StreamProcess")
+        self._logger: WorkerLogger | None = None
+        self._shutdown = False
 
         # Initialize SHM SPSC producer for data
         self.data_producer = ShmSpscProducer(
             path=data_path,
             capacity_bytes=16 * 1024 * 1024,
             create=True,
-            unlink_on_close=False,
+            unlink_on_close=True,
         )
 
         # Message encoder
         self.encoder = msgspec.json.Encoder()
 
-        # WebSocket pools
-        self.bbo_pool: WsPool | None = None
-        self.trade_pool: WsPool | None = None
-        self.depth_pool: WsPool | None = None
+        # Three feeds share this process, with one connection per feed.
+        # The standalone candle and moving-average demos show redundant pools.
+        self.bbo_stream: WsSingle | None = None
+        self.trade_stream: WsSingle | None = None
+        self.depth_stream: WsSingle | None = None
         self._trade_sent_count = 0
+
+    @property
+    def logger(self) -> WorkerLogger:
+        """Return the logger after the processing process is ready."""
+        if self._logger is None:
+            raise RuntimeError("Worker logger has not been initialized")
+        return self._logger
+
+    def initialize_logger(self) -> None:
+        """Attach the worker logger after the master has created its SHM ring."""
+        if self._logger is not None:
+            return
+        logger_config = LoggerConfig(
+            base_level=LogLevel.INFO,
+            path=self.logger_path,
+            flush_interval_s=0.5,
+            emit_internal=False,
+        )
+        self._logger = WorkerLogger(config=logger_config, name="StreamProcess")
 
     def _process_bbo_message(self, msg: bytes) -> None:
         """Process bookTicker (BBO) messages."""
@@ -231,50 +248,61 @@ class BinanceStreamProcessor:
         bbo_config = WsConnectionConfig.default(
             wss_url=f"wss://fstream.binance.com/ws/{self.symbol.lower()}@bookTicker"
         )
-        self.bbo_pool = await WsPool.new(
-            config=bbo_config,
-            pool_config=WsPoolConfig.default(),
-        )
+        self.bbo_stream = WsSingle(config=bbo_config)
 
         # Trade stream
         trade_config = WsConnectionConfig.default(
             wss_url=f"wss://fstream.binance.com/ws/{self.symbol.lower()}@trade"
         )
-        self.trade_pool = await WsPool.new(
-            config=trade_config,
-            pool_config=WsPoolConfig.default(),
-        )
+        self.trade_stream = WsSingle(config=trade_config)
 
         # Depth stream
         depth_config = WsConnectionConfig.default(
             wss_url=f"wss://fstream.binance.com/ws/{self.symbol.lower()}@depth@100ms"
         )
-        self.depth_pool = await WsPool.new(
-            config=depth_config,
-            pool_config=WsPoolConfig.default(),
-        )
+        self.depth_stream = WsSingle(config=depth_config)
 
-        async with self.bbo_pool, self.trade_pool, self.depth_pool:
-            self.logger.info(
-                "Streams connected, processing BBO + trades + depth...".encode("utf-8")
-            )
-            try:
+        bbo_stream = self.bbo_stream
+        trade_stream = self.trade_stream
+        depth_stream = self.depth_stream
+        assert bbo_stream is not None
+        assert trade_stream is not None
+        assert depth_stream is not None
 
-                async def consume_bbo():
-                    async for msg in self.bbo_pool:
-                        self._process_bbo_message(msg)
+        async def consume_bbo():
+            async for msg in bbo_stream:
+                self._process_bbo_message(msg)
 
-                async def consume_trades():
-                    async for msg in self.trade_pool:
-                        self._process_trade_message(msg)
+        async def consume_trades():
+            async for msg in trade_stream:
+                self._process_trade_message(msg)
 
-                async def consume_depth():
-                    async for msg in self.depth_pool:
-                        self._process_depth_message(msg)
+        async def consume_depth():
+            async for msg in depth_stream:
+                self._process_depth_message(msg)
 
-                await asyncio.gather(consume_bbo(), consume_trades(), consume_depth())
-            except KeyboardInterrupt:
-                self.logger.info("Stream interrupted, shutting down...".encode("utf-8"))
+        # Start readers before opening all sockets so the shared receive rings
+        # are drained while the streams complete their startup handshakes.
+        consumer_tasks = [
+            asyncio.create_task(consume_bbo()),
+            asyncio.create_task(consume_trades()),
+            asyncio.create_task(consume_depth()),
+        ]
+        try:
+            async with bbo_stream, trade_stream, depth_stream:
+                self.logger.info(
+                    "Streams connected, processing BBO + trades + depth...".encode(
+                        "utf-8"
+                    )
+                )
+                await asyncio.gather(*consumer_tasks)
+        except KeyboardInterrupt:
+            self.logger.info("Stream interrupted, shutting down...".encode("utf-8"))
+        finally:
+            for task in consumer_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*consumer_tasks, return_exceptions=True)
 
     def run(self) -> None:
         """Run the stream processor."""
@@ -287,14 +315,19 @@ class BinanceStreamProcessor:
 
     def shutdown(self) -> None:
         """Shutdown the stream processor."""
-        if self.bbo_pool is not None:
-            self.bbo_pool.close()
-        if self.trade_pool is not None:
-            self.trade_pool.close()
-        if self.depth_pool is not None:
-            self.depth_pool.close()
+        if self._shutdown:
+            return
+        self._shutdown = True
+        if self.bbo_stream is not None:
+            self.bbo_stream.close()
+        if self.trade_stream is not None:
+            self.trade_stream.close()
+        if self.depth_stream is not None:
+            self.depth_stream.close()
         self.data_producer.close()
-        self.logger.shutdown()
+        if self._logger is not None:
+            self._logger.shutdown()
+            self._logger = None
 
 
 class BinanceDataProcessor:
@@ -346,6 +379,7 @@ class BinanceDataProcessor:
         self.last_update_id: int = 0
         self._depth_started: bool = False
         self._depth_update_count: int = 0
+        self._shutdown = False
 
         # TEMA and rounding
         self.tema = TimeExponentialMovingAverage(half_life_s=1.0)
@@ -411,6 +445,16 @@ class BinanceDataProcessor:
 
     def _handle_trade(self, trade_data: TradeUpdate) -> None:
         """Handle trade update - build candles with real size."""
+        if not (
+            math.isfinite(trade_data.price)
+            and trade_data.price > 0
+            and math.isfinite(trade_data.quantity)
+            and trade_data.quantity > 0
+        ):
+            self.logger.info(
+                b"Skipping trade with nonpositive or nonfinite price/quantity"
+            )
+            return
         self._trade_count += 1
         if self._trade_count % 100 == 0:
             side = "SELL" if trade_data.is_buyer_maker else "BUY"
@@ -555,6 +599,9 @@ class BinanceDataProcessor:
 
     def shutdown(self) -> None:
         """Shutdown the data processor."""
+        if self._shutdown:
+            return
+        self._shutdown = True
         self.data_consumer.close()
         self.logger.shutdown()
 
@@ -571,13 +618,18 @@ def stream_process_entry(
     # Create processor (and SHM producer backing file) first before waiting
     processor = BinanceStreamProcessor(symbol, logger_path, data_path)
 
-    # Wait for processing process to initialize MasterLogger and snapshot
-    startup = StartupEvent(startup_event_path)
-    if not startup.wait(timeout=10.0):
-        print("Timeout waiting for processing process to start", file=sys.stderr)
-        sys.exit(1)
+    try:
+        # Wait before attaching WorkerLogger: the processing process creates
+        # the master logger's shared-memory ring before publishing readiness.
+        startup = StartupEvent(startup_event_path)
+        if not startup.wait(timeout=10.0):
+            print("Timeout waiting for processing process to start", file=sys.stderr)
+            return
 
-    processor.run()
+        processor.initialize_logger()
+        processor.run()
+    finally:
+        processor.shutdown()
 
 
 def processing_process_entry(
@@ -593,34 +645,31 @@ def processing_process_entry(
         symbol, tick_size, lot_size, logger_path, data_path
     )
 
-    # Fetch snapshot before signaling ready so stream process does not
-    # produce deltas we are unprepared to handle.
-    processor._fetch_snapshot()
+    try:
+        # Fetch snapshot before signaling ready so stream process does not
+        # produce deltas we are unprepared to handle.
+        processor._fetch_snapshot()
 
-    # Signal that MasterLogger and orderbook snapshot are ready
-    startup = StartupEvent(startup_event_path)
-    startup.set()
+        # Signal that MasterLogger and orderbook snapshot are ready
+        startup = StartupEvent(startup_event_path)
+        startup.set()
 
-    processor.run()
+        processor.run()
+    finally:
+        processor.shutdown()
 
 
-def main() -> None:
-    """Main entry point."""
+def _run_processes(duration_s: float | None, runtime_dir: str) -> None:
+    """Start the stream/processing children using paths owned by runtime_dir."""
     symbol = "BTCUSDT"
     tick_size = 0.01
     lot_size = 0.001
 
-    # Paths - logger and data ringbuffer use raw filesystem paths
-    logger_path = "/tmp/binance_logger"
-    data_path = "/tmp/binance_data"
-    startup_event_path = "/tmp/binance_startup_ready"
-
-    # Clean up any stale files
-    for p in (startup_event_path, data_path):
-        try:
-            os.remove(p)
-        except FileNotFoundError:
-            pass
+    # Each run owns its shared-memory and startup files. TemporaryDirectory
+    # removes them after both children have stopped.
+    logger_path = os.path.join(runtime_dir, "binance_logger")
+    data_path = os.path.join(runtime_dir, "binance_data")
+    startup_event_path = os.path.join(runtime_dir, "binance_startup_ready")
 
     # Create processes
     stream_proc = multiprocessing.Process(
@@ -634,25 +683,68 @@ def main() -> None:
         daemon=True,
     )
 
-    # Start stream first so the SHM producer creates the backing file before
-    # the processing process tries to attach its consumer.
-    stream_proc.start()
-    processing_proc.start()
-
-    print(f"Started stream and processing processes for {symbol}")
-    print("Press Ctrl+C to stop...")
-
+    processes: list[multiprocessing.Process] = []
+    start = time.monotonic()
     try:
-        # Wait for processes
-        stream_proc.join()
-        processing_proc.join()
+        # Start stream first so the SHM producer creates the backing file
+        # before the processing process tries to attach as a consumer.
+        stream_proc.start()
+        processes.append(stream_proc)
+        processing_proc.start()
+        processes.append(processing_proc)
+
+        print(f"Started stream and processing processes for {symbol}")
+        print("Press Ctrl+C to stop...")
+
+        while any(proc.is_alive() for proc in processes):
+            if duration_s is not None and time.monotonic() - start >= duration_s:
+                print(f"Duration limit reached ({duration_s:g}s).")
+                break
+            if any(proc.exitcode not in (None, 0) for proc in processes):
+                print("A child process exited with an error; stopping the example.")
+                break
+            for proc in processes:
+                proc.join(timeout=0.05)
     except KeyboardInterrupt:
         print("\nShutting down...")
-        stream_proc.terminate()
-        processing_proc.terminate()
-        stream_proc.join(timeout=2)
-        processing_proc.join(timeout=2)
+    finally:
+        # Ask both children to run their finally/shutdown paths before using
+        # terminate() as a last resort.
+        for proc in processes:
+            if proc.is_alive() and proc.pid is not None:
+                try:
+                    os.kill(proc.pid, signal.SIGINT)
+                except ProcessLookupError:
+                    pass
+        for proc in processes:
+            proc.join(timeout=5)
+        for proc in processes:
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=2)
+
+    failed = [proc.name for proc in processes if proc.exitcode not in (0, None)]
+    if failed:
+        raise RuntimeError(f"Example child process failed: {', '.join(failed)}")
+
+
+def main(duration_s: float | None = None) -> None:
+    """Run the example in a temporary directory owned by this invocation."""
+    with tempfile.TemporaryDirectory(prefix="mm-binance-stream-") as runtime_dir:
+        _run_processes(duration_s, runtime_dir)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Stream public Binance futures market data"
+    )
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="Stop after this many seconds (default: run until interrupted)",
+    )
+    args = parser.parse_args()
+    if args.duration is not None and args.duration <= 0:
+        parser.error("--duration must be > 0")
+    main(duration_s=args.duration)

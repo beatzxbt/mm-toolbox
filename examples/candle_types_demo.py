@@ -12,7 +12,9 @@ This example shows:
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import math
 import signal
 import sys
 from typing import Any
@@ -110,10 +112,12 @@ class CandleAggregator:
             task = asyncio.create_task(self._consume_builder(name, builder))
             self._consumer_tasks.append(task)
 
-    def stop_consumers(self) -> None:
-        """Cancel all async consumer tasks."""
+    async def stop_consumers(self) -> None:
+        """Cancel all async consumer tasks and wait for them to finish."""
         for task in self._consumer_tasks:
             task.cancel()
+        if self._consumer_tasks:
+            await asyncio.gather(*self._consumer_tasks, return_exceptions=True)
 
     def process_trade(self, trade: Trade) -> None:
         """Feed a single trade to all five candle aggregators.
@@ -189,11 +193,20 @@ async def _consume_trades(
 
         try:
             trade_msg = decoder.decode(msg)
+            price, size = float(trade_msg.p), float(trade_msg.q)
+            if not (
+                math.isfinite(price) and price > 0 and math.isfinite(size) and size > 0
+            ):
+                print(
+                    f"Skipping non-execution trade: price={trade_msg.p}, quantity={trade_msg.q}",
+                    file=sys.stderr,
+                )
+                continue
             trade = Trade(
                 time_ms=trade_msg.T,
                 is_buy=not trade_msg.m,
-                price=float(trade_msg.p),
-                size=float(trade_msg.q),
+                price=price,
+                size=size,
             )
             aggregator.process_trade(trade)
         except Exception as e:
@@ -217,7 +230,7 @@ async def _print_periodic_summary(
             aggregator.print_summary()
 
 
-async def _run() -> None:
+async def _run(duration_s: float | None = None) -> None:
     """Set up the WsPool and run the event loop."""
     shutdown_event = asyncio.Event()
 
@@ -228,6 +241,9 @@ async def _run() -> None:
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _signal_handler)
+    duration_handle = (
+        loop.call_later(duration_s, _signal_handler) if duration_s is not None else None
+    )
 
     symbol = "btcusdt"
 
@@ -236,35 +252,63 @@ async def _run() -> None:
     config = WsConnectionConfig.default(
         wss_url=f"wss://fstream.binance.com/ws/{symbol}@trade"
     )
+    pool_config = WsPoolConfig(
+        num_connections=2,
+        evict_interval_s=60,
+        hash_capacity=16_384,
+    )
     pool = await WsPool.new(
         config=config,
-        pool_config=WsPoolConfig.default(),
+        pool_config=pool_config,
     )
 
     aggregator = CandleAggregator()
     aggregator.start_consumers()
+    trade_task = asyncio.create_task(_consume_trades(pool, aggregator, shutdown_event))
+    summary_task = asyncio.create_task(
+        _print_periodic_summary(aggregator, shutdown_event)
+    )
+    shutdown_task = asyncio.create_task(shutdown_event.wait())
+    tasks = (trade_task, summary_task, shutdown_task)
 
-    async with pool:
-        print("Connected. Streaming trades and building candles...")
-        print("Press Ctrl+C to stop.\n")
-
-        try:
-            await asyncio.gather(
-                _consume_trades(pool, aggregator, shutdown_event),
-                _print_periodic_summary(aggregator, shutdown_event),
-            )
-        finally:
-            aggregator.stop_consumers()
-            aggregator.print_summary()
-            for sig in (signal.SIGINT, signal.SIGTERM):
-                loop.remove_signal_handler(sig)
-            print("Shutdown complete.")
+    try:
+        async with pool:
+            print("Connected. Streaming trades and building candles...")
+            print("Press Ctrl+C to stop.\n")
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                if task is not shutdown_task:
+                    task.result()
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await aggregator.stop_consumers()
+        aggregator.print_summary()
+        if duration_handle is not None:
+            duration_handle.cancel()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.remove_signal_handler(sig)
+        print("Shutdown complete.")
 
 
 def main() -> None:
     """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description="Build candle types from public Binance futures trades"
+    )
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="Stop after this many seconds (default: run until interrupted)",
+    )
+    args = parser.parse_args()
+    if args.duration is not None and args.duration <= 0:
+        parser.error("--duration must be > 0")
     try:
-        asyncio.run(_run())
+        asyncio.run(_run(args.duration))
     except KeyboardInterrupt:
         pass
 
