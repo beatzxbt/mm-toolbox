@@ -8,11 +8,14 @@ reentrant usage, and fallback when all connections are rejected.
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
-from mm_toolbox.websocket.connection import ConnectionState
+from mm_toolbox.websocket import pool as pool_module
+from mm_toolbox.websocket.connection import ConnectionState, WsConnectionConfig
 from mm_toolbox.websocket.pool import WsPool, WsPoolConfig
+from tests.websocket.conftest import _Connection
 
 
 def noop_message_handler(msg: bytes) -> None:
@@ -100,3 +103,38 @@ class TestWsPoolContextManager:
                     pytest.fail("startup must fail")
             assert pool.get_connection_count() == 0
             assert pool.get_state() == ConnectionState.DISCONNECTED
+
+
+@pytest.mark.asyncio
+async def test_pool_partial_start_rolls_back_and_cancels_pending_open(monkeypatch):
+    created = []
+    cancelled = asyncio.Event()
+    calls = 0
+
+    async def connect(ringbuffer, config):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            await asyncio.sleep(0)
+            raise OSError("refused")
+        if calls == 3:
+            try:
+                await asyncio.Future()
+            finally:
+                cancelled.set()
+        conn = _Connection(config)
+        created.append(conn)
+        return conn
+
+    monkeypatch.setattr(pool_module, "WsConnection", SimpleNamespace(new=connect))
+    pool = WsPool(
+        WsConnectionConfig.default("ws://localhost"), pool_config=WsPoolConfig(3, 60)
+    )
+    with pytest.raises(RuntimeError, match="every WebSocket connection"):
+        await pool.__aenter__()
+    assert cancelled.is_set()
+    assert created and all(not conn.live for conn in created)
+    assert pool.get_connection_count() == 0
+    assert pool.get_state() == ConnectionState.DISCONNECTED
+    assert not pool._opening_tasks
+    assert not pool._replacement_tasks

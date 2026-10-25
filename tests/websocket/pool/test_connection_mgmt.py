@@ -17,11 +17,14 @@ Key coverage:
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
+from mm_toolbox.websocket import pool as pool_module
 from mm_toolbox.websocket.connection import ConnectionState, WsConnectionConfig
 from mm_toolbox.websocket.pool import WsPool, WsPoolConfig
+from tests.websocket.conftest import _Connection, _until
 
 
 def noop_message_handler(msg: bytes) -> None:
@@ -153,3 +156,53 @@ class TestWsPoolConnectionManagement:
                 await asyncio.sleep(0.5)
                 assert pool.get_connection_count() == pool_config.num_connections
             pool.close()
+
+
+@pytest.mark.asyncio
+async def test_pool_recovers_after_every_socket_is_lost(monkeypatch):
+    accepting = True
+    attempts = 0
+
+    async def connect(ringbuffer, config):
+        nonlocal attempts
+        attempts += 1
+        if not accepting:
+            raise OSError("outage")
+        return _Connection(config)
+
+    monkeypatch.setattr(pool_module, "WsConnection", SimpleNamespace(new=connect))
+    pool = WsPool(
+        WsConnectionConfig.default("ws://localhost"), pool_config=WsPoolConfig(2, 60)
+    )
+    async with pool:
+        accepting = False
+        for conn in pool._conns.values():
+            conn.close()
+        await _until(lambda: attempts >= 4)
+        assert pool.get_connection_count() == 0
+        assert pool.get_state() == ConnectionState.CONNECTING
+        assert len(pool._replacement_tasks) == 2
+        accepting = True
+        await _until(lambda: pool.get_connection_count() == 2)
+        assert pool.get_state() == ConnectionState.CONNECTED
+    assert not pool._replacement_tasks
+    assert pool._eviction_task is None
+
+@pytest.mark.asyncio
+async def test_pool_no_recovery_when_disabled(monkeypatch):
+    attempts = 0
+
+    async def connect(ringbuffer, config):
+        nonlocal attempts
+        attempts += 1
+        return _Connection(config)
+
+    monkeypatch.setattr(pool_module, "WsConnection", SimpleNamespace(new=connect))
+    config = WsConnectionConfig.default("ws://localhost")
+    config.auto_reconnect = False
+    async with WsPool(config, pool_config=WsPoolConfig(2, 60)) as pool:
+        for conn in pool._conns.values():
+            conn.close()
+        await asyncio.sleep(0.25)
+        assert attempts == 2
+        assert pool.get_state() == ConnectionState.DISCONNECTED

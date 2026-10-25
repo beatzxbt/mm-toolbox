@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from types import SimpleNamespace
 
 import msgspec
 import pytest
 
+from mm_toolbox.websocket import single as single_module
 from mm_toolbox.websocket.connection import ConnectionState, WsConnectionConfig
 from mm_toolbox.websocket.single import WsSingle
+from tests.websocket.conftest import _until
 
 
 async def wait_for_single_state(
@@ -173,3 +176,59 @@ class TestWsSingleErrorScenarios:
         with pytest.raises(RuntimeError, match="disconnected"):
             ws.send_data(b"no-op")
         assert ws._ws_conn is None
+
+
+@pytest.mark.asyncio
+async def test_single_close_wakes_reader_and_is_terminal():
+    ws = WsSingle(WsConnectionConfig.default("ws://localhost"))
+    reader = asyncio.create_task(anext(ws))
+    await asyncio.sleep(0)
+    ws.close()
+    ws.close()
+    with pytest.raises(StopAsyncIteration):
+        await asyncio.wait_for(reader, 0.2)
+    with pytest.raises(RuntimeError, match="closed"):
+        await ws.start()
+    with pytest.raises(RuntimeError, match="closed"):
+        await ws.__aenter__()
+
+@pytest.mark.asyncio
+async def test_single_close_during_connect_cancels_connector(monkeypatch):
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def connect(ringbuffer, config):
+        entered.set()
+        try:
+            await asyncio.Future()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(single_module, "WsConnection", SimpleNamespace(new=connect))
+    ws = WsSingle(WsConnectionConfig.default("ws://localhost"))
+    starter = asyncio.create_task(ws.start())
+    await entered.wait()
+    ws.close()
+    await asyncio.wait_for(starter, 0.2)
+    assert cancelled.is_set()
+    assert ws.get_state() == ConnectionState.DISCONNECTED
+    assert all(task.done() for task in ws._tasks)
+
+@pytest.mark.asyncio
+async def test_single_close_during_retry_prevents_further_attempts(monkeypatch):
+    attempts = 0
+
+    async def connect(ringbuffer, config):
+        nonlocal attempts
+        attempts += 1
+        raise OSError("offline")
+
+    monkeypatch.setattr(single_module, "WsConnection", SimpleNamespace(new=connect))
+    ws = WsSingle(WsConnectionConfig.default("ws://localhost"))
+    starter = asyncio.create_task(ws.start())
+    await _until(lambda: ws._reconnect_task is not None)
+    ws.close()
+    await asyncio.wait_for(starter, 0.2)
+    await asyncio.sleep(0.05)
+    assert attempts == 1
+    assert all(task.done() for task in ws._tasks)

@@ -15,6 +15,7 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 from concurrent.futures import Future
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -571,3 +572,23 @@ class TestRateLimiter:
         await asyncio.gather(*(limiter.acquire(1) for _ in range(3)))
         elapsed = asyncio.get_running_loop().time() - start
         assert elapsed >= 0.07
+
+
+class _Advanced(BaseLogHandler):
+    def push(self, logs):
+        pass
+
+def test_advanced_close_bounds_total_wait_across_many_futures():
+    handler = _Advanced()
+
+    async def never():
+        await asyncio.Future()
+
+    futures = [handler._submit_coro(never()) for _ in range(20)]
+    start = time.monotonic()
+    handler.close(timeout_s=0.1)
+    assert time.monotonic() - start < 0.5
+    handler._loop_thread.join(timeout=0.5)
+    assert not handler._loop_thread.is_alive()
+    assert all(future.done() for future in futures)
+    assert handler._submit_coro(never()) is None

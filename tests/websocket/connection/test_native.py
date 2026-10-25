@@ -14,6 +14,7 @@ Skipped gracefully when the native test module has not been built.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 
@@ -31,6 +32,9 @@ except ImportError as e:
         f"Native Cython test module not built: {e}. Run `make build-test`",
         allow_module_level=True,
     )
+
+from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
+from mm_toolbox.websocket.connection import WsConnection, WsConnectionConfig
 
 
 # --------------------------------------------------------------------------- #
@@ -141,3 +145,34 @@ def test_get_state_returns_enum():
 def test_config_cache_reflects_updates():
     """Given a config update, When the cache is read, Then it reflects the new values."""
     _native.test_config_cache_reflects_updates()
+
+
+@pytest.mark.asyncio
+async def test_connection_open_cancellation_closes_created_listener(monkeypatch):
+    listeners = []
+    entered = asyncio.Event()
+
+    class Listener:
+        def __init__(self, ringbuffer, config):
+            self.closed = False
+            listeners.append(self)
+
+        def close(self):
+            self.closed = True
+
+    async def connect(**kwargs):
+        kwargs["ws_listener_factory"]()
+        entered.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr("mm_toolbox.websocket.connection.ws_connect", connect)
+    task = asyncio.create_task(
+        WsConnection.new.__func__(
+            Listener, BytesRingBuffer(8), WsConnectionConfig.default("ws://localhost")
+        )
+    )
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert listeners and all(listener.closed for listener in listeners)
