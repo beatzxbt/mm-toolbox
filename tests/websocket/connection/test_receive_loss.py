@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 import pytest
+import pytest_asyncio
 import websockets
 
 import mm_toolbox.websocket.connection as connection_module
@@ -24,7 +25,7 @@ async def _received(conn, count):
             await asyncio.sleep(0)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def burst_server():
     async def send_burst(socket):
         for index in range(132):
