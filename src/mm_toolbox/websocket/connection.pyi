@@ -7,6 +7,10 @@ from picows.picows import WSFrame, WSListener, WSTransport
 
 from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
 
+class _ReceiveBuffer(BytesRingBuffer):
+    def __init__(self, max_capacity: int) -> None: ...
+    def get_dropped_messages(self) -> int: ...
+
 class ConnectionState(IntEnum):
     DISCONNECTED = 0
     CONNECTING = 1

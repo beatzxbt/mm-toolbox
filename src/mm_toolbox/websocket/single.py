@@ -17,11 +17,11 @@ from typing import Self
 
 import msgspec
 
-from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
 from mm_toolbox.websocket.connection import (
     ConnectionState,
     WsConnection,
     WsConnectionConfig,
+    _ReceiveBuffer,
 )
 
 
@@ -51,7 +51,7 @@ class WsSingle:
 
         """
         self._config = config
-        self._ringbuffer = BytesRingBuffer(max_capacity=128, only_insert_unique=False)
+        self._ringbuffer = _ReceiveBuffer(128)
         self._ws_conn: WsConnection | None = None
         self._closed = False
         self._stop_event = asyncio.Event()
@@ -286,6 +286,13 @@ class WsSingle:
         if self._ws_conn is not None:
             return self._ws_conn.get_seq_id()
         return 0
+
+    def get_dropped_messages(self) -> int:
+        """Return receive overwrites over this client's entire lifetime.
+
+        Includes startup and replaced connections; closing never resets it.
+        """
+        return self._ringbuffer.get_dropped_messages()
 
     def get_state(self) -> ConnectionState:
         """Return the current connection state.

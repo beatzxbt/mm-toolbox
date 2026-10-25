@@ -10,6 +10,10 @@ from picows.picows cimport (
 
 from mm_toolbox.ringbuffer.bytes cimport BytesRingBuffer
 
+cdef class _ReceiveBuffer(BytesRingBuffer):
+    cdef object _receive_loss_count
+    cpdef object get_dropped_messages(self)
+
 cpdef enum ConnectionState:
     DISCONNECTED = 0
     CONNECTING = 1
@@ -21,6 +25,7 @@ cdef class WsConnection(WSListener):
         ConnectionState   _conn_state
         i64               _seq_id
         i64               _dropped_messages
+        object            _receive_loss_count
         BytesRingBuffer   _ringbuffer
         double            _latency_ms
         object            _latency_ema

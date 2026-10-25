@@ -82,6 +82,20 @@ class WsConnectionConfig(Struct):
             ),
         )
 
+cdef class _ReceiveBuffer(BytesRingBuffer):
+    """A wrapper-owned counter bound before any native listener receives frames.
+
+    A native subclass avoids Python override lookups on normal buffer writes.
+    The shared counter is updated with the GIL only when overwrite occurs.
+    """
+
+    def __cinit__(self, int max_capacity):
+        self._receive_loss_count = [0]
+
+    cpdef object get_dropped_messages(self):
+        return self._receive_loss_count[0]
+
+
 cdef class WsConnection(WSListener):
     """Abstract Websocket connection class, wrapping PicoWs.
 
@@ -107,6 +121,10 @@ cdef class WsConnection(WSListener):
         self._seq_id = 0
         self._dropped_messages = 0
         self._ringbuffer = ringbuffer
+        self._receive_loss_count = (
+            (<_ReceiveBuffer>ringbuffer)._receive_loss_count
+            if isinstance(ringbuffer, _ReceiveBuffer) else None
+        )
         self._latency_ms = 1000.0
         self._latency_ema = Ema(window=60, is_fast=True)
         self._max_frame_size = self._config.max_frame_size
@@ -435,11 +453,16 @@ cdef class WsConnection(WSListener):
     cdef void _buffer_message(self, bytes payload) except *:
         if self._ringbuffer.is_full():
             self._dropped_messages += 1
-            _logger.warning(
-                "WebSocket %s receive buffer overflow: discarded oldest payload "
-                "(dropped=%d); sequence-dependent consumers must resynchronize",
-                self._config.conn_id, self._dropped_messages,
-            )
+            if self._receive_loss_count is not None:
+                self._receive_loss_count[0] += 1
+            # Report the first loss and powers of two thereafter. Exact counts
+            # remain available without synchronous logging on every overwrite.
+            if (self._dropped_messages & (self._dropped_messages - 1)) == 0:
+                _logger.warning(
+                    "WebSocket %s receive buffer overflow: discarded oldest payload "
+                    "(dropped=%d; warnings sampled); sequence-dependent consumers must resynchronize",
+                    self._config.conn_id, self._dropped_messages,
+                )
         self._ringbuffer.insert(payload)
         self._seq_id += 1
 

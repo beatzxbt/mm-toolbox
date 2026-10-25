@@ -13,13 +13,13 @@ import numpy as np
 from msgspec import Struct
 from msgspec.json import decode as json_decode
 
-from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
 from mm_toolbox.ringbuffer.numeric import NumericRingBuffer, _contains_u64, _insert_u64
 from mm_toolbox.time.time import time_s
 from mm_toolbox.websocket.connection import (
     ConnectionState,
     WsConnection,
     WsConnectionConfig,
+    _ReceiveBuffer,
 )
 
 UINT64_MASK = (1 << 64) - 1
@@ -84,9 +84,7 @@ class WsPool:
         """
         self._config: WsConnectionConfig = config
         self._pool_config: WsPoolConfig = pool_config or WsPoolConfig.default()
-        self._ringbuffer: BytesRingBuffer = BytesRingBuffer(
-            max_capacity=128, only_insert_unique=False
-        )
+        self._ringbuffer = _ReceiveBuffer(128)
         self._hashes: NumericRingBuffer = NumericRingBuffer(
             max_capacity=self._pool_config.hash_capacity,
             dtype=np.uint64,
@@ -393,6 +391,14 @@ class WsPool:
             conn.get_seq_id() for conn in self._conns.values() if conn.is_connected()
         ]
         return max(seq_ids) if seq_ids else 0
+
+    def get_dropped_messages(self) -> int:
+        """Return all shared receive-buffer overwrites over this pool's lifetime.
+
+        Includes startup, evicted and disconnected listeners, before deduplication.
+        Closing or reentering the pool never resets the cumulative count.
+        """
+        return self._ringbuffer.get_dropped_messages()
 
     def close(self) -> None:
         """Shut down the pool, cancel eviction, and close all connections."""

@@ -149,9 +149,22 @@ asyncio.run(main())
   reconnect path can replace a half-open connection.
 - Pool eviction periodically replaces slower connections based on latency.
 - Receive buffers retain the newest 128 messages. Overflow discards the oldest
-  message and logs a warning through `mm_toolbox.websocket.connection`, including
-  the connection ID and cumulative drop count. The connection also exposes
-  get_dropped_messages(). Sequence-dependent market data
-  consumers must treat this as lost feed validity and resynchronize (for example,
-  by fetching a fresh orderbook snapshot). Hash deduplication does not detect
-  exchange sequence gaps or establish continuity.
+  payload. `WsConnection.get_dropped_messages()` counts exact overwrites by that
+  listener; `WsSingle.get_dropped_messages()` and `WsPool.get_dropped_messages()`
+  count exact overwrites throughout the wrapper's lifetime, including startup,
+  failed handshakes, reconnects and retired pool sockets. Close does not reset
+  these counters. Pool counts describe the shared buffer before deduplication;
+  an overwritten redundant copy still counts, even if another copy arrived.
+- Overwrite warnings through `mm_toolbox.websocket.connection` include the
+  listener ID and count, sampled at counts 1, 2, 4, 8, ... to limit logging under
+  overload. Read the counters for exact totals; warning lines are not loss counts.
+- Consumers that require continuity must check loss from the initial zero
+  baseline before applying buffered startup messages and monitor disconnects
+  even when no messages arrive. Hash deduplication and reconnection do not
+  establish exchange sequence continuity. A fresh orderbook snapshot cannot
+  repair already missing trades, candles or moving-average inputs.
+- The standalone market-data examples stop on receive/SHM loss, rejected SHM
+  writes, sequence gaps and disconnects. They disable automatic reconnect and
+  propagate child failure to the parent, which exits nonzero. Restart the whole
+  example to rebuild its state. Their bounded buffers keep overwrite-oldest
+  semantics; they do not promise loss-free throughput.
