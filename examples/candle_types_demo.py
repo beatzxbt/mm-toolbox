@@ -32,6 +32,11 @@ from mm_toolbox.candles import (
 )
 from mm_toolbox.websocket import WsConnectionConfig, WsPool, WsPoolConfig
 
+if __package__:
+    from ._stream_guard import assert_no_receive_loss, feed_messages, monitor_feeds
+else:
+    from _stream_guard import assert_no_receive_loss, feed_messages, monitor_feeds
+
 
 class BinanceTradeMsg(msgspec.Struct):
     """Binance futures trade stream message."""
@@ -187,30 +192,24 @@ async def _consume_trades(
     """
     decoder = msgspec.json.Decoder(type=BinanceTradeMsg)
 
-    async for msg in pool:
+    async for msg in feed_messages(pool, "trades", connections=2):
         if shutdown_event.is_set():
             break
 
-        try:
-            trade_msg = decoder.decode(msg)
-            price, size = float(trade_msg.p), float(trade_msg.q)
-            if not (
-                math.isfinite(price) and price > 0 and math.isfinite(size) and size > 0
-            ):
-                print(
-                    f"Skipping non-execution trade: price={trade_msg.p}, quantity={trade_msg.q}",
-                    file=sys.stderr,
-                )
-                continue
-            trade = Trade(
-                time_ms=trade_msg.T,
-                is_buy=not trade_msg.m,
-                price=price,
-                size=size,
+        trade_msg = decoder.decode(msg)
+        price, size = float(trade_msg.p), float(trade_msg.q)
+        if not (
+            math.isfinite(price) and price > 0 and math.isfinite(size) and size > 0
+        ):
+            print(
+                f"Skipping non-execution trade: price={trade_msg.p}, quantity={trade_msg.q}",
+                file=sys.stderr,
             )
-            aggregator.process_trade(trade)
-        except Exception as e:
-            print(f"Error processing trade: {e}", file=sys.stderr)
+            continue
+        trade = Trade(
+            time_ms=trade_msg.T, is_buy=not trade_msg.m, price=price, size=size
+        )
+        aggregator.process_trade(trade)
 
 
 async def _print_periodic_summary(
@@ -250,7 +249,8 @@ async def _run(duration_s: float | None = None) -> None:
     print(f"Connecting to Binance futures @trade stream for {symbol.upper()}...")
 
     config = WsConnectionConfig.default(
-        wss_url=f"wss://fstream.binance.com/ws/{symbol}@trade"
+        wss_url=f"wss://fstream.binance.com/ws/{symbol}@trade",
+        auto_reconnect=False,
     )
     pool_config = WsPoolConfig(
         num_connections=2,
@@ -263,34 +263,50 @@ async def _run(duration_s: float | None = None) -> None:
     )
 
     aggregator = CandleAggregator()
-    aggregator.start_consumers()
-    trade_task = asyncio.create_task(_consume_trades(pool, aggregator, shutdown_event))
-    summary_task = asyncio.create_task(
-        _print_periodic_summary(aggregator, shutdown_event)
-    )
-    shutdown_task = asyncio.create_task(shutdown_event.wait())
-    tasks = (trade_task, summary_task, shutdown_task)
+    tasks: tuple[asyncio.Task, ...] = ()
 
     try:
         async with pool:
+            aggregator.start_consumers()
+            trade_task = asyncio.create_task(
+                _consume_trades(pool, aggregator, shutdown_event)
+            )
+            summary_task = asyncio.create_task(
+                _print_periodic_summary(aggregator, shutdown_event)
+            )
+            monitor_task = asyncio.create_task(monitor_feeds([(pool, "trades", 2)]))
+            shutdown_task = asyncio.create_task(shutdown_event.wait())
+            tasks = (
+                trade_task,
+                summary_task,
+                monitor_task,
+                shutdown_task,
+                *aggregator._consumer_tasks,
+            )
             print("Connected. Streaming trades and building candles...")
             print("Press Ctrl+C to stop.\n")
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 if task is not shutdown_task:
                     task.result()
+            if not shutdown_event.is_set():
+                raise RuntimeError("A candle consumer stopped unexpectedly")
     finally:
         for task in tasks:
             if not task.done():
                 task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         await aggregator.stop_consumers()
-        aggregator.print_summary()
         if duration_handle is not None:
             duration_handle.cancel()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.remove_signal_handler(sig)
-        print("Shutdown complete.")
+        assert_no_receive_loss(pool, "trades")
+        for result in results:
+            if isinstance(result, Exception):
+                raise result
+    aggregator.print_summary()
+    print("Shutdown complete.")
 
 
 def main() -> None:

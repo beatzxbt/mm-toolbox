@@ -10,12 +10,17 @@ This example demonstrates:
   MasterLogger (master).
 - msgspec encoding/decoding for IPC.
 - Clean shutdown on Ctrl+C.
+
+Snapshots seed the demonstration books; only the latest BBO is maintained live.
+This example does not subscribe to depth deltas or maintain synchronized depth.
+It stops the whole pipeline on transport loss or disconnected continuity.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import math
 import multiprocessing
 import os
 import signal
@@ -43,6 +48,25 @@ from mm_toolbox.orderbook.advanced import (
 from mm_toolbox.rate_limiter import RateLimiter
 from mm_toolbox.ringbuffer.shm import ShmMpscConsumer, ShmMpscProducer
 from mm_toolbox.websocket import WsConnectionConfig, WsSingle
+
+if __package__:
+    from ._stream_guard import (
+        FeedIntegrityError,
+        assert_no_receive_loss,
+        assert_no_transport_loss,
+        consume_batch,
+        forward_message,
+        run_feeds,
+    )
+else:
+    from _stream_guard import (
+        FeedIntegrityError,
+        assert_no_receive_loss,
+        assert_no_transport_loss,
+        consume_batch,
+        forward_message,
+        run_feeds,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -243,12 +267,16 @@ class WorkerProcess:
         )
         self.logger = WorkerLogger(config=logger_config, name=f"Worker-{symbol}")
 
-        self.data_producer = ShmMpscProducer(
-            path=data_path,
-            capacity_bytes=SHM_CAPACITY_BYTES,
-            create=False,
-            unlink_on_close=False,
-        )
+        try:
+            self.data_producer = ShmMpscProducer(
+                path=data_path,
+                capacity_bytes=SHM_CAPACITY_BYTES,
+                create=False,
+                unlink_on_close=False,
+            )
+        except BaseException:
+            self.logger.shutdown()
+            raise
 
         self.encoder = msgspec.json.Encoder()
         self.ws_trade: WsSingle | None = None
@@ -257,37 +285,31 @@ class WorkerProcess:
 
     def _process_trade_message(self, msg: bytes) -> None:
         """Decode a Binance @trade message and push it to the MPSC ring."""
-        try:
-            decoded = msgspec.json.decode(msg, type=dict)
-            update = MarketUpdate(
-                msg_type="trade",
-                event_time=decoded["E"],
-                symbol=decoded["s"],
-                price=float(decoded["p"]),
-                quantity=float(decoded["q"]),
-                trade_time=decoded["T"],
-                is_buyer_maker=decoded["m"],
-            )
-            self.data_producer.insert(self.encoder.encode(update))
-        except Exception as e:
-            self.logger.error(f"Error processing trade: {e}".encode("utf-8"))
+        decoded = msgspec.json.decode(msg, type=dict)
+        update = MarketUpdate(
+            msg_type="trade",
+            event_time=decoded["E"],
+            symbol=decoded["s"],
+            price=float(decoded["p"]),
+            quantity=float(decoded["q"]),
+            trade_time=decoded["T"],
+            is_buyer_maker=decoded["m"],
+        )
+        forward_message(self.data_producer, self.encoder.encode(update), self.symbol)
 
     def _process_bbo_message(self, msg: bytes) -> None:
         """Decode a Binance @bookTicker message and push it to the MPSC ring."""
-        try:
-            decoded = msgspec.json.decode(msg, type=dict)
-            update = MarketUpdate(
-                msg_type="bbo",
-                event_time=decoded["E"],
-                symbol=decoded["s"],
-                best_bid_price=float(decoded["b"]),
-                best_bid_qty=float(decoded["B"]),
-                best_ask_price=float(decoded["a"]),
-                best_ask_qty=float(decoded["A"]),
-            )
-            self.data_producer.insert(self.encoder.encode(update))
-        except Exception as e:
-            self.logger.error(f"Error processing BBO: {e}".encode("utf-8"))
+        decoded = msgspec.json.decode(msg, type=dict)
+        update = MarketUpdate(
+            msg_type="bbo",
+            event_time=decoded["E"],
+            symbol=decoded["s"],
+            best_bid_price=float(decoded["b"]),
+            best_bid_qty=float(decoded["B"]),
+            best_ask_price=float(decoded["a"]),
+            best_ask_qty=float(decoded["A"]),
+        )
+        forward_message(self.data_producer, self.encoder.encode(update), self.symbol)
 
     async def _run_streams(self) -> None:
         """Start WebSocket streams for trades and BBO."""
@@ -295,19 +317,30 @@ class WorkerProcess:
 
         trade_config = WsConnectionConfig.default(
             wss_url=f"wss://fstream.binance.com/ws/{self.symbol.lower()}@trade",
-            auto_reconnect=True,
+            auto_reconnect=False,
         )
         bbo_config = WsConnectionConfig.default(
             wss_url=f"wss://fstream.binance.com/ws/{self.symbol.lower()}@bookTicker",
-            auto_reconnect=True,
+            auto_reconnect=False,
         )
 
-        self.ws_trade = WsSingle(
-            config=trade_config, on_message=self._process_trade_message
-        )
-        self.ws_bbo = WsSingle(config=bbo_config, on_message=self._process_bbo_message)
-
-        await asyncio.gather(self.ws_trade.start(), self.ws_bbo.start())
+        self.ws_trade = WsSingle(config=trade_config)
+        self.ws_bbo = WsSingle(config=bbo_config)
+        try:
+            async with self.ws_trade, self.ws_bbo:
+                await run_feeds(
+                    [
+                        (
+                            self.ws_trade,
+                            f"{self.symbol} trades",
+                            self._process_trade_message,
+                        ),
+                        (self.ws_bbo, f"{self.symbol} BBO", self._process_bbo_message),
+                    ]
+                )
+        finally:
+            assert_no_receive_loss(self.ws_trade, f"{self.symbol} trades")
+            assert_no_receive_loss(self.ws_bbo, f"{self.symbol} BBO")
 
     def run(self) -> None:
         """Run the worker event loop."""
@@ -327,8 +360,11 @@ class WorkerProcess:
             self.ws_trade.close()
         if self.ws_bbo is not None:
             self.ws_bbo.close()
-        self.data_producer.close()
-        self.logger.shutdown()
+        try:
+            assert_no_transport_loss(self.data_producer, self.symbol)
+        finally:
+            self.data_producer.close()
+            self.logger.shutdown()
 
 
 # ---------------------------------------------------------------------------
@@ -370,17 +406,23 @@ class MasterProcess:
         )
 
         # Create the MPSC backing file so workers can attach.
-        self._data_producer = ShmMpscProducer(
-            path=data_path,
-            capacity_bytes=SHM_CAPACITY_BYTES,
-            # The master keeps one producer attached to own the shared file,
-            # so reserve a shard for it in addition to one per worker.
-            num_rings=len(symbols) + 1,
-            create=True,
-            unlink_on_close=True,
-        )
-
-        self.data_consumer = ShmMpscConsumer(path=data_path)
+        try:
+            self._data_producer = ShmMpscProducer(
+                path=data_path,
+                capacity_bytes=SHM_CAPACITY_BYTES,
+                # Reserve the master's creator shard as well as worker shards.
+                num_rings=len(symbols) + 1,
+                create=True,
+                unlink_on_close=True,
+            )
+            try:
+                self.data_consumer = ShmMpscConsumer(path=data_path)
+            except BaseException:
+                self._data_producer.close()
+                raise
+        except BaseException:
+            self.logger.shutdown()
+            raise
 
         self.decoder = msgspec.json.Decoder(type=MarketUpdate)
 
@@ -394,63 +436,61 @@ class MasterProcess:
             )
 
         self._trade_counts: dict[str, int] = {s: 0 for s in symbols}
+        self._bbo_ready: set[str] = set()
         self._shutdown = False
 
     def _load_snapshots(self) -> None:
         """Fetch and apply initial orderbook snapshots via REST."""
         limiter = RateLimiter.per_minute(capacity=1200)
         for symbol in self.symbols:
-            try:
-                payload = fetch_orderbook_snapshot(symbol, limiter)
-                bids_data = payload.get("bids", [])
-                asks_data = payload.get("asks", [])
-
-                bids = OrderbookLevels.from_list(
-                    prices=[float(p) for p, _ in bids_data],
-                    sizes=[float(q) for _, q in bids_data],
-                )
-                asks = OrderbookLevels.from_list(
-                    prices=[float(p) for p, _ in asks_data],
-                    sizes=[float(q) for _, q in asks_data],
-                )
-
-                self.orderbooks[symbol].consume_snapshot(asks=asks, bids=bids)
-                self.logger.info(
-                    f"[{symbol}] Snapshot: {len(bids_data)} bids, "
-                    f"{len(asks_data)} asks".encode("utf-8")
-                )
-            except Exception as e:
-                self.logger.error(
-                    f"[{symbol}] Failed to load snapshot: {e}".encode("utf-8")
-                )
+            payload = fetch_orderbook_snapshot(symbol, limiter)
+            bids_data = payload["bids"]
+            asks_data = payload["asks"]
+            bids = OrderbookLevels.from_list(
+                prices=[float(p) for p, _ in bids_data],
+                sizes=[float(q) for _, q in bids_data],
+            )
+            asks = OrderbookLevels.from_list(
+                prices=[float(p) for p, _ in asks_data],
+                sizes=[float(q) for _, q in asks_data],
+            )
+            self.orderbooks[symbol].consume_snapshot(asks=asks, bids=bids)
+            self.logger.info(
+                f"[{symbol}] Initial snapshot (BBO updates only): {len(bids_data)} bids, "
+                f"{len(asks_data)} asks".encode("utf-8")
+            )
 
     def _handle_bbo(self, update: MarketUpdate) -> None:
         """Apply a BBO update to the relevant orderbook."""
         ob = self.orderbooks.get(update.symbol)
         if ob is None:
-            return
-        try:
-            bid = OrderbookLevel(
-                price=update.best_bid_price,
-                size=update.best_bid_qty,
-                norders=1,
-            )
-            ask = OrderbookLevel(
-                price=update.best_ask_price,
-                size=update.best_ask_qty,
-                norders=1,
-            )
-            ob.consume_bbo(ask=ask, bid=bid)
-        except Exception as e:
-            self.logger.error(f"[{update.symbol}] BBO error: {e}".encode("utf-8"))
+            raise FeedIntegrityError(f"Unknown symbol: {update.symbol}")
+        bid = OrderbookLevel(
+            price=update.best_bid_price, size=update.best_bid_qty, norders=1
+        )
+        ask = OrderbookLevel(
+            price=update.best_ask_price, size=update.best_ask_qty, norders=1
+        )
+        ob.consume_bbo(ask=ask, bid=bid)
+        self._bbo_ready.add(update.symbol)
 
     def _handle_trade(self, update: MarketUpdate) -> None:
         """Log a trade against the current BBO."""
         symbol = update.symbol
+        if not (
+            math.isfinite(update.price)
+            and update.price > 0
+            and math.isfinite(update.quantity)
+            and update.quantity > 0
+        ):
+            self.logger.info(
+                b"Skipping trade with nonpositive or nonfinite price/quantity"
+            )
+            return
         self._trade_counts[symbol] += 1
 
         ob = self.orderbooks.get(symbol)
-        if ob is None:
+        if ob is None or symbol not in self._bbo_ready:
             return
 
         count = self._trade_counts[symbol]
@@ -473,28 +513,26 @@ class MasterProcess:
 
     def _process_message(self, msg_bytes: bytes) -> None:
         """Decode and dispatch a single MPSC message."""
-        try:
-            update = self.decoder.decode(msg_bytes)
-            if update.msg_type == "bbo":
-                self._handle_bbo(update)
-            elif update.msg_type == "trade":
-                self._handle_trade(update)
-        except Exception as e:
-            self.logger.error(f"Error processing message: {e}".encode("utf-8"))
+        update = self.decoder.decode(msg_bytes)
+        if update.msg_type == "bbo":
+            self._handle_bbo(update)
+        elif update.msg_type == "trade":
+            self._handle_trade(update)
+        else:
+            raise FeedIntegrityError(f"Unknown market message: {update.msg_type}")
 
     def run(self) -> None:
         """Run the master consumption loop."""
         self.logger.info("Master process started".encode("utf-8"))
-        self._load_snapshots()
-
         try:
             while True:
-                messages = self.data_consumer.consume_all()
+                messages = consume_batch(self.data_consumer, "market data")
                 if not messages:
                     time.sleep(0.001)
                     continue
 
                 for msg_bytes in messages:
+                    assert_no_transport_loss(self.data_consumer, "market data")
                     self._process_message(msg_bytes)
 
         except KeyboardInterrupt:
@@ -507,9 +545,12 @@ class MasterProcess:
         if self._shutdown:
             return
         self._shutdown = True
-        self.data_consumer.close()
-        self._data_producer.close()
-        self.logger.shutdown()
+        try:
+            assert_no_transport_loss(self.data_consumer, "market data")
+        finally:
+            self.data_consumer.close()
+            self._data_producer.close()
+            self.logger.shutdown()
 
 
 # ---------------------------------------------------------------------------
@@ -573,11 +614,14 @@ def master_entry(
     signal.signal(signal.SIGTERM, _signal_handler)
     signal.signal(signal.SIGINT, _signal_handler)
 
-    # Signal readiness after SHM and snapshots are initialized.
-    startup = StartupEvent(startup_event_path)
-    startup.set()
-
-    master.run()
+    try:
+        # Publish readiness only after every requested snapshot succeeds.
+        master._load_snapshots()
+        startup = StartupEvent(startup_event_path)
+        startup.set()
+        master.run()
+    finally:
+        master.shutdown()
 
 
 # ---------------------------------------------------------------------------
@@ -611,6 +655,7 @@ def _run_pipeline(duration_s: float | None, runtime_dir: str) -> None:
     startup = StartupEvent(startup_event_path)
     workers: list[multiprocessing.Process] = []
     startup_deadline = time.monotonic() + 30.0
+    unexpected_exit = False
     try:
         ready = False
         while time.monotonic() < startup_deadline:
@@ -636,13 +681,16 @@ def _run_pipeline(duration_s: float | None, runtime_dir: str) -> None:
         print("All processes running. Press Ctrl+C to stop...")
         start = time.monotonic()
         while master_proc.is_alive():
+            if any(proc.exitcode is not None for proc in workers):
+                unexpected_exit = True
+                print("A worker exited unexpectedly; stopping the example.")
+                break
             if duration_s is not None and time.monotonic() - start >= duration_s:
                 print(f"Duration limit reached ({duration_s:g}s).")
                 break
-            if any(proc.exitcode not in (None, 0) for proc in workers):
-                print("A worker exited with an error; stopping the example.")
-                break
             time.sleep(0.1)
+        else:
+            unexpected_exit = True
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:
@@ -672,6 +720,8 @@ def _run_pipeline(duration_s: float | None, runtime_dir: str) -> None:
     ]
     if failed:
         raise RuntimeError(f"Example child process failed: {', '.join(failed)}")
+    if unexpected_exit:
+        raise RuntimeError("Example child process exited before shutdown was requested")
 
 
 def main(duration_s: float | None = None) -> None:

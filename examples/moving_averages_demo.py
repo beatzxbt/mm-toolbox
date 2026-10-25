@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import signal
-import sys
 
 import msgspec
 import numpy as np
@@ -27,6 +26,11 @@ from mm_toolbox.moving_average import (
 )
 from mm_toolbox.time.time import time_ms
 from mm_toolbox.websocket import WsConnectionConfig, WsPool, WsPoolConfig
+
+if __package__:
+    from ._stream_guard import assert_no_receive_loss, feed_messages, monitor_feeds
+else:
+    from _stream_guard import assert_no_receive_loss, feed_messages, monitor_feeds
 
 
 class MovingAverageSuite:
@@ -144,16 +148,13 @@ async def _consume_bbo(
         pool: The WsPool connected to the Binance bookTicker stream.
         shutdown_event: Event to signal shutdown.
     """
-    async for msg in pool:
+    async for msg in feed_messages(pool, "BBO", connections=2):
         if shutdown_event.is_set():
             break
-        try:
-            data = msgspec.json.decode(msg, type=dict)
-            bid = float(data["b"])
-            ask = float(data["a"])
-            suite.process_bbo(bid, ask)
-        except (KeyError, ValueError) as e:
-            print(f"Error processing message: {e}", file=sys.stderr)
+        data = msgspec.json.decode(msg, type=dict)
+        bid = float(data["b"])
+        ask = float(data["a"])
+        suite.process_bbo(bid, ask)
 
 
 async def _print_loop(
@@ -225,7 +226,8 @@ async def main(duration_s: float | None = None) -> None:
     )
 
     config = WsConnectionConfig.default(
-        wss_url=f"wss://fstream.binance.com/ws/{symbol.lower()}@bookTicker"
+        wss_url=f"wss://fstream.binance.com/ws/{symbol.lower()}@bookTicker",
+        auto_reconnect=False,
     )
     pool_config = WsPoolConfig(
         num_connections=2,
@@ -237,13 +239,15 @@ async def main(duration_s: float | None = None) -> None:
         pool_config=pool_config,
     )
 
-    bbo_task = asyncio.create_task(_consume_bbo(suite, pool, shutdown_event))
-    print_task = asyncio.create_task(_print_loop(suite, shutdown_event))
-    shutdown_task = asyncio.create_task(shutdown_event.wait())
-    tasks = (bbo_task, print_task, shutdown_task)
+    tasks: tuple[asyncio.Task, ...] = ()
 
     try:
         async with pool:
+            bbo_task = asyncio.create_task(_consume_bbo(suite, pool, shutdown_event))
+            print_task = asyncio.create_task(_print_loop(suite, shutdown_event))
+            monitor_task = asyncio.create_task(monitor_feeds([(pool, "BBO", 2)]))
+            shutdown_task = asyncio.create_task(shutdown_event.wait())
+            tasks = (bbo_task, print_task, monitor_task, shutdown_task)
             print(f"Connected to Binance futures {symbol} @bookTicker")
             print("Press Ctrl+C to stop...")
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -260,6 +264,7 @@ async def main(duration_s: float | None = None) -> None:
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.remove_signal_handler(sig)
         pool.close()
+        assert_no_receive_loss(pool, "BBO")
 
 
 if __name__ == "__main__":
