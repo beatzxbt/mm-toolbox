@@ -5,6 +5,8 @@ using separate processes to avoid thread/core interference.
 
 Usage:
     uv run python benchmarks/websocket/benchmark_local.py
+    uv run python benchmarks/websocket/benchmark_local.py --mode inbound
+    uv run python benchmarks/websocket/benchmark_local.py --mode inbound --allow-loss
 """
 
 from __future__ import annotations
@@ -30,6 +32,13 @@ except ModuleNotFoundError:
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from benchmarks.core import BenchmarkCLI
+
+from benchmarks.websocket.inbound import (
+    InboundBenchmarkConfig,
+    _MAX_LATENCY_SAMPLES,
+    _run_pool_inbound_benchmark,
+    _run_single_inbound_benchmark,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +369,12 @@ def main() -> None:
     cli = BenchmarkCLI("Benchmark local WebSocket performance")
     cli.parser.set_defaults(operations=10_000, warmup=1_000)
     cli.parser.add_argument(
+        "--mode",
+        choices=("outbound", "inbound", "both"),
+        default="outbound",
+        help="Run existing outbound benchmarks, inbound delivery, or both",
+    )
+    cli.parser.add_argument(
         "--message-size",
         type=int,
         default=128,
@@ -371,6 +386,47 @@ def main() -> None:
         default=3,
         help="Number of pool connections (default: 3)",
     )
+    cli.parser.add_argument(
+        "--receive-messages",
+        type=int,
+        default=512,
+        help="Unique inbound messages per scenario; at least 129 for burst coverage",
+    )
+    cli.parser.add_argument(
+        "--receive-warmup",
+        type=int,
+        default=32,
+        help="Drained inbound warmup messages before paced/post-idle scenarios",
+    )
+    cli.parser.add_argument(
+        "--receive-message-size",
+        type=int,
+        default=256,
+        help="Inbound frame size in bytes (default: realistic 256-byte frame)",
+    )
+    cli.parser.add_argument(
+        "--receive-interval-ms",
+        type=float,
+        default=1.0,
+        help="Inter-message interval for the paced inbound scenario",
+    )
+    cli.parser.add_argument(
+        "--receive-idle-ms",
+        type=float,
+        default=20.0,
+        help="Quiet period before the post-idle burst scenario",
+    )
+    cli.parser.add_argument(
+        "--receive-timeout",
+        type=float,
+        default=3.0,
+        help="Finite deadline for connection setup and inbound drain",
+    )
+    cli.parser.add_argument(
+        "--allow-loss",
+        action="store_true",
+        help="Report receive loss without strict no-loss failure",
+    )
 
     args = cli.parse()
 
@@ -381,55 +437,155 @@ def main() -> None:
         pool_connections=args.pool_connections,
     )
 
-    print("=" * 80)
-    print("Local WebSocket Benchmark")
-    print("=" * 80)
-    print(f"Message size: {config.message_size} bytes")
-    print(f"Pool connections: {config.pool_connections}")
-    print(f"Send calls per mode: {config.num_messages:,}")
-    print(f"Warmup send calls per mode: {config.warmup_messages:,}")
-    print("Send latency is the synchronous send_data() call, not network RTT")
-    print()
+    if args.mode in {"outbound", "both"}:
+        print("=" * 80)
+        print("Local WebSocket Benchmark")
+        print("=" * 80)
+        print(f"Message size: {config.message_size} bytes")
+        print(f"Pool connections: {config.pool_connections}")
+        print(f"Send calls per mode: {config.num_messages:,}")
+        print(f"Warmup send calls per mode: {config.warmup_messages:,}")
+        print("Send latency is the synchronous send_data() call, not network RTT")
+        print()
 
-    config_dict = {
-        "server_host": config.server_host,
-        "server_port": config.server_port,
-        "message_size": config.message_size,
-        "pool_connections": config.pool_connections,
-        "num_messages": config.num_messages,
-        "warmup_messages": config.warmup_messages,
-    }
+        config_dict = {
+            "server_host": config.server_host,
+            "server_port": config.server_port,
+            "message_size": config.message_size,
+            "pool_connections": config.pool_connections,
+            "num_messages": config.num_messages,
+            "warmup_messages": config.warmup_messages,
+        }
 
-    # Run benchmarks in separate processes
-    print("Running single-connection benchmark...")
-    single_proc = multiprocessing.Process(
-        target=_run_single_and_print,
-        args=(config_dict,),
-    )
-    single_proc.start()
-    _join_benchmark_process(single_proc, "single-connection")
+        print("Running single-connection benchmark...")
+        single_proc = multiprocessing.Process(
+            target=_run_single_and_print,
+            args=(config_dict,),
+        )
+        single_proc.start()
+        _join_benchmark_process(single_proc, "single-connection")
 
-    print("\nRunning pool benchmark...")
-    pool_proc = multiprocessing.Process(
-        target=_run_pool_and_print,
-        args=(config_dict,),
-    )
-    pool_proc.start()
-    _join_benchmark_process(pool_proc, "pool")
+        print("\nRunning pool benchmark...")
+        pool_proc = multiprocessing.Process(
+            target=_run_pool_and_print,
+            args=(config_dict,),
+        )
+        pool_proc.start()
+        _join_benchmark_process(pool_proc, "pool")
+
+    if args.mode in {"inbound", "both"}:
+        try:
+            inbound_config = InboundBenchmarkConfig(
+                server_host=config.server_host,
+                pool_connections=config.pool_connections,
+                message_size=args.receive_message_size,
+                num_messages=args.receive_messages,
+                warmup_messages=args.receive_warmup,
+                paced_interval_ms=args.receive_interval_ms,
+                idle_interval_ms=args.receive_idle_ms,
+                timeout_s=args.receive_timeout,
+                require_no_loss=not args.allow_loss,
+            )
+        except ValueError as exc:
+            cli.parser.error(str(exc))
+        print("\n" + "=" * 80)
+        print("Inbound WebSocket Delivery Benchmark")
+        print("=" * 80)
+        print(
+            f"Each receiver runs paced, startup-burst, and post-idle-burst; "
+            f"{inbound_config.num_messages:,} unique frames per scenario "
+            f"({inbound_config.message_size} bytes), "
+            f"{inbound_config.pool_connections} pool sockets."
+        )
+        print(
+            "The source runs in a separate process from the receiver. Rate is "
+            "unique app deliveries divided by the interval from first source "
+            "send to last unique app delivery. Latency is per-ID source-send to "
+            "app receipt using the same-host monotonic clock; "
+            f"percentiles use at most {_MAX_LATENCY_SAMPLES:,} reservoir samples "
+            "(all deliveries below the cap)."
+        )
+        print(
+            "Pool wire copies are intentional duplicates; their hash-filter count "
+            "is separate from receive-buffer losses."
+        )
+        print(
+            "No-loss acceptance: "
+            f"{'required' if inbound_config.require_no_loss else 'disabled by --allow-loss'}"
+        )
+        inbound_dict = {
+            "server_host": inbound_config.server_host,
+            "pool_connections": inbound_config.pool_connections,
+            "message_size": inbound_config.message_size,
+            "num_messages": inbound_config.num_messages,
+            "warmup_messages": inbound_config.warmup_messages,
+            "paced_interval_ms": inbound_config.paced_interval_ms,
+            "idle_interval_ms": inbound_config.idle_interval_ms,
+            "timeout_s": inbound_config.timeout_s,
+            "require_no_loss": inbound_config.require_no_loss,
+        }
+        inbound_child_timeout_s = max(
+            60.0,
+            2.0
+            * (
+                inbound_config.num_messages * inbound_config.paced_interval_ms / 1_000
+                + 3 * inbound_config.timeout_s
+                + inbound_config.idle_interval_ms / 1_000
+                + 10
+            ),
+        )
+        print("Running inbound single-connection scenarios...")
+        single_proc = multiprocessing.Process(
+            target=_run_single_inbound_benchmark,
+            args=(inbound_dict,),
+        )
+        single_proc.start()
+        _join_benchmark_process(
+            single_proc, "inbound single-connection", inbound_child_timeout_s
+        )
+
+        print("\nRunning inbound redundant-pool scenarios...")
+        pool_proc = multiprocessing.Process(
+            target=_run_pool_inbound_benchmark,
+            args=(inbound_dict,),
+        )
+        pool_proc.start()
+        _join_benchmark_process(pool_proc, "inbound pool", inbound_child_timeout_s)
 
     print("\n" + "=" * 80)
     print("Benchmark complete")
     print("=" * 80)
 
 
-def _join_benchmark_process(process: multiprocessing.Process, name: str) -> None:
+def _join_benchmark_process(
+    process: multiprocessing.Process,
+    name: str,
+    timeout_s: float = 60.0,
+    cleanup_timeout_s: float = 5.0,
+) -> None:
     """Wait for a child, stop it if it hangs, and propagate child failures."""
-    process.join(timeout=60)
+    process.join(timeout=timeout_s)
     if process.is_alive():
-        process.terminate()
-        process.join(timeout=5)
+        cleanup_deadline = time.monotonic() + cleanup_timeout_s
+        try:
+            process.terminate()
+        except ProcessLookupError:
+            pass
+        process.join(timeout=max(0.0, cleanup_deadline - time.monotonic()))
+        if process.is_alive():
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            process.join(timeout=max(0.0, cleanup_deadline - time.monotonic()))
+        if process.is_alive():
+            raise TimeoutError(
+                f"{name} benchmark child remained alive after terminate and kill"
+            )
         process.close()
-        raise TimeoutError(f"{name} benchmark did not finish within 60 seconds")
+        raise TimeoutError(
+            f"{name} benchmark did not finish within {timeout_s:.1f} seconds"
+        )
     exitcode = process.exitcode
     process.close()
     if exitcode != 0:
