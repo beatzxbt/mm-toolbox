@@ -51,10 +51,10 @@ class WsSingle:
 
         """
         self._config = config
-        self._ringbuffer = _ReceiveBuffer(128)
+        self._ringbuffer = _ReceiveBuffer(config.receive_buffer_capacity)
+        self._ringbuffer.configure(config.receive_buffer_max_bytes)
         self._ws_conn: WsConnection | None = None
         self._closed = False
-        self._stop_event = asyncio.Event()
         self._tasks: set[asyncio.Task] = set()
         self._start_task: asyncio.Task | None = None
         self._reconnect_task: asyncio.Task | None = None
@@ -159,7 +159,7 @@ class WsSingle:
                 await asyncio.sleep(0.1)
                 continue
             if not self._config.auto_reconnect:
-                self._stop_event.set()
+                self._ringbuffer.stop()
                 return
             await asyncio.sleep(delay)
             if self._closed:
@@ -225,7 +225,7 @@ class WsSingle:
         if self._closed:
             return
         self._closed = True
-        self._stop_event.set()
+        self._ringbuffer.stop()
         try:
             current = asyncio.current_task()
         except RuntimeError:
@@ -334,24 +334,7 @@ class WsSingle:
 
     async def __anext__(self) -> bytes:
         """Drain queued bytes, then raise StopAsyncIteration after close."""
-        if len(self._ringbuffer):
-            return self._ringbuffer.consume()
-        if self._stop_event.is_set():
-            raise StopAsyncIteration
-        consume = asyncio.create_task(self._ringbuffer.aconsume())
-        stopped = asyncio.create_task(self._stop_event.wait())
-        try:
-            await asyncio.wait((consume, stopped), return_when=asyncio.FIRST_COMPLETED)
-            if consume.done() and not consume.cancelled():
-                return consume.result()
-            if len(self._ringbuffer):
-                return self._ringbuffer.consume()
-            raise StopAsyncIteration
-        finally:
-            for task in (consume, stopped):
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(consume, stopped, return_exceptions=True)
+        return await self._ringbuffer.aconsume()
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ from mm_toolbox.ringbuffer.bytes cimport BytesRingBuffer
 from mm_toolbox.websocket.connection cimport (
     ConnectionState,
     WsConnection,
+    _ReceiveBuffer,
 )
 
 # Python-level import for the config class (msgspec.Struct, not cdef)
@@ -81,6 +82,77 @@ def expire_ping(WsConnection conn):
     """Arm an expired outstanding ping without sending a real one."""
     from mm_toolbox.time import time_monotonic_ms
     conn._tracker_ping_sent_time_ms = time_monotonic_ms() - 10000.0
+
+
+def pause_client_reads(WsConnection conn):
+    conn._receive_buffer._prepare(2 * conn._receive_buffer._max_capacity)
+
+
+def resume_client_reads(WsConnection conn):
+    conn._receive_buffer._maybe_resume()
+
+
+def ping_sent_time(WsConnection conn):
+    return conn._tracker_ping_sent_time_ms
+
+
+def unfinished_size(WsConnection conn):
+    return conn._unfin_msg_size
+
+
+def test_receive_tail_reserve_and_retired_transport_cleanup():
+    class ReadTransport:
+        def __init__(self):
+            self.paused = self.resumed = 0
+        def pause_reading(self):
+            self.paused += 1
+        def resume_reading(self):
+            self.resumed += 1
+
+    cdef _ReceiveBuffer ring = _ReceiveBuffer(8)
+    ring.configure(8192)
+    first, second = ReadTransport(), ReadTransport()
+    ring._register(first)
+    ring._register(second)
+    ring.insert(b"one")
+    assert not ring.is_reading_paused()
+    # Only one queued message, but six possible already-read frames remain.
+    ring._prepare(12)
+    assert ring.is_reading_paused()
+    assert first.paused == second.paused == 1
+    ring._unregister(first)
+    assert ring.consume() == b"one"
+    assert first.resumed == 0
+    assert second.resumed == 1
+    ring._unregister(second)
+    assert ring._read_transports == []
+
+
+def test_receive_byte_limit_multiple_evictions_and_reference_release():
+    cdef _ReceiveBuffer ring = _ReceiveBuffer(8)
+    ring.configure(10)
+    config = WsConnectionConfig.default("ws://localhost", max_frame_size=10, receive_buffer_max_bytes=10)
+    cdef WsConnection conn = WsConnection(ring, config)
+    for _ in range(3):
+        conn._buffer_message(b"abc")
+    conn._buffer_message(b"12345678")
+    assert ring.get_dropped_messages() == conn.get_dropped_messages() == 3
+    assert ring.get_buffered_bytes() == 8
+    assert ring.consume() == b"12345678"
+    assert ring.get_buffered_bytes() == 0
+    assert all(item == b"" for item in ring._buffer)
+    assert ring.get_dropped_messages() == 3
+
+
+def test_close_unregisters_receive_transport():
+    cdef _ReceiveBuffer ring = _ReceiveBuffer(8)
+    ring.configure(8192)
+    cdef WsConnection conn = WsConnection(ring, WsConnectionConfig.default("ws://localhost"))
+    transport = object()
+    conn._read_transport = transport
+    ring._register(transport)
+    conn.close()
+    assert ring._read_transports == []
 
 
 def test_receive_overflow_count():

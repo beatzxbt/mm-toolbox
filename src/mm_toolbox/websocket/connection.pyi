@@ -10,6 +10,11 @@ from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
 class _ReceiveBuffer(BytesRingBuffer):
     def __init__(self, max_capacity: int) -> None: ...
     def get_dropped_messages(self) -> int: ...
+    def get_buffered_bytes(self) -> int: ...
+    def is_reading_paused(self) -> bool: ...
+    def configure(self, max_bytes: int) -> None: ...
+    def stop(self) -> None: ...
+    def reopen(self) -> None: ...
 
 class ConnectionState(IntEnum):
     DISCONNECTED = 0
@@ -23,6 +28,8 @@ class WsConnectionConfig(msgspec.Struct):
     auto_reconnect: bool
     max_frame_size: int
     latency_ping_interval_ms: int
+    receive_buffer_capacity: int
+    receive_buffer_max_bytes: int
     @classmethod
     def default(
         cls,
@@ -32,6 +39,8 @@ class WsConnectionConfig(msgspec.Struct):
         auto_reconnect: bool | None = None,
         max_frame_size: int | None = None,
         latency_ping_interval_ms: int | None = None,
+        receive_buffer_capacity: int | None = None,
+        receive_buffer_max_bytes: int | None = None,
     ) -> WsConnectionConfig: ...
 
 class WsConnection(WSListener):

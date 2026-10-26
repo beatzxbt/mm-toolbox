@@ -59,11 +59,20 @@ config = WsConnectionConfig.default(
     auto_reconnect=True,
     max_frame_size=1_048_576,
     latency_ping_interval_ms=1000,
+    receive_buffer_capacity=4096,
+    receive_buffer_max_bytes=16 * 1024 * 1024,
 )
 ```
 
 - `max_frame_size`: maximum allowed frame size in bytes (default 1 MB).
 - `latency_ping_interval_ms`: interval between internal latency pings in milliseconds (default 1000).
+- `receive_buffer_capacity`: maximum queued messages in a wrapper, rounded up to
+  a power of two (default 4096; positive 32-bit integer).
+- `receive_buffer_max_bytes`: maximum queued payload bytes in a wrapper (default
+  16 MiB; integer between `max_frame_size` and `sys.maxsize`). A pool shares both
+  limits across all its sockets. Slot references, Python object overhead, the
+  current fragmented message and Picows's parser storage are additional memory.
+  Low-level `WsConnection` callers still supply and own their ring buffer.
 
 ## Quick start
 
@@ -148,16 +157,37 @@ asyncio.run(main())
 - Missing PONGs for three ping intervals disconnect the socket so the configured
   reconnect path can replace a half-open connection.
 - Pool eviction periodically replaces slower connections based on latency.
-- Receive buffers retain the newest 128 messages. Overflow discards the oldest
-  payload. `WsConnection.get_dropped_messages()` counts exact overwrites by that
+- Wrapper receive buffers retain the newest messages within both configured
+  limits. Overload discards the oldest payloads; one incoming message may evict
+  several older messages to fit the byte limit. Consumed slots release their
+  payload references. General-purpose ringbuffer overwrite behavior is unchanged.
+- Wrapper sockets pause reading under queue pressure and resume once both count
+  and payload bytes drain to one quarter of their bounds. The high watermarks
+  are three quarters of the bounds (byte watermark rounded up). All pool sockets
+  share this flow control, including sockets that finish opening while paused.
+  Retired sockets unregister from it.
+- Picows delivers all complete frames in an already-read parser batch
+  synchronously. Pausing cannot interrupt that batch. The pause decision reserves
+  its remaining bytes and a conservative frame count derived from `tail_size`
+  before later socket reads are allowed. This absorbs ordinary bursts and startup
+  delays; a batch exceeding the finite queue bounds can still overwrite data.
+  An indefinitely stalled application can also trigger the peer's heartbeat
+  timeout. Our latency probes suspend while reading is deliberately paused, so
+  unread PONGs do not cause a false local timeout.
+- Readers await one readiness event directly; inserts and close wake it without
+  creating per-message tasks or polling. A pending single-client reader can drain
+  a payload queued just before close. Pool close clears its queue; pending readers
+  from an old pool session cannot consume data after reentry.
+- `WsConnection.get_dropped_messages()` counts exact overwrites by that
   listener; `WsSingle.get_dropped_messages()` and `WsPool.get_dropped_messages()`
   count exact overwrites throughout the wrapper's lifetime, including startup,
   failed handshakes, reconnects and retired pool sockets. Close does not reset
   these counters. Pool counts describe the shared buffer before deduplication;
   an overwritten redundant copy still counts, even if another copy arrived.
 - Overwrite warnings through `mm_toolbox.websocket.connection` include the
-  listener ID and count, sampled at counts 1, 2, 4, 8, ... to limit logging under
-  overload. Read the counters for exact totals; warning lines are not loss counts.
+  listener ID and count, sampled at the first loss and power-of-two thresholds
+  thereafter. A multi-payload eviction can cross a threshold in one insert.
+  Read the counters for exact totals; warning lines are not loss counts.
 - Consumers that require continuity must check loss from the initial zero
   baseline before applying buffered startup messages and monitor disconnects
   even when no messages arrive. Hash deduplication and reconnection do not

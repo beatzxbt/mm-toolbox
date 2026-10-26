@@ -8,9 +8,54 @@ This ensures user-supplied limits are respected by the transport layer.
 from __future__ import annotations
 
 import pytest
+import sys
 
 from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
 from mm_toolbox.websocket.connection import WsConnection, WsConnectionConfig
+from mm_toolbox.websocket import WsSingle
+
+
+def test_default_receive_limits_are_bounded_and_configurable():
+    config = WsConnectionConfig.default("ws://localhost")
+    assert config.receive_buffer_capacity == 4096
+    assert config.receive_buffer_max_bytes == 16 * 1024 * 1024
+    custom = WsConnectionConfig.default(
+        "ws://localhost",
+        receive_buffer_capacity=512,
+        receive_buffer_max_bytes=2 * 1024 * 1024,
+    )
+    assert custom.receive_buffer_capacity == 512
+    assert custom.receive_buffer_max_bytes == 2 * 1024 * 1024
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"receive_buffer_capacity": 0},
+        {"receive_buffer_capacity": -1},
+        {"receive_buffer_capacity": 1.5},
+        {"receive_buffer_capacity": 2**31},
+        {"receive_buffer_max_bytes": 0},
+        {"receive_buffer_max_bytes": 1024},
+        {"receive_buffer_max_bytes": sys.maxsize + 1},
+    ],
+)
+def test_invalid_receive_limits_are_rejected(options):
+    with pytest.raises(ValueError, match="receive_buffer"):
+        WsConnectionConfig.default("ws://localhost", **options)
+
+
+def test_huge_valid_byte_budget_does_not_overflow_watermarks():
+    config = WsConnectionConfig.default(
+        "ws://localhost", receive_buffer_max_bytes=sys.maxsize
+    )
+    client = WsSingle(config)
+    try:
+        client._ringbuffer.insert(b"small")
+        assert not client._ringbuffer.is_reading_paused()
+        assert client._ringbuffer.consume() == b"small"
+    finally:
+        client.close()
 
 
 class TestWsConnectionConfigForwarding:

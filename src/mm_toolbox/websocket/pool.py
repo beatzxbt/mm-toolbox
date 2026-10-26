@@ -84,7 +84,8 @@ class WsPool:
         """
         self._config: WsConnectionConfig = config
         self._pool_config: WsPoolConfig = pool_config or WsPoolConfig.default()
-        self._ringbuffer = _ReceiveBuffer(128)
+        self._ringbuffer = _ReceiveBuffer(config.receive_buffer_capacity)
+        self._ringbuffer.configure(config.receive_buffer_max_bytes)
         self._hashes: NumericRingBuffer = NumericRingBuffer(
             max_capacity=self._pool_config.hash_capacity,
             dtype=np.uint64,
@@ -274,6 +275,8 @@ class WsPool:
             auto_reconnect=self._config.auto_reconnect,
             max_frame_size=self._config.max_frame_size,
             latency_ping_interval_ms=self._config.latency_ping_interval_ms,
+            receive_buffer_capacity=self._config.receive_buffer_capacity,
+            receive_buffer_max_bytes=self._config.receive_buffer_max_bytes,
         )
         conn = await WsConnection.new(ringbuffer=self._ringbuffer, config=config)
         if (
@@ -419,6 +422,7 @@ class WsPool:
         conns_snapshot = list(self._conns.values())
         self._conns.clear()
         self._fast_conn = None
+        self._ringbuffer.stop()
         self._ringbuffer.clear()
         self._hashes.clear()
         for conn in conns_snapshot:
@@ -430,6 +434,7 @@ class WsPool:
             return self
         self._loop = asyncio.get_running_loop()
         self._should_stop = False
+        self._ringbuffer.reopen()
         self._generation += 1
         self._pool_state = ConnectionState.CONNECTING
         tasks = [
@@ -481,12 +486,7 @@ class WsPool:
     async def __anext__(self) -> bytes:
         """Returns the next hash-filtered message from the pool ringbuffer."""
         while True:
-            try:
-                msg = await asyncio.wait_for(self._ringbuffer.aconsume(), timeout=1.0)
-            except asyncio.TimeoutError:
-                if self._should_stop:
-                    raise StopAsyncIteration
-                continue
+            msg = await self._ringbuffer.aconsume()
             if self._is_seen_hash(msg):
                 continue
             return msg
