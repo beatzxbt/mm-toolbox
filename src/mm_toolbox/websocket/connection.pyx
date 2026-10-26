@@ -63,9 +63,9 @@ class WsConnectionConfig(Struct):
                 "Invalid latency_ping_interval_ms; expected >0 but got "
                 f"{self.latency_ping_interval_ms}"
             )
-        if not isinstance(self.receive_buffer_capacity, int) or not 0 < self.receive_buffer_capacity <= 0x7FFFFFFF:
+        if isinstance(self.receive_buffer_capacity, bool) or not isinstance(self.receive_buffer_capacity, int) or not 0 < self.receive_buffer_capacity <= 0x7FFFFFFF:
             raise ValueError("receive_buffer_capacity must be a positive 32-bit integer")
-        if not isinstance(self.receive_buffer_max_bytes, int) or not self.max_frame_size <= self.receive_buffer_max_bytes <= sys.maxsize:
+        if isinstance(self.receive_buffer_max_bytes, bool) or not isinstance(self.receive_buffer_max_bytes, int) or not self.max_frame_size <= self.receive_buffer_max_bytes <= sys.maxsize:
             raise ValueError("receive_buffer_max_bytes must be an integer between max_frame_size and sys.maxsize")
     
     @classmethod
@@ -695,6 +695,11 @@ cdef class WsConnection(WSListener):
                 ws_listener_factory=listener_factory,
                 url=config.wss_url,
                 max_frame_size=config.max_frame_size,
+                # Picows auto-selects optional aiofastnet. Its TLS fallback
+                # engine cannot handle the buffer_updated(0) scheduled by
+                # resume_reading(), so use the supported asyncio transport
+                # consistently, including redirects that introduce TLS.
+                use_aiofastnet=False,
             )
             if not wsl.is_connected():
                 raise RuntimeError("WebSocket disconnected during connection establishment")

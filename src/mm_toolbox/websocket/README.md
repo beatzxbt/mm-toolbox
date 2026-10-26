@@ -3,6 +3,12 @@
 WebSocket connection management built on PicoWs with byte ring buffers and
 latency tracking.
 
+Connections explicitly use the event loop's standard asyncio TCP/TLS transport.
+Picows's optional aiofastnet backend is not auto-selected: its locked TLS fallback
+engine can raise callback errors when paused reads resume. Backend selection does
+not retry a connection or replay writes. Secure connections retain Picows's normal
+certificate and hostname verification defaults.
+
 ## Core components
 
 - `WsConnection`: low-level connection wrapper with ping/pong latency tracking.
