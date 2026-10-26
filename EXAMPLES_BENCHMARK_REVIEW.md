@@ -62,6 +62,21 @@ Evidence is in `/tmp/mm-heartbeat-final-{source314,coverage314,wheel315}-tests.l
 and `/tmp/mm-heartbeat-final-dist315/`. Live acceptance and the exact-head
 cross-platform matrix results are recorded in [draft PR #31](https://github.com/beatzxbt/mm-toolbox/pull/31).
 
+The final installed Python 3.15 wheel also passed live acceptance: the MPSC
+pipeline ran for **600 seconds**, the stream demo for **60 seconds**, and the
+candle and moving-average demos for **30 seconds each**. All four exited 0,
+with no receive/SHM loss, heartbeat errors, callback exceptions or crashes.
+The candle demo reported two filtered non-execution trades; the other runs
+had empty stderr. A previous attempt included a recorded 279-second clamshell
+suspension and is excluded from acceptance. The successful rerun kept the
+machine awake without changing heartbeat deadlines. Evidence:
+`/tmp/mm-heartbeat-awake-live315/runs.json` and its per-example logs.
+
+The first platform matrix exposed an assertion portability defect: older
+OpenSSL spells its self-signed-certificate error differently. Certificate
+rejection tests now assert the verification code, preserving both untrusted
+issuer and hostname rejection without depending on message punctuation.
+
 Before the heartbeat correction, at `52d158f`, source Python 3.14 and installed Python 3.15 wheel suites each
 passed **1,804 tests, eight skipped**; Cython-aware coverage was **85.55%**
 against the unchanged 85% gate. These checks precede the final heartbeat

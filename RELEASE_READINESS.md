@@ -27,6 +27,11 @@ distribution, metadata, lint/format and source type checks passed. The draft
 PR records the exact-head Python 3.12–3.15/platform wheel matrix and live
 acceptance results.
 
+Live acceptance against the final installed Python 3.15 wheel passed the
+600-second MPSC pipeline, 60-second stream and both 30-second analytics demos.
+All exited 0 without receive loss, heartbeat errors or callback exceptions.
+An earlier run interrupted by recorded clamshell suspension is excluded.
+
 [The example and benchmark report](EXAMPLES_BENCHMARK_REVIEW.md) records the
 reproductions, measured workloads, limits and evidence;
 [the test-structure report](TEST_STRUCTURE_REVIEW.md) records the preserved

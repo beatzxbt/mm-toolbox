@@ -153,9 +153,8 @@ async def test_tls_certificate_failure_propagates_without_backend_retry(
         client = WsSingle(WsConnectionConfig.default(uri))
         with pytest.raises(ssl.SSLCertVerificationError) as rejected:
             await client.__aenter__()
-        if trusted_wrong_hostname:
-            assert "hostname mismatch" in rejected.value.verify_message.lower()
-        else:
-            assert "self-signed" in rejected.value.verify_message.lower()
+        # OpenSSL's message spelling varies by version; its verification codes
+        # identify hostname mismatch (62) and an untrusted self-signed leaf (18).
+        assert rejected.value.verify_code == (62 if trusted_wrong_hostname else 18)
         assert client.get_connection_count() == 0
     assert attempts == [False]
