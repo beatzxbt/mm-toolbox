@@ -245,7 +245,9 @@ async def test_missing_subscription_ack_times_out_and_cancels_group():
 
 @pytest.mark.asyncio
 async def test_pool_late_duplicate_ack_is_suppressed_after_hash_history_rolls():
-    hash_capacity = 16_384
+    # Exercise the same eviction boundary with a small history. Scanning the
+    # default 16k history for every message is quadratic under Cython tracing.
+    hash_capacity = 256
     market_count = hash_capacity + 1
     connection_index = 0
     release_slow_ack = asyncio.Event()
@@ -259,7 +261,7 @@ async def test_pool_late_duplicate_ack_is_suppressed_after_hash_history_rolls():
         connection_index += 1
         request = json.loads(await websocket.recv())
         assert request["method"] == "SUBSCRIBE"
-        ack = json.dumps({"result": None, "id": request["id"]}, separators=(",", ":"))
+        ack = f'{{ "result" : null, "id" : {request["id"]} }}'
         if index == 0:
             await websocket.send(ack)
             for sequence in range(market_count):
@@ -268,7 +270,8 @@ async def test_pool_late_duplicate_ack_is_suppressed_after_hash_history_rolls():
                     await asyncio.sleep(0)
         else:
             await release_slow_ack.wait()
-            await websocket.send(f'{{ "result" : null, "id" : {request["id"]} }}')
+            # Identical bytes would be deduplicated before the history rolls.
+            await websocket.send(ack)
             await websocket.send(json.dumps({"event": "after-late-ack"}))
         await websocket.wait_closed()
 

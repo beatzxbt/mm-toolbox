@@ -14,7 +14,9 @@ from mm_toolbox.websocket import WsConnectionConfig, WsPool, WsPoolConfig, WsSin
 async def test_receive_bursts_are_delivered_without_overwrite(
     connections, during_startup
 ):
-    total = 8192 if during_startup else 2048
+    # Keep startup pressure at twice its configured queue capacity without
+    # making the pool's traced hash scans dominate this flow-control check.
+    total = 1024 if during_startup else 2048
     sent = 0
     all_sent = asyncio.Event()
 
@@ -33,7 +35,11 @@ async def test_receive_bursts_are_delivered_without_overwrite(
 
     async with websockets.serve(source, "127.0.0.1", 0, compression=None) as server:
         uri = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
-        config = WsConnectionConfig.default(uri, auto_reconnect=False)
+        config = WsConnectionConfig.default(
+            uri,
+            auto_reconnect=False,
+            receive_buffer_capacity=512 if during_startup else 4096,
+        )
         client = (
             WsSingle(config)
             if connections == 1
