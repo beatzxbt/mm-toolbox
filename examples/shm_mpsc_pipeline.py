@@ -51,6 +51,7 @@ from mm_toolbox.websocket import WsConnectionConfig, WsSingle
 
 if __package__:
     from ._stream_guard import (
+        FeedSubscription,
         FeedIntegrityError,
         assert_no_receive_loss,
         assert_no_transport_loss,
@@ -60,6 +61,7 @@ if __package__:
     )
 else:
     from _stream_guard import (
+        FeedSubscription,
         FeedIntegrityError,
         assert_no_receive_loss,
         assert_no_transport_loss,
@@ -315,12 +317,15 @@ class WorkerProcess:
         """Start WebSocket streams for trades and BBO."""
         self.logger.info(f"Starting streams for {self.symbol}".encode("utf-8"))
 
+        # Preserve the existing raw @trade event semantics. The
+        # current Futures route map lists @aggTrade under /market but omits
+        # raw @trade; a read-only live probe confirmed raw @trade on /public.
         trade_config = WsConnectionConfig.default(
-            wss_url=f"wss://fstream.binance.com/ws/{self.symbol.lower()}@trade",
+            wss_url="wss://fstream.binance.com/public/ws",
             auto_reconnect=False,
         )
         bbo_config = WsConnectionConfig.default(
-            wss_url=f"wss://fstream.binance.com/ws/{self.symbol.lower()}@bookTicker",
+            wss_url="wss://fstream.binance.com/public/ws",
             auto_reconnect=False,
         )
 
@@ -336,7 +341,11 @@ class WorkerProcess:
                             self._process_trade_message,
                         ),
                         (self.ws_bbo, f"{self.symbol} BBO", self._process_bbo_message),
-                    ]
+                    ],
+                    subscriptions=[
+                        FeedSubscription((f"{self.symbol.lower()}@trade",), 1),
+                        FeedSubscription((f"{self.symbol.lower()}@bookTicker",), 2),
+                    ],
                 )
         finally:
             assert_no_receive_loss(self.ws_trade, f"{self.symbol} trades")

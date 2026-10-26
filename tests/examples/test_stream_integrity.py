@@ -1,6 +1,7 @@
 """Examples stop before applying data whose continuity is no longer known."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import msgspec
@@ -42,6 +43,12 @@ class FakeFeed:
 
     def __aiter__(self):
         return self
+
+    def send_data(self, message, only_fastest=True):
+        request = json.loads(message)
+        self.queue.put_nowait(
+            json.dumps({"result": None, "id": request["id"]}).encode()
+        )
 
     async def __anext__(self):
         self.waiting.set()
@@ -247,15 +254,22 @@ async def test_binance_full_startup_checks_loss_before_forwarding_ready_or_marke
 
         async def __aenter__(self):
             opened.append(self)
-            if startup_loss and "@depth" in self.name:
+            if startup_loss and len(opened) == 1:
                 self.dropped = 1
             return self
 
         async def __aexit__(self, *args):
             closed.append(self)
 
-    async def stop_after_startup(feeds):
+    async def stop_after_startup(feeds, *, on_ready, **kwargs):
         assert len(opened) == 3
+        if startup_loss:
+            from examples._stream_guard import assert_feed_connected
+
+            with pytest.raises(FeedIntegrityError):
+                assert_feed_connected(opened[0], "depth")
+            raise FeedIntegrityError("injected startup loss")
+        on_ready()
         assert [msgspec.json.decode(message)["msg_type"] for message in sent] == [
             "streams_ready"
         ]

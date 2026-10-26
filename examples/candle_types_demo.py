@@ -33,9 +33,19 @@ from mm_toolbox.candles import (
 from mm_toolbox.websocket import WsConnectionConfig, WsPool, WsPoolConfig
 
 if __package__:
-    from ._stream_guard import assert_no_receive_loss, feed_messages, monitor_feeds
+    from ._stream_guard import (
+        FeedSubscription,
+        assert_no_receive_loss,
+        feed_messages,
+        run_feeds,
+    )
 else:
-    from _stream_guard import assert_no_receive_loss, feed_messages, monitor_feeds
+    from _stream_guard import (
+        FeedSubscription,
+        assert_no_receive_loss,
+        feed_messages,
+        run_feeds,
+    )
 
 
 class BinanceTradeMsg(msgspec.Struct):
@@ -191,30 +201,35 @@ async def _consume_trades(
         shutdown_event: Event to signal graceful shutdown.
     """
     decoder = msgspec.json.Decoder(type=BinanceTradeMsg)
-
     async for msg in feed_messages(pool, "trades", connections=2):
         if shutdown_event.is_set():
             break
+        _process_trade_message(msg, aggregator, decoder)
 
-        trade_msg = decoder.decode(msg)
-        price, size = float(trade_msg.p), float(trade_msg.q)
-        if not (
-            math.isfinite(price) and price > 0 and math.isfinite(size) and size > 0
-        ):
-            print(
-                f"Skipping non-execution trade: price={trade_msg.p}, quantity={trade_msg.q}",
-                file=sys.stderr,
-            )
-            continue
-        trade = Trade(
-            time_ms=trade_msg.T, is_buy=not trade_msg.m, price=price, size=size
+
+def _process_trade_message(
+    message: bytes,
+    aggregator: CandleAggregator,
+    decoder: msgspec.json.Decoder,
+) -> None:
+    """Apply one raw execution event to every candle builder."""
+    trade_msg = decoder.decode(message)
+    price, size = float(trade_msg.p), float(trade_msg.q)
+    if not (math.isfinite(price) and price > 0 and math.isfinite(size) and size > 0):
+        print(
+            f"Skipping non-execution trade: price={trade_msg.p}, quantity={trade_msg.q}",
+            file=sys.stderr,
         )
-        aggregator.process_trade(trade)
+        return
+    aggregator.process_trade(
+        Trade(time_ms=trade_msg.T, is_buy=not trade_msg.m, price=price, size=size)
+    )
 
 
 async def _print_periodic_summary(
     aggregator: CandleAggregator,
     shutdown_event: asyncio.Event,
+    ready_event: asyncio.Event,
 ) -> None:
     """Print a summary every 30 seconds.
 
@@ -222,6 +237,7 @@ async def _print_periodic_summary(
         aggregator: The candle aggregator to summarize.
         shutdown_event: Event to signal graceful shutdown.
     """
+    await ready_event.wait()
     while not shutdown_event.is_set():
         try:
             await asyncio.wait_for(shutdown_event.wait(), timeout=30.0)
@@ -249,7 +265,11 @@ async def _run(duration_s: float | None = None) -> None:
     print(f"Connecting to Binance futures @trade stream for {symbol.upper()}...")
 
     config = WsConnectionConfig.default(
-        wss_url=f"wss://fstream.binance.com/ws/{symbol}@trade",
+        # Current Futures routing docs classify @aggTrade under /market but do
+        # not list raw @trade. A read-only live probe confirmed raw @trade data
+        # on /public; preserve the existing raw-trade semantics because
+        # TickCandles counts accepted stream events.
+        wss_url="wss://fstream.binance.com/public/ws",
         auto_reconnect=False,
     )
     pool_config = WsPoolConfig(
@@ -264,27 +284,38 @@ async def _run(duration_s: float | None = None) -> None:
 
     aggregator = CandleAggregator()
     tasks: tuple[asyncio.Task, ...] = ()
+    ready_event = asyncio.Event()
+    decoder = msgspec.json.Decoder(type=BinanceTradeMsg)
+
+    def process_trade(message: bytes) -> None:
+        _process_trade_message(message, aggregator, decoder)
+
+    def publish_ready() -> None:
+        print("Connected. Streaming trades and building candles...")
+        print("Press Ctrl+C to stop.\n")
 
     try:
         async with pool:
             aggregator.start_consumers()
             trade_task = asyncio.create_task(
-                _consume_trades(pool, aggregator, shutdown_event)
+                run_feeds(
+                    [(pool, "trades", process_trade)],
+                    connection_counts=[2],
+                    subscriptions=[FeedSubscription((f"{symbol}@trade",), 1)],
+                    on_ready=publish_ready,
+                    ready_event=ready_event,
+                )
             )
             summary_task = asyncio.create_task(
-                _print_periodic_summary(aggregator, shutdown_event)
+                _print_periodic_summary(aggregator, shutdown_event, ready_event)
             )
-            monitor_task = asyncio.create_task(monitor_feeds([(pool, "trades", 2)]))
             shutdown_task = asyncio.create_task(shutdown_event.wait())
             tasks = (
                 trade_task,
                 summary_task,
-                monitor_task,
                 shutdown_task,
                 *aggregator._consumer_tasks,
             )
-            print("Connected. Streaming trades and building candles...")
-            print("Press Ctrl+C to stop.\n")
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 if task is not shutdown_task:

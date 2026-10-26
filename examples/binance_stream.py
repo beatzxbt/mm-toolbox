@@ -49,8 +49,8 @@ from mm_toolbox.websocket import WsConnectionConfig, WsSingle
 
 if __package__:
     from ._stream_guard import (
+        FeedSubscription,
         FeedIntegrityError,
-        assert_feed_connected,
         assert_no_receive_loss,
         assert_no_transport_loss,
         consume_batch,
@@ -59,8 +59,8 @@ if __package__:
     )
 else:
     from _stream_guard import (
+        FeedSubscription,
         FeedIntegrityError,
-        assert_feed_connected,
         assert_no_receive_loss,
         assert_no_transport_loss,
         consume_batch,
@@ -258,21 +258,24 @@ class BinanceStreamProcessor:
 
         # BBO stream
         bbo_config = WsConnectionConfig.default(
-            wss_url=f"wss://fstream.binance.com/ws/{self.symbol.lower()}@bookTicker",
+            wss_url="wss://fstream.binance.com/public/ws",
             auto_reconnect=False,
         )
         self.bbo_stream = WsSingle(config=bbo_config)
 
-        # Trade stream
+        # The current Futures route map places bookTicker and depth on
+        # /public. It documents @aggTrade under /market but omits raw @trade;
+        # a read-only live probe confirmed raw @trade data on /public. Keep the
+        # raw stream here because downstream trade counts depend on its events.
         trade_config = WsConnectionConfig.default(
-            wss_url=f"wss://fstream.binance.com/ws/{self.symbol.lower()}@trade",
+            wss_url="wss://fstream.binance.com/public/ws",
             auto_reconnect=False,
         )
         self.trade_stream = WsSingle(config=trade_config)
 
         # Depth stream
         depth_config = WsConnectionConfig.default(
-            wss_url=f"wss://fstream.binance.com/ws/{self.symbol.lower()}@depth@100ms",
+            wss_url="wss://fstream.binance.com/public/ws",
             auto_reconnect=False,
         )
         self.depth_stream = WsSingle(config=depth_config)
@@ -290,23 +293,32 @@ class BinanceStreamProcessor:
             (depth_stream, "depth", self._process_depth_message),
         ]
         try:
-            # Open depth first, buffering before the processor requests its
-            # snapshot. No market state is updated before every feed is live
-            # and its cumulative loss count is checked from zero.
+            # Open every idle transport first. The shared runner then starts
+            # readers before sending subscriptions and waits for each logical
+            # feed's successful ACK before publishing readiness or data.
             async with depth_stream, trade_stream, bbo_stream:
-                for stream, name, _ in feeds:
-                    assert_feed_connected(stream, name)
-                forward_message(
-                    self.data_producer,
-                    self.encoder.encode(StreamMessage("streams_ready", {})),
-                    "data",
-                )
-                self.logger.info(
-                    "Streams connected, processing BBO + trades + depth...".encode(
-                        "utf-8"
+
+                def publish_ready() -> None:
+                    forward_message(
+                        self.data_producer,
+                        self.encoder.encode(StreamMessage("streams_ready", {})),
+                        "data",
                     )
+                    self.logger.info(
+                        "Streams connected, processing BBO + trades + depth...".encode(
+                            "utf-8"
+                        )
+                    )
+
+                await run_feeds(
+                    feeds,
+                    subscriptions=[
+                        FeedSubscription((f"{self.symbol.lower()}@bookTicker",), 1),
+                        FeedSubscription((f"{self.symbol.lower()}@trade",), 2),
+                        FeedSubscription((f"{self.symbol.lower()}@depth@100ms",), 3),
+                    ],
+                    on_ready=publish_ready,
                 )
-                await run_feeds(feeds)
         except KeyboardInterrupt:
             self.logger.info("Stream interrupted, shutting down...".encode("utf-8"))
         finally:
