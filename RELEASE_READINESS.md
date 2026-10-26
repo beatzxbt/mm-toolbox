@@ -1,35 +1,42 @@
 # Public release readiness and hardening
 
-## Current review candidate — 2026-10-25
+## Current review candidate — 2026-10-26
 
 [Draft PR #31](https://github.com/beatzxbt/mm-toolbox/pull/31) contains the
-approved example/benchmark repairs, component test organization and remaining
-receive-loss/logging accounting fixes. Exact WebSocket loss totals survive
-startup, reconnect and close; overload diagnostics are sampled. Market-data
-examples now stop on unproven continuity and propagate processing/child
-failure. Worker transport statistics include shutdown, and the logging
-benchmark rejects lifecycle errors and unexplained missing deliveries.
+approved example/benchmark repairs, component test organization and receive
+reliability fixes. The original live loss was reproduced with a minimal
+consumer: batched delivery could overflow the fixed 128-message queue before
+its consumer ran. Wrapper queues now have configurable message/byte bounds,
+shared backpressure and direct reader wakeups. Examples subscribe only after
+all transports open and require acknowledged group startup before publishing
+state.
 
-Final local clean-source and installed-wheel suites each passed **1,740 tests,
-eight skipped**, on Python 3.14.4 and 3.15.1 respectively, requiring all seven
-native test extensions. Cython-aware coverage is **85.55%** against the
-unchanged 85% gate; the standalone C orderbook suite passed **33/33**. Isolated
-distributions, metadata, lint/format and source type checks passed. The draft
-PR carries the Python 3.12–3.15 and cross-platform wheel matrix results.
+Longer checks also exposed an optional aiofastnet TLS-resume defect and two
+false heartbeat timeout orderings. Connections now explicitly select verified
+standard asyncio transports. Namespaced PING/PONG matching, cumulative paused-
+time accounting and an I/O poll before deadline confirmation preserve the
+existing readable-time timeout while preventing false closures and stale
+acknowledgements. Bursty traffic still updates observed latency samples.
 
-All four bounded live examples exited 0. A longer MPSC run detected real
-receive overload, exited nonzero and cleaned up as designed. This machine
-has therefore not established loss-free operation for that workload.
+Final clean-source, Cython-aware coverage and installed-wheel suites each
+passed **1,814 tests, eight skipped**, requiring all seven native test
+extensions. Source/coverage used Python 3.14.4; the wheel built from the sdist
+was tested outside the checkout on Python 3.15.1. Coverage is **85.75%** against
+the unchanged 85% gate. The standalone C orderbook suite passed **33/33**;
+distribution, metadata, lint/format and source type checks passed. The draft
+PR records the exact-head Python 3.12–3.15/platform wheel matrix and live
+acceptance results.
+
 [The example and benchmark report](EXAMPLES_BENCHMARK_REVIEW.md) records the
-limits, prior performance measurements and final evidence;
+reproductions, measured workloads, limits and evidence;
 [the test-structure report](TEST_STRUCTURE_REVIEW.md) records the preserved
-scenarios and their destinations. Native layouts changed, requiring a clean
-library and dependent-extension rebuild.
+scenarios and their destinations. Native layouts changed: rebuild the library
+and dependent Cython extensions together. The public client protocol, general
+ringbuffer overwrite policy and lock-free SHM core are unchanged.
 
-Publication remains held for user review. The existing b9/b10 tags remain
-unchanged and unpublished; the fixes are untagged. Select and validate the
-release revision after review. Earlier sections below are dated historical
-evidence, not the current candidate's results.
+Publication remains held for user review. Existing b9/b10 tags remain unchanged
+and unpublished; the fixes are untagged. Choose and validate the release
+revision after review. Earlier sections below are dated historical evidence.
 
 ## Initial hardening status — 2026-10-19
 

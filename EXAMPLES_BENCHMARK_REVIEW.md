@@ -1,4 +1,4 @@
-# Examples, benchmarks and release review — 2026-10-25
+# Examples, benchmarks and release review — 2026-10-26
 
 Publication remains on hold in [draft PR #31](https://github.com/beatzxbt/mm-toolbox/pull/31).
 Two GPT-6 Luna max agents exercised the examples and benchmarks; a GPT-6 Sol
@@ -19,7 +19,97 @@ Those measurements predate the current reliability changes; they are retained
 as audit evidence, not presented as new performance measurements of this PR's
 final revision.
 
-## Approved reliability and test follow-up
+## Receive-burst follow-up — 2026-10-26
+
+The live receive loss was an unresolved release defect. A minimal consumer
+that only retained bytes, without JSON decoding or SHM writes, lost **1,016
+of 2,048 messages** with the old 128-slot buffer when 256-message bursts
+arrived every 50 ms. The corrected wrapper delivered **2,048/2,048** with
+zero loss in that reproducer.
+
+- Wrapper buffers now default to **4,096 messages and 16 MiB of queued payloads**,
+  configurable through `WsConnectionConfig`. Consumed slots release payload
+  references. Shared pool backpressure considers bytes already held in the
+  synchronous Picows parser; pausing a socket cannot interrupt that batch.
+- Readers await one readiness event directly. Closing a single client drains
+  queued bytes; a pending reader from an old pool session cannot consume a new
+  session's data. The general ringbuffer and lock-free SHM core are unchanged.
+- Binance examples open idle routed sockets, start readers, then subscribe.
+  The full group must acknowledge startup before readiness or market state is
+  published. Temporary pre-ACK data is bounded; late pool ACKs are handled
+  without decoding ordinary market frames twice.
+- Longer TLS validation found a second defect: automatically selected
+  `aiofastnet==1.2.0` resumes its fallback TLS engine through an unimplemented
+  method. A verified local TLS reproduction delivered all 2,048 messages but
+  raised 16 callback exceptions. Explicit standard asyncio transport selection
+  delivered the same traffic with **zero callback exceptions**. Certificate and
+  hostname verification remain enabled; there is no retry/fallback of writes.
+- A subsequent live run exposed an intermittent watchdog disconnect. Two false
+  timeout sequences were reproduced locally: ready PONG callbacks losing to
+  the timer, and pause/resume occurring entirely between heartbeat ticks.
+  The correction gives ready I/O a poll before expiry, matches namespaced probe
+  payloads, and excludes actual paused duration from the existing three-interval
+  readable-time budget. Repeated brief pauses cannot reset that budget forever.
+  Matching PONGs still update observed RTT under pressure. Real TLS ordering,
+  cancellation/close and missing-PONG cases preserve these contracts.
+
+Final code at `d79969a` passed **1,814 tests, eight skipped** in each clean-source,
+Cython-aware coverage and installed-wheel suite. Coverage is **85.75%**, passing
+the unchanged 85% gate. Source used Python 3.14.4; the wheel was built from the
+sdist and tested on Python 3.15.1 outside the checkout with all seven native test
+extensions rebuilt. The final artifacts passed twine and version/content checks.
+Evidence is in `/tmp/mm-heartbeat-final-{source314,coverage314,wheel315}-tests.log`
+and `/tmp/mm-heartbeat-final-dist315/`. Live acceptance and the exact-head
+cross-platform matrix results are recorded in [draft PR #31](https://github.com/beatzxbt/mm-toolbox/pull/31).
+
+Before the heartbeat correction, at `52d158f`, source Python 3.14 and installed Python 3.15 wheel suites each
+passed **1,804 tests, eight skipped**; Cython-aware coverage was **85.55%**
+against the unchanged 85% gate. These checks precede the final heartbeat
+correction. The wheel was built from the sdist, and all seven native test
+extensions were rebuilt against the installed headers. Twine, version/content
+validation, lint/format, source typing and the 33-test C orderbook suite passed.
+
+### Inbound performance at `52d158f`
+
+The source runs in a separate process. Each scenario sends 5,000 unique
+256-byte messages; the pool receives three identical wire copies and filters
+10,000 duplicates. All six paced/first-burst/post-idle cases had zero loss,
+missing or reordered IDs, duplicate app deliveries, or unexplained counts.
+Rates cover first source send through last unique application receipt.
+
+| Receiver / burst | Unique deliveries/s | Source-to-app p50 | Source-to-app p99 |
+| --- | ---: | ---: | ---: |
+| Single, first burst | 171,554 | 0.052 ms | 0.182 ms |
+| Single, post-idle | 212,882 | 0.054 ms | 0.077 ms |
+| Three-socket pool, first burst | 72,425 | 0.082 ms | 0.263 ms |
+| Three-socket pool, post-idle | 66,268 | 0.069 ms | 0.301 ms |
+
+Percentiles use a bounded uniform reservoir of 4,096/5,000 deliveries. The paced
+cases intentionally throttle their source and are acceptance checks, not
+maximum-throughput results. Periodic occupancy sampling observed no pauses in
+these active-consumer runs; separate startup tests deliberately hold consumers
+until reads pause, then verify bounded queues and exact zero-loss delivery.
+
+The outbound 100,000-call check also delivered all expected frames: **3.14M
+single send calls/s**, **1.50M pool-fastest calls/s**, and **2.10M broadcast
+frames/s** (three frames per broadcast call). These are synchronous send-call
+measurements, not RTT. The sink received 201,000 single and 804,000 pool frames,
+including warmup and latency workloads. Send-buffer high/low-water notices
+were informational; there were no callback exceptions or missing deliveries.
+
+These are local reference measurements on the environment below, without
+cross-run confidence intervals. Evidence: `/tmp/mm-receive-diagnosis-fixed.jsonl`,
+`/tmp/mm-receive-final2-inbound5000.stdout`,
+`/tmp/mm-receive-final2-outbound100k.stdout`, and
+`/tmp/mm-receive-final2-{source314,coverage314,wheel315}-tests.log`.
+
+The examples retain existing raw `@trade` semantics on the live-verified
+`/public/ws` route. The current official [Binance route map](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/websocket-market-streams/Important-WebSocket-Change-Notice)
+lists `@aggTrade` under `/market` and omits raw `@trade`; changing to aggregate
+events would change candle input counts. This follow-up does not silently make
+that change. Subscription responses follow the [official ACK format](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/websocket-market-streams/Live-Subscribing-Unsubscribing-to-streams).
+
+## Earlier reliability and test follow-up — 2026-10-25
 
 - WebSocket single/pool wrappers expose exact lifetime receive-overwrite
   totals, including startup, failed handshakes and replaced/retired sockets.
@@ -54,7 +144,7 @@ final revision.
 
 The adapter sequencing follows the [Binance futures local-book guide](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/websocket-market-streams/How-to-manage-a-local-order-book-correctly).
 
-### Final follow-up validation
+### Validation at `eefd9a6`
 
 The final source suite on Python 3.14.4 passed **1,740 tests, eight skipped**
 with all seven native test modules required; the standalone C orderbook suite
@@ -70,7 +160,7 @@ The draft PR shows the cross-platform CI status.
 | Distribution checks | Isolated wheel and sdist builds, a separate wheel build from the sdist, twine and version validation passed. The wheel contains 36 native modules, typing metadata and native SHM sources; the sdist contains example/benchmark helpers and the native test harness. |
 | Opt-in live integration tests | **Three passed** against the installed Python 3.15 wheel, including single/pool WebSockets and exact-reference orderbook replay. |
 | Live examples against the final Python 3.15 wheel | Candles 6 s, averages 6 s, stream 8 s and MPSC 5 s exited 0 with no stderr. Candles/averages/stream processed live updates; the short MPSC run established all four snapshots and started workers. |
-| Extended MPSC live check | The 12 s run processed live trades/BBO, then detected receive overwrites and exited **1**, reporting child failure. This is the intended stop-on-loss result; it demonstrates a workload limitation on this machine, not loss-free operation. Owned temporary files were removed. |
+| Extended MPSC live check | The 12 s run processed live trades/BBO, then detected receive overwrites and exited **1**, reporting child failure. The guard contained the failure, but the loss remained a release blocker. The subsequent receive investigation reproduced the defect with a minimal consumer, so machine throughput alone was not an adequate explanation. Owned temporary files were removed. |
 | Native receive-loss fault injection | A localhost burst into a one-slot test buffer makes the real multiprocess stream fail before state output and removes owned files. Included in both full suites. |
 | Advanced logging final-status smoke | One worker, 32-byte messages, one 50 ms window: **144,976 attempted/consumed**, no rejected messages, transport errors, overwrites, worker errors, forced exits or drain timeouts. Exit 0; functional evidence rather than a new performance measurement. |
 | Ruff lint/format, configured source typing, whitespace | Passed. |

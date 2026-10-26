@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Bound WebSocket wrapper receive queues by message count and retained payload bytes, with shared pool backpressure that accounts for frames already read by the parser. Default limits are 4,096 messages and 16 MiB; consumed slots release their payload references.
+- Wake WebSocket readers directly on data or close, preserving queued single-client data and isolating readers across pool restarts.
+- Explicitly select verified standard asyncio transports; avoid the optional aiofastnet TLS fallback defect when paused reads resume. Certificate and hostname verification remain enabled.
+- Correlate internal PING/PONG probes, preserve their readable-time deadline across short pauses, and service ready I/O before confirming expiry. Keep observed latency samples fresh under backpressure and include heartbeat state in timeout diagnostics.
+- Subscribe the Binance examples only after every transport opens, validate subscription acknowledgements before publishing readiness, and handle late pool acknowledgements. Preserve raw trade event semantics.
+- Add an inbound WebSocket benchmark with an independent source process, exact receive/deduplication accounting, and strict no-loss paced/startup/post-idle scenarios.
 - Retain exact WebSocket receive-overwrite totals across startup, reconnects, retired connections and close; sample overload diagnostics at powers of two. The concrete single/pool getters are additive and the public client protocol is unchanged.
 - Stop market-data examples on lost continuity, disconnects or rejected SHM writes; propagate processing and child failures, and follow Binance futures snapshot/`pu` sequencing. Rebuild the whole example after a failure.
 - Expose cumulative worker-logger transport counters after shutdown, report startup loss at the master, and reject benchmark runs with worker/shutdown errors or unexplained missing deliveries. Intentional overwrite stress remains explicitly counted.

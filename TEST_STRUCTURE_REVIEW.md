@@ -1,4 +1,4 @@
-# Test structure review — implementation status (2026-10-25)
+# Test structure review — implementation status (2026-10-26)
 
 ## Implementation status
 
@@ -30,7 +30,9 @@ complete; publication remains held for review.
   the legacy-layout check.
 - The organization/assertion work collects 1,689 cases: the 1,682 baseline
   plus the one SHM split and six phase-two rounding cases. The approved
-  reliability work adds 59 cases, for a final collection of 1,748.
+  initial reliability work added 59 cases, collecting 1,748 at `eefd9a6`.
+  Receive, subscription, TLS and heartbeat work adds another 74 cases,
+  bringing the current collection to **1,822**.
 - Mapping and count evidence is in `/tmp/mm-test-layout-analytics/` and
   `/tmp/mm-test-layout-io/`. The rounder phase-two case list and counts are in
   `/tmp/mm-test-layout-analytics/phase2-added-cases.txt` and
@@ -38,10 +40,12 @@ complete; publication remains held for review.
 - The phase-two focused rounder run passed 63 tests; its log is
   `/tmp/mm-test-layout-analytics-phase2-rounding.log`. The root's phase-one
   focused component log is `/tmp/mm-test-layout-analytics-phase1-tests.log`.
-- The final Python 3.14.4 source suite passed **1,740 tests, eight skipped**,
+- The final Python 3.14.4 source suite passed **1,814 tests, eight skipped**,
   with all seven native test extensions required. The standalone C orderbook
-  suite passed **33/33**. Final installed-wheel and coverage results are
-  recorded with the release follow-up in `EXAMPLES_BENCHMARK_REVIEW.md`.
+  suite passed **33/33**. The installed Python 3.15 wheel and Cython-aware
+  coverage suites each passed the same **1,814/eight** inventory. Coverage is
+  **85.75%** against the unchanged 85% gate. Detailed evidence and platform
+  matrix status are linked from `EXAMPLES_BENCHMARK_REVIEW.md`.
 
 ### Retained native and tooling contracts
 
@@ -67,6 +71,14 @@ checks sit in `tests/benchmarks`. The installed-wheel runner now copies the
 example and benchmark helper trees alongside tests, so those checks exercise
 the installed library outside the source checkout. The sdist includes the
 helper trees and native test sources. There is no separate regression runner.
+
+The subsequent receive checks follow the same structure: burst/TLS behavior in
+WebSocket integration tests, heartbeat ordering and native fields in connection
+tests, subscription readiness in examples, and driver accounting/cleanup in
+benchmarks. A deliberately small dedup history still forces full rollover, and
+the startup-pressure fixture offers twice its configured receive capacity. This
+preserves the failure boundaries without quadratic Cython tracing work or
+larger timeouts. Default-capacity paced bursts remain covered independently.
 
 ## Historical proposal snapshot
 
