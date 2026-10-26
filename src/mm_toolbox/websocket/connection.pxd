@@ -19,6 +19,9 @@ cdef class _ReceiveBuffer(BytesRingBuffer):
     cdef unsigned long long _high_count
     cdef unsigned long long _low_count
     cdef unsigned long long _generation
+    cdef unsigned long long _pause_generation
+    cdef i64 _pause_started_time_ns
+    cdef i64 _paused_time_ns
     cdef bint _paused
     cdef bint _stopped
     cdef list _read_transports
@@ -40,6 +43,7 @@ cdef class _ReceiveBuffer(BytesRingBuffer):
     cdef void _register(self, object transport) except *
     cdef void _unregister(self, object transport) except *
     cdef void _maybe_resume(self) except *
+    cdef i64 _pause_time_ns(self)
 
 cpdef enum ConnectionState:
     DISCONNECTED = 0
@@ -68,6 +72,16 @@ cdef class WsConnection(WSListener):
         # Original tracking fields
         double            _tracker_ping_sent_time_ms
         double            _tracker_pong_recv_time_ms
+        double            _last_ping_sent_time_ms
+        double            _heartbeat_loop_lag_ms
+        i64               _heartbeat_pings_sent
+        i64               _heartbeat_pongs_received
+        Py_ssize_t        _last_pong_payload_size
+        unsigned long long _probe_pause_generation
+        bytes             _probe_payload
+        i64               _probe_paused_time_ns
+        i64               _heartbeat_pause_affected_samples
+        i64               _heartbeat_pongs_matched
 
         bytearray         _unfin_msg_buffer
         Py_ssize_t        _unfin_msg_size
@@ -93,6 +107,8 @@ cdef class WsConnection(WSListener):
     cpdef void          close(self)
     cpdef object        get_config(self)
     cpdef object        get_state(self)
+    cpdef dict          _heartbeat_snapshot(self)
+    cdef double         _readable_ping_age_ms(self, double now_ms)
     cdef void           _buffer_message(self, bytes payload) except *
 
     # PicoWs should add void returns to these methods, but since they didnt

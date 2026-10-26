@@ -14,7 +14,7 @@ from picows.picows cimport (
     WSMsgType, 
 )
 
-from mm_toolbox.time.time cimport time_ns, time_monotonic_ms
+from mm_toolbox.time.time cimport time_ns, time_monotonic_ms, time_monotonic_ns
 from mm_toolbox.websocket.connection cimport ConnectionState
 from mm_toolbox.ringbuffer.bytes cimport BytesRingBuffer
 from mm_toolbox.moving_average.ema cimport ExponentialMovingAverage as Ema
@@ -32,6 +32,12 @@ def _report_disconnect(future):
         error = future.exception()
         if error is not None:
             _logger.warning("WebSocket transport disconnected with error: %s", error)
+
+
+def _wake_pending_future(future):
+    """A cancelled deadline check must not leave a failing timer callback."""
+    if not future.done():
+        future.set_result(None)
 
 
 cdef inline bint _is_data_frame_type(WSMsgType msg_type):
@@ -111,6 +117,9 @@ cdef class _ReceiveBuffer(BytesRingBuffer):
         self._paused = False
         self._stopped = False
         self._generation = 0
+        self._pause_generation = 0
+        self._pause_started_time_ns = 0
+        self._paused_time_ns = 0
 
     cpdef object get_dropped_messages(self):
         return self._receive_loss_count[0]
@@ -154,14 +163,23 @@ cdef class _ReceiveBuffer(BytesRingBuffer):
             or max(0, tail_bytes) >= self._high_bytes - self._queued_bytes
         ):
             self._paused = True
+            self._pause_generation += 1
+            self._pause_started_time_ns = time_monotonic_ns()
             for transport in self._read_transports:
                 transport.pause_reading()
 
     cdef void _maybe_resume(self) except *:
         if self._paused and not self._stopped and self._size <= self._low_count and self._queued_bytes <= self._low_bytes:
+            self._paused_time_ns += time_monotonic_ns() - self._pause_started_time_ns
+            self._pause_started_time_ns = 0
             self._paused = False
             for transport in self._read_transports:
                 transport.resume_reading()
+
+    cdef i64 _pause_time_ns(self):
+        if self._paused:
+            return self._paused_time_ns + time_monotonic_ns() - self._pause_started_time_ns
+        return self._paused_time_ns
 
     cdef object _append(self, bytes item):
         cdef Py_ssize_t item_size = len(item)
@@ -298,6 +316,16 @@ cdef class WsConnection(WSListener):
         # Use atomic-like operations for ping/pong tracking (single writes)
         self._tracker_ping_sent_time_ms = 0.0  # 0.0 means no ping sent
         self._tracker_pong_recv_time_ms = 0.0  # 0.0 means no pong received
+        self._last_ping_sent_time_ms = 0.0
+        self._heartbeat_loop_lag_ms = 0.0
+        self._heartbeat_pings_sent = 0
+        self._heartbeat_pongs_received = 0
+        self._last_pong_payload_size = 0
+        self._probe_pause_generation = 0
+        self._probe_payload = b""
+        self._probe_paused_time_ns = 0
+        self._heartbeat_pause_affected_samples = 0
+        self._heartbeat_pongs_matched = 0
         
         self._unfin_msg_buffer = bytearray()
         self._unfin_msg_size = 0  # Track buffer size for memory safety
@@ -327,6 +355,42 @@ cdef class WsConnection(WSListener):
             Estimated round-trip latency based on ping/pong timing.
         """
         return self._latency_ms
+
+    cpdef dict _heartbeat_snapshot(self):
+        """Low-frequency diagnostics; no additional market-frame timestamps."""
+        cdef double now_ms = time_monotonic_ms()
+        cdef object transport = self._read_transport
+        return {
+            "pending_ping_age_ms": (now_ms - self._tracker_ping_sent_time_ms if self._tracker_ping_sent_time_ms else None),
+            "last_ping_age_ms": (now_ms - self._last_ping_sent_time_ms if self._last_ping_sent_time_ms else None),
+            "last_pong_age_ms": (now_ms - self._tracker_pong_recv_time_ms if self._tracker_pong_recv_time_ms else None),
+            "buffer_last_data_age_ms": ((time_monotonic_ns() - self._ringbuffer._latest_insert_time_ns) / 1000000.0 if self._ringbuffer._latest_insert_time_ns else None),
+            "pings_sent": self._heartbeat_pings_sent,
+            "pongs_received": self._heartbeat_pongs_received,
+            "pongs_matched": self._heartbeat_pongs_matched,
+            "pending_readable_age_ms": (self._readable_ping_age_ms(now_ms) if self._tracker_ping_sent_time_ms else None),
+            "paused_ms_since_probe": ((self._receive_buffer._pause_time_ns() - self._probe_paused_time_ns) / 1000000.0 if self._receive_buffer is not None and self._tracker_ping_sent_time_ms else None),
+            "latency_samples_affected_by_pause": self._heartbeat_pause_affected_samples,
+            "pause_generation": (self._receive_buffer._pause_generation if self._receive_buffer is not None else None),
+            "probe_pause_generation": self._probe_pause_generation,
+            "pending_ping_payload_hex": (self._probe_payload.hex() if self._tracker_ping_sent_time_ms else None),
+            "last_pong_payload_size": self._last_pong_payload_size,
+            "received_messages": self._seq_id,
+            "latency_ms": self._latency_ms,
+            "queue_messages": self._ringbuffer._size,
+            "queue_bytes": (self._receive_buffer._queued_bytes if self._receive_buffer is not None else None),
+            "buffer_paused": (bool(self._receive_buffer._paused) if self._receive_buffer is not None else None),
+            "transport_reading": (transport.is_reading() if transport is not None else None),
+            "write_buffer_bytes": (transport.get_write_buffer_size() if transport is not None else None),
+            "loop_lag_ms": self._heartbeat_loop_lag_ms,
+            "dropped_messages": self._dropped_messages,
+        }
+
+    cdef double _readable_ping_age_ms(self, double now_ms):
+        cdef double paused_ms = 0.0
+        if self._receive_buffer is not None:
+            paused_ms = (self._receive_buffer._pause_time_ns() - self._probe_paused_time_ns) / 1000000.0
+        return max(0.0, now_ms - self._tracker_ping_sent_time_ms - paused_ms)
 
     cpdef bint is_connected(self):
         """Return whether the connection is currently connected.
@@ -375,10 +439,17 @@ cdef class WsConnection(WSListener):
         """Periodically sends ping and updates latency when pong arrives."""
         cdef double interval_s = self._latency_ping_interval_s
         cdef double ping_timeout_ms = interval_s * 3000.0
+        cdef double expected_wake_ms
+        cdef double pending_ping_ms
+        cdef bytes pending_payload
+        cdef object ready
+        cdef object timer
 
         try:
             while not self._should_stop:
+                expected_wake_ms = time_monotonic_ms() + interval_s * 1000.0
                 await asyncio.sleep(interval_s)
+                self._heartbeat_loop_lag_ms = max(0.0, time_monotonic_ms() - expected_wake_ms)
 
                 if (
                     self._should_stop
@@ -388,23 +459,47 @@ cdef class WsConnection(WSListener):
                     continue
 
                 if self._receive_buffer is not None and self._receive_buffer._paused:
-                    # A deliberately paused socket cannot read its PONG. Clear
-                    # the old probe and start a new one after reading resumes.
-                    self._tracker_ping_sent_time_ms = 0.0
+                    # Retain the probe; its deadline counts readable time only.
                     continue
 
                 if self._tracker_ping_sent_time_ms > 0.0:
                     # A half-open transport must be replaced, not kept alive
                     # indefinitely by resetting its outstanding ping.
-                    if time_monotonic_ms() - self._tracker_ping_sent_time_ms > ping_timeout_ms:
-                        _logger.warning("WebSocket %s PONG timeout; disconnecting", self._config.conn_id)
-                        self.close()
-                        return
+                    if self._readable_ping_age_ms(time_monotonic_ms()) > ping_timeout_ms:
+                        pending_ping_ms = self._tracker_ping_sent_time_ms
+                        pending_payload = self._probe_payload
+                        # The overdue timer task may precede a ready socket
+                        # callback after a busy loop turn. Service that I/O,
+                        # then recheck the same probe without extending its
+                        # configured deadline or sending another one.
+                        ready = self._loop.create_future()
+                        timer = self._loop.call_later(0, _wake_pending_future, ready)
+                        try:
+                            await ready
+                        finally:
+                            timer.cancel()
+                        if self._should_stop or self._transport is None:
+                            return
+                        if self._receive_buffer is not None and self._receive_buffer._paused:
+                            continue
+                        if (
+                            self._tracker_ping_sent_time_ms == pending_ping_ms
+                            and self._probe_payload == pending_payload
+                            and self._readable_ping_age_ms(time_monotonic_ms()) > ping_timeout_ms
+                        ):
+                            _logger.warning("WebSocket %s PONG timeout; disconnecting: %s", self._config.conn_id, self._heartbeat_snapshot())
+                            self.close()
+                            return
                     continue
 
                 try:
-                    self._transport.send_ping()
+                    self._probe_payload = b"mm-toolbox\x00" + int(self._heartbeat_pings_sent + 1).to_bytes(8, "big")
+                    self._transport.send_ping(self._probe_payload)
                     self._tracker_ping_sent_time_ms = time_monotonic_ms()
+                    self._probe_pause_generation = (self._receive_buffer._pause_generation if self._receive_buffer is not None else 0)
+                    self._probe_paused_time_ns = (self._receive_buffer._pause_time_ns() if self._receive_buffer is not None else 0)
+                    self._last_ping_sent_time_ms = self._tracker_ping_sent_time_ms
+                    self._heartbeat_pings_sent += 1
                 except Exception:
                     self.close()
                     return
@@ -527,6 +622,15 @@ cdef class WsConnection(WSListener):
         self._loop = asyncio.get_running_loop()
         self._tracker_ping_sent_time_ms = 0.0
         self._tracker_pong_recv_time_ms = 0.0
+        self._last_ping_sent_time_ms = 0.0
+        self._heartbeat_loop_lag_ms = 0.0
+        self._heartbeat_pings_sent = 0
+        self._heartbeat_pongs_received = 0
+        self._heartbeat_pongs_matched = 0
+        self._probe_paused_time_ns = 0
+        self._heartbeat_pause_affected_samples = 0
+        self._probe_payload = b""
+        self._probe_pause_generation = 0
         
         # Clear any stale fragmented message state
         self._unfin_msg_buffer.clear()
@@ -561,14 +665,27 @@ cdef class WsConnection(WSListener):
             object     frame_payload_mv
 
         if frame_msg_type == WSMsgType.PONG:
+            self._heartbeat_pongs_received += 1
+            self._last_pong_payload_size = frame.payload_size
             pong_recv_time_ms = time_monotonic_ms()
             ping_sent_time_ms = self._tracker_ping_sent_time_ms
             self._tracker_pong_recv_time_ms = pong_recv_time_ms
-            if ping_sent_time_ms > 0.0 and pong_recv_time_ms >= ping_sent_time_ms:
+            if (
+                ping_sent_time_ms > 0.0
+                and pong_recv_time_ms >= ping_sent_time_ms
+                and frame.payload_size == len(self._probe_payload)
+                and frame.get_payload_as_bytes() == self._probe_payload
+            ):
+                # Observed RTT includes application backpressure; retaining it
+                # keeps pool latency selection fresh on continuously busy feeds.
                 latency_ms = pong_recv_time_ms - ping_sent_time_ms
                 self._latency_ema.update(latency_ms)
                 self._latency_ms = latency_ms
+                if self._receive_buffer is not None and self._probe_pause_generation != self._receive_buffer._pause_generation:
+                    self._heartbeat_pause_affected_samples += 1
                 self._tracker_ping_sent_time_ms = 0.0
+                self._probe_payload = b""
+                self._heartbeat_pongs_matched += 1
             return
 
         if frame_msg_type == WSMsgType.PING:

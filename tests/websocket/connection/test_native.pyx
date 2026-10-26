@@ -12,6 +12,7 @@ Tests cdef fields and hot-path behavior that are inaccessible from pure Python:
 from __future__ import annotations
 
 from libc.stdint cimport int64_t as i64
+from picows.picows cimport _make_test_ws_frame, WSMsgType
 
 from mm_toolbox.ringbuffer.bytes cimport BytesRingBuffer
 from mm_toolbox.websocket.connection cimport (
@@ -82,6 +83,9 @@ def expire_ping(WsConnection conn):
     """Arm an expired outstanding ping without sending a real one."""
     from mm_toolbox.time import time_monotonic_ms
     conn._tracker_ping_sent_time_ms = time_monotonic_ms() - 10000.0
+    if conn._receive_buffer is not None:
+        conn._probe_paused_time_ns = conn._receive_buffer._pause_time_ns()
+        conn._probe_pause_generation = conn._receive_buffer._pause_generation
 
 
 def pause_client_reads(WsConnection conn):
@@ -94,6 +98,72 @@ def resume_client_reads(WsConnection conn):
 
 def ping_sent_time(WsConnection conn):
     return conn._tracker_ping_sent_time_ms
+
+
+def deliver_pong(WsConnection conn, payload=b""):
+    conn.on_ws_frame(conn._transport, _make_test_ws_frame(WSMsgType.PONG, payload, True, False))
+
+
+def arm_probe(WsConnection conn, bytes payload, double age_ms=10000):
+    from mm_toolbox.time import time_monotonic_ms
+    conn._probe_payload = payload
+    conn._tracker_ping_sent_time_ms = time_monotonic_ms() - age_ms
+    if conn._receive_buffer is not None:
+        conn._probe_paused_time_ns = conn._receive_buffer._pause_time_ns()
+        conn._probe_pause_generation = conn._receive_buffer._pause_generation
+
+
+def replace_probe_payload(WsConnection conn, bytes payload):
+    conn._probe_payload = payload
+
+
+def pending_probe_payload(WsConnection conn):
+    return conn._probe_payload
+
+
+def read_socket(WsConnection conn):
+    return conn._read_transport.get_extra_info("socket")
+
+
+def simulate_completed_read_pause(WsConnection conn, double paused_ms):
+    pause_client_reads(conn)
+    conn._receive_buffer._pause_started_time_ns -= <i64>(paused_ms * 1000000)
+    resume_client_reads(conn)
+
+
+def test_pong_must_match_outstanding_probe():
+    cdef WsConnection conn = _make_conn()
+    conn._conn_state = ConnectionState.CONNECTED
+    arm_probe(conn, b"new probe", 10)
+    deliver_pong(conn, b"old probe")
+    assert conn._tracker_ping_sent_time_ms > 0
+    assert conn._heartbeat_pongs_received == 1
+    assert conn._heartbeat_pongs_matched == 0
+    deliver_pong(conn, b"new probe")
+    assert conn._tracker_ping_sent_time_ms == 0
+    assert conn._heartbeat_pongs_received == 2
+    assert conn._heartbeat_pongs_matched == 1
+    conn.close()
+
+
+def test_pause_affected_matching_pongs_refresh_latency():
+    cdef _ReceiveBuffer ring = _ReceiveBuffer(8)
+    ring.configure(4096)
+    cdef WsConnection conn = WsConnection(ring, WsConnectionConfig.default("ws://localhost"))
+    conn._conn_state = ConnectionState.CONNECTED
+    for index in range(5):
+        arm_probe(conn, str(index).encode(), 10)
+        conn._latency_ms = -1
+        conn._buffer_message(b"market data")
+        ring._prepare(16)
+        assert ring.is_reading_paused()
+        ring._maybe_resume()
+        deliver_pong(conn, str(index).encode())
+        assert conn.get_latency_ms() >= 0
+        assert conn._heartbeat_pongs_matched == index + 1
+        assert conn._heartbeat_pause_affected_samples == index + 1
+        ring.consume()
+    conn.close()
 
 
 def unfinished_size(WsConnection conn):

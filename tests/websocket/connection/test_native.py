@@ -54,6 +54,14 @@ def test_receive_overflow_count():
     _native.test_receive_overflow_count()
 
 
+def test_pong_must_match_outstanding_probe():
+    _native.test_pong_must_match_outstanding_probe()
+
+
+def test_pause_affected_matching_pongs_refresh_latency():
+    _native.test_pause_affected_matching_pongs_refresh_latency()
+
+
 def test_receive_tail_reserve_and_retired_transport_cleanup():
     _native.test_receive_tail_reserve_and_retired_transport_cleanup()
 
@@ -93,7 +101,8 @@ async def test_paused_receive_does_not_expire_unread_pong(
                 )
                 await conn._latency_loop()
             assert conn.is_connected()
-            assert _native.ping_sent_time(conn) == 0.0
+            assert _native.ping_sent_time(conn) > 0.0
+            assert conn._heartbeat_snapshot()["pings_sent"] == 0
             _native.resume_client_reads(conn)
 
 

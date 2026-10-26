@@ -160,8 +160,20 @@ asyncio.run(main())
   and callback work, and wakes idle readers. Iteration drains already buffered
   messages before raising `StopAsyncIteration`. Create a new single client for a
   new session. Context exit also waits for owned tasks to terminate.
-- Missing PONGs for three ping intervals disconnect the socket so the configured
-  reconnect path can replace a half-open connection.
+- An internal PING carries a namespaced sequence payload. Only its matching PONG
+  acknowledges that probe; empty, unrelated manual or stale PONGs cannot clear it.
+  Missing acknowledgement for three ping intervals of readable time disconnects
+  the socket so configured recovery can replace a half-open connection.
+- Native cumulative pause duration excludes only time when this client deliberately
+  stopped reading. Brief pause/resume cycles do not reset an outstanding probe or
+  grant a fresh deadline. At expiry, a zero-delay timer allows a selector/I/O turn
+  before rechecking the identical probe, avoiding closure ahead of an already
+  readable PONG. Cancellation or close during that check ends the owned work.
+- Matching PONGs keep latency samples fresh, including under burst pressure.
+  Reported RTT includes application backpressure and event-loop scheduling; it is
+  not a pure network measurement. Timeout diagnostics include wall/readable probe
+  age, last PONG and buffer data age, queue/read state, loop lag and control-frame
+  counters. Buffer data age is shared across sockets in a pool.
 - Pool eviction periodically replaces slower connections based on latency.
 - Wrapper receive buffers retain the newest messages within both configured
   limits. Overload discards the oldest payloads; one incoming message may evict
@@ -178,7 +190,7 @@ asyncio.run(main())
   before later socket reads are allowed. This absorbs ordinary bursts and startup
   delays; a batch exceeding the finite queue bounds can still overwrite data.
   An indefinitely stalled application can also trigger the peer's heartbeat
-  timeout. Our latency probes suspend while reading is deliberately paused, so
+  timeout. Probe deadlines suspend while reading is deliberately paused, so
   unread PONGs do not cause a false local timeout.
 - Readers await one readiness event directly; inserts and close wake it without
   creating per-message tasks or polling. A pending single-client reader can drain
