@@ -19,6 +19,57 @@ Those measurements predate the current reliability changes; they are retained
 as audit evidence, not presented as new performance measurements of this PR's
 final revision.
 
+## Advanced BBO correction — 2026-10-27
+
+The mixed-feed investigation exposed an independent advanced-orderbook defect:
+a worse BBO price removed only one obsolete top level and could leave an old
+price, quantity or order count in place. With bids 100/99/98/97 and asks
+101/102/103/104, a supplied BBO of bid 97 size 7 and ask 98 size 8 incorrectly
+produced bid 99 size 2 and ask 101 size 1. The standard book applied it correctly.
+
+The core now finds the first valid remaining level with the ladder's binary
+search and advances its ring head past the obsolete prefix. It updates an
+existing quoted price or inserts it ahead of surviving depth. Same-price
+updates and tighter quotes retain their constant-time paths; the operation
+allocates no memory and adds no locks. Both Python ingestion APIs and Cython
+callers use this same core. Normal component tests cover price jumps, metadata,
+full and partial capacity, and wrapped ladders.
+
+Replaying the same saved 10,000-record capture against the rebuilt core removed
+all **220** advanced BBO payload mismatches in arrival order and all **190** in
+the sequence-ordered prototype. The 1,000-record capture also had zero BBO
+payload mismatches. Every accepted BBO was checked for both price and quantity;
+the full book was independently compared with a Decimal reference at depth
+boundaries. Evidence: `/tmp/mm-bbo-fixed-replay-6w2ihnr2/`.
+
+Local validation of this correction passed **1,877 tests, eight skipped** on
+both the Python 3.14 source build and an isolated installed Python 3.15 wheel,
+requiring all seven native test extensions. The wheel was built from the sdist;
+its source and the changed test sources matched the checkout. The standalone C
+suite passed **33/33**, and Ruff format/lint, source typing and diff whitespace
+checks passed. The installed wheel also reproduced zero BBO payload mismatches
+on the 10,000-record capture. Evidence:
+`/tmp/mm-bbo-fix314-full-final-tests.log` and
+`/tmp/mm-bbo-release315-jcmn37_g/wheel-tests.log`, with wheel replay results
+under that directory's `replay/`.
+
+The collector still records independent BBO and depth feeds in arrival order;
+its depth bridge and `pu` chain checks do not establish cross-feed ordering.
+The depth-aware publication gate remains an isolated prototype. Its ordered
+replays had zero full-book mismatches at depth boundaries after this correction,
+while arrival-order replay retained its separate sequencing discrepancies.
+That collector integration remains outstanding.
+
+The advanced logging benchmark explicitly uses **64 MiB** shared transport
+capacity for the master and every worker and prints it in its report. It has
+no capacity command-line option. The earlier capacity experiment is recorded
+in `/tmp/mm-logging-capacity-I8V7iF/RESULTS.md`. A bounded 0.2-second, one-worker
+32-byte smoke run delivered all **586,879** attempted messages, with zero
+overwrites, rejections, transport/worker errors or shutdown timeouts. This
+checks the explicit setting and cleanup; it is not a new sustained-load
+performance comparison. Output:
+`/tmp/mm-bbo-fixed-replay-6w2ihnr2/logger-smoke.log`.
+
 ## Final benchmark and collector follow-up — 2026-10-27
 
 All 13 benchmark entry points have now completed substantive bounded checks
@@ -68,12 +119,6 @@ Both orderbook benchmark CLIs now exit nonzero with actionable instructions if
 the capture is missing. The 100,000-line fixture is present in the Git checkout
 but omitted from the sdist; provide a capture with `--input`, or generate one
 using `collect_data.py --output <path>` and pass that path to `--input`.
-
-The independent-source WebSocket pool tail investigation is recorded in the
-draft PR. Ten uninstrumented repeats had startup p99 between 0.116 and 0.284 ms
-with no loss, but the original 50.851 ms outlier remains unattributed. A slower
-instrumented run showed substantial off-CPU delay while data was queued. These
-local results do not establish a production tail-latency guarantee.
 
 ## Receive-burst follow-up — 2026-10-26
 

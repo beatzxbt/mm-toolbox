@@ -41,8 +41,24 @@ sequence checks; both orderbook drivers replayed the latter. Both drivers now
 return nonzero when the input is missing. The large Git fixture is not in the
 sdist; supply or collect an input explicitly. Saturation benchmarks deliberately
 exercise overwrite-oldest and report their losses; they are not evidence of
-loss-free delivery under overload. The PR records the remaining local pool
-tail-latency uncertainty and exact-head CI status.
+loss-free delivery under overload. The PR records the validated revisions and
+their CI status.
+
+The subsequent mixed-feed review found and corrected an independent advanced
+BBO defect: quotes that moved past several levels could leave obsolete prices
+and quantities at the touch. The core now removes the whole obsolete prefix
+by advancing the ring head, then updates or inserts the authoritative quote.
+Both captured workloads now have zero advanced BBO payload mismatches after
+rebuilding. The independent collector cross-feed sequencing gate remains a
+prototype and still needs integration; the BBO correction does not establish
+globally ordered capture output. The example/benchmark report records the
+reproduction, checks and remaining scope.
+
+Local validation of the BBO correction passed **1,877 tests, eight skipped**
+on Python 3.14 source and the isolated installed Python 3.15 wheel built from
+the sdist, requiring every native test extension. The C suite passed **33/33**;
+Ruff, source typing and whitespace checks passed. These are local results;
+the latest platform matrix is recorded separately in the draft PR.
 
 [The example and benchmark report](EXAMPLES_BENCHMARK_REVIEW.md) records the
 reproductions, measured workloads, limits and evidence;

@@ -21,6 +21,67 @@ from tests.orderbook.advanced.conftest import (
 class TestEndToEnd:
     """Layer 3: Realistic sequences through the Python wrapper."""
 
+    @pytest.mark.parametrize("api", ["values", "levels"])
+    @pytest.mark.parametrize("capacity", [4, 7])
+    @pytest.mark.parametrize(
+        "bid_price,ask_price,bid_prices,ask_prices",
+        [
+            (100.0, 101.0, [100, 99, 98, 97], [101, 102, 103, 104]),
+            (99.0, 102.0, [99, 98, 97], [102, 103, 104]),
+            (97.0, 104.0, [97], [104]),
+            (97.5, 103.5, [97.5, 97], [103.5, 104]),
+            (95.0, 106.0, [95], [106]),
+            (97.0, 98.0, [97], [98, 101, 102, 103, 104]),
+            (103.0, 104.0, [103, 100, 99, 98, 97], [104]),
+            (100.5, 100.75, [100.5, 100, 99, 98, 97], [100.75, 101, 102, 103, 104]),
+        ],
+    )
+    def test_bbo_sets_authoritative_touch_after_price_moves(
+        self, api, capacity, bid_price, ask_price, bid_prices, ask_prices
+    ):
+        """A quote replaces all obsolete top levels and refreshes size and orders.
+
+        Prices can move past several existing levels or outside the retained
+        depth. Old prices must not remain above the quoted bid or below its ask.
+        """
+        book = _mk_book(num_levels=capacity)
+        book.consume_snapshot(
+            OrderbookLevels.from_list([101, 102, 103, 104], [1, 2, 3, 4]),
+            OrderbookLevels.from_list([100, 99, 98, 97], [1, 2, 3, 4]),
+        )
+
+        if api == "values":
+            book.consume_bbo_values(
+                ask_price=ask_price,
+                ask_size=8.0,
+                bid_price=bid_price,
+                bid_size=7.0,
+                ask_norders=17,
+                bid_norders=19,
+            )
+        else:
+            book.consume_bbo(
+                ask=PyOrderbookLevel(ask_price, 8.0, 17),
+                bid=PyOrderbookLevel(bid_price, 7.0, 19),
+            )
+
+        bid, ask = book.get_bbo()
+        assert (bid.price, bid.size, bid.norders) == (bid_price, 7.0, 19)
+        assert (ask.price, ask.size, ask.norders) == (ask_price, 8.0, 17)
+        bids = book.get_bids_numpy()
+        asks = book.get_asks_numpy()
+        np.testing.assert_array_equal(bids["price"], bid_prices[:capacity])
+        np.testing.assert_array_equal(asks["price"], ask_prices[:capacity])
+        assert bids["size"][0] == 7.0
+        assert asks["size"][0] == 8.0
+        assert bids["norders"][0] == 19
+        assert asks["norders"][0] == 17
+        # Surviving depth retains its quantities after head movement/insertion.
+        for row in bids[1:]:
+            assert row["size"] == 101 - row["price"]
+        for row in asks[1:]:
+            assert row["size"] == row["price"] - 100
+
     def test_snapshot_delta_bbo_sequence(self):
         """Given snapshot, delta, and BBO updates, When applied in sequence, Then mid price is valid."""
         book = _mk_book(num_levels=64)

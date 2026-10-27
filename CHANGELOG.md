@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Apply advanced-orderbook BBO prices across all obsolete top levels, including multi-level jumps and quotes outside retained depth. Refresh the quoted quantity and order count when its price already exists, and preserve valid deeper levels without allocation or locks.
+- Fix the advanced logging benchmark's shared transport capacity at an explicit 64 MiB for both the master and workers, and include that setting in its report.
 - Start both orderbook collector feeds before fetching a snapshot, buffer updates with bounded backpressure, validate the snapshot bridge and subsequent depth sequence, and publish only complete captures. Use routed public endpoints and propagate startup, stream and timeout failures. Orderbook benchmark drivers now fail clearly when their input capture is missing.
 - Bound WebSocket wrapper receive queues by message count and retained payload bytes, with shared pool backpressure that accounts for frames already read by the parser. Default limits are 4,096 messages and 16 MiB; consumed slots release their payload references.
 - Wake WebSocket readers directly on data or close, preserving queued single-client data and isolating readers across pool restarts.
