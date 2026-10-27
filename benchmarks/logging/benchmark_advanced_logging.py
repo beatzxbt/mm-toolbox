@@ -54,6 +54,8 @@ from mm_toolbox.logging.advanced import (
     WorkerLogger,
 )
 
+SHM_CAPACITY_BYTES = 64 * 1024 * 1024
+
 
 def _get_or_add_operation(stats: BenchmarkStatistics, name: str):
     """Get existing operation metrics or create them."""
@@ -251,6 +253,7 @@ def _worker_emit_burst(
                 do_stdout=False,
                 flush_interval_s=flush_interval_s,
                 emit_internal=False,
+                shm_capacity_bytes=SHM_CAPACITY_BYTES,
             ),
             name=worker_name,
         )
@@ -502,6 +505,7 @@ class AdvancedLoggingBenchmark(BenchmarkRunner[AdvancedLoggingBenchmarkConfig]):
                     do_stdout=False,
                     flush_interval_s=self.config.flush_interval_s,
                     emit_internal=False,
+                    shm_capacity_bytes=SHM_CAPACITY_BYTES,
                 ),
                 log_handlers=[handler],
             )
@@ -884,6 +888,7 @@ def main() -> None:
         "Percentile sample count per operation": config.num_operations,
         "Drain": "joined workers, then bounded MasterLogger final drain",
         "Flush interval (s)": config.flush_interval_s,
+        "Shared transport capacity (bytes)": SHM_CAPACITY_BYTES,
         "IPC dir": config.ipc_dir,
     }
     for key, value in report_metadata.items():
