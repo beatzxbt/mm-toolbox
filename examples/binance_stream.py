@@ -1,20 +1,28 @@
 """Comprehensive example demonstrating multi-process Binance streaming with SHM SPSC.
 
 This example shows:
-- Using WsPool for BBO, orderbook depth, and trade streams
-- Building time-based candles on mid price
+- Using WsSingle for each BBO, orderbook depth, and trade stream
+- Building time-based candles on executed trades
 - Building standard orderbook from snapshot + deltas
 - Computing TEMA on mid price with tick-size rounding
 - SHM SPSC communication between processes
 - Worker logger in stream process, master logger in processing process
+
+The whole example stops on lost continuity; it does not implement recovery.
+Futures snapshot bridging and ``pu`` continuity follow Binance's guide:
+https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/websocket-market-streams/How-to-manage-a-local-order-book-correctly
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import math
 import multiprocessing
 import os
+import signal
 import sys
+import tempfile
 import time
 import urllib.request
 from typing import Any
@@ -37,7 +45,28 @@ from mm_toolbox.ringbuffer.shm.spsc import (
     ShmSpscProducer,
 )
 from mm_toolbox.rounding import Rounder, RounderConfig
-from mm_toolbox.websocket import WsConnectionConfig, WsPool, WsPoolConfig
+from mm_toolbox.websocket import WsConnectionConfig, WsSingle
+
+if __package__:
+    from ._stream_guard import (
+        FeedSubscription,
+        FeedIntegrityError,
+        assert_no_receive_loss,
+        assert_no_transport_loss,
+        consume_batch,
+        forward_message,
+        run_feeds,
+    )
+else:
+    from _stream_guard import (
+        FeedSubscription,
+        FeedIntegrityError,
+        assert_no_receive_loss,
+        assert_no_transport_loss,
+        consume_batch,
+        forward_message,
+        run_feeds,
+    )
 
 
 class StartupEvent:
@@ -103,6 +132,7 @@ class OrderbookDelta(msgspec.Struct):
 
     final_update_id: int
     first_update_id: int
+    previous_update_id: int
     bids: list[tuple[float, float]]
     asks: list[tuple[float, float]]
 
@@ -121,7 +151,7 @@ class TradeUpdate(msgspec.Struct):
 class StreamMessage(msgspec.Struct):
     """Wrapper for stream messages."""
 
-    msg_type: str  # "bbo", "trade", "depth"
+    msg_type: str  # "streams_ready", "bbo", "trade", "depth"
     data: dict[str, Any]
 
 
@@ -138,90 +168,89 @@ class BinanceStreamProcessor:
         self.symbol = symbol
         self.logger_path = logger_path
         self.data_path = data_path
-
-        # Initialize worker logger
-        logger_config = LoggerConfig(
-            base_level=LogLevel.INFO,
-            path=logger_path,
-            flush_interval_s=0.5,
-            emit_internal=False,
-        )
-        self.logger = WorkerLogger(config=logger_config, name="StreamProcess")
+        self._logger: WorkerLogger | None = None
+        self._shutdown = False
 
         # Initialize SHM SPSC producer for data
         self.data_producer = ShmSpscProducer(
             path=data_path,
             capacity_bytes=16 * 1024 * 1024,
             create=True,
-            unlink_on_close=False,
+            unlink_on_close=True,
         )
 
         # Message encoder
         self.encoder = msgspec.json.Encoder()
 
-        # WebSocket pools
-        self.bbo_pool: WsPool | None = None
-        self.trade_pool: WsPool | None = None
-        self.depth_pool: WsPool | None = None
+        # Three feeds share this process, with one connection per feed.
+        # The standalone candle and moving-average demos show redundant pools.
+        self.bbo_stream: WsSingle | None = None
+        self.trade_stream: WsSingle | None = None
+        self.depth_stream: WsSingle | None = None
         self._trade_sent_count = 0
+
+    @property
+    def logger(self) -> WorkerLogger:
+        """Return the logger after the processing process is ready."""
+        if self._logger is None:
+            raise RuntimeError("Worker logger has not been initialized")
+        return self._logger
+
+    def initialize_logger(self) -> None:
+        """Attach the worker logger after the master has created its SHM ring."""
+        if self._logger is not None:
+            return
+        logger_config = LoggerConfig(
+            base_level=LogLevel.INFO,
+            path=self.logger_path,
+            flush_interval_s=0.5,
+            emit_internal=False,
+        )
+        self._logger = WorkerLogger(config=logger_config, name="StreamProcess")
 
     def _process_bbo_message(self, msg: bytes) -> None:
         """Process bookTicker (BBO) messages."""
-        try:
-            decoded = msgspec.json.decode(msg, type=dict)
-            bbo = BBOUpdate(
-                event_time=decoded["E"],
-                symbol=decoded["s"],
-                best_bid_price=float(decoded["b"]),
-                best_bid_qty=float(decoded["B"]),
-                best_ask_price=float(decoded["a"]),
-                best_ask_qty=float(decoded["A"]),
-            )
-            stream_msg = StreamMessage(msg_type="bbo", data=msgspec.to_builtins(bbo))
-            self.data_producer.insert(self.encoder.encode(stream_msg))
-        except Exception as e:
-            self.logger.error(f"Error processing BBO message: {e}".encode("utf-8"))
+        decoded = msgspec.json.decode(msg, type=dict)
+        bbo = BBOUpdate(
+            event_time=decoded["E"],
+            symbol=decoded["s"],
+            best_bid_price=float(decoded["b"]),
+            best_bid_qty=float(decoded["B"]),
+            best_ask_price=float(decoded["a"]),
+            best_ask_qty=float(decoded["A"]),
+        )
+        stream_msg = StreamMessage(msg_type="bbo", data=msgspec.to_builtins(bbo))
+        forward_message(self.data_producer, self.encoder.encode(stream_msg), "data")
 
     def _process_trade_message(self, msg: bytes) -> None:
         """Process aggregated trade messages."""
-        try:
-            decoded = msgspec.json.decode(msg, type=dict)
-            trade = TradeUpdate(
-                event_time=decoded["E"],
-                symbol=decoded["s"],
-                price=float(decoded["p"]),
-                quantity=float(decoded["q"]),
-                trade_time=decoded["T"],
-                is_buyer_maker=decoded["m"],
-            )
-            stream_msg = StreamMessage(
-                msg_type="trade", data=msgspec.to_builtins(trade)
-            )
-            self.data_producer.insert(self.encoder.encode(stream_msg))
-            self._trade_sent_count += 1
-            if self._trade_sent_count % 50 == 0:
-                self.logger.info(
-                    f"Sent {self._trade_sent_count} trades".encode("utf-8")
-                )
-        except Exception as e:
-            self.logger.error(f"Error processing trade message: {e}".encode("utf-8"))
+        decoded = msgspec.json.decode(msg, type=dict)
+        trade = TradeUpdate(
+            event_time=decoded["E"],
+            symbol=decoded["s"],
+            price=float(decoded["p"]),
+            quantity=float(decoded["q"]),
+            trade_time=decoded["T"],
+            is_buyer_maker=decoded["m"],
+        )
+        stream_msg = StreamMessage(msg_type="trade", data=msgspec.to_builtins(trade))
+        forward_message(self.data_producer, self.encoder.encode(stream_msg), "data")
+        self._trade_sent_count += 1
+        if self._trade_sent_count % 50 == 0:
+            self.logger.info(f"Sent {self._trade_sent_count} trades".encode("utf-8"))
 
     def _process_depth_message(self, msg: bytes) -> None:
         """Process depth update messages."""
-        try:
-            decoded = msgspec.json.decode(msg, type=dict)
-            delta = OrderbookDelta(
-                final_update_id=decoded["u"],
-                first_update_id=decoded["U"],
-                bids=[(float(p), float(q)) for p, q in decoded.get("b", [])],
-                asks=[(float(p), float(q)) for p, q in decoded.get("a", [])],
-            )
-            stream_msg = StreamMessage(
-                msg_type="depth", data=msgspec.to_builtins(delta)
-            )
-            self.data_producer.insert(self.encoder.encode(stream_msg))
-        except Exception as e:
-            self.logger.error(f"Error processing depth message: {e}".encode("utf-8"))
+        decoded = msgspec.json.decode(msg, type=dict)
+        delta = OrderbookDelta(
+            final_update_id=decoded["u"],
+            first_update_id=decoded["U"],
+            previous_update_id=decoded["pu"],
+            bids=[(float(p), float(q)) for p, q in decoded.get("b", [])],
+            asks=[(float(p), float(q)) for p, q in decoded.get("a", [])],
+        )
+        stream_msg = StreamMessage(msg_type="depth", data=msgspec.to_builtins(delta))
+        forward_message(self.data_producer, self.encoder.encode(stream_msg), "data")
 
     async def _run_streams(self) -> None:
         """Run WebSocket streams."""
@@ -229,52 +258,72 @@ class BinanceStreamProcessor:
 
         # BBO stream
         bbo_config = WsConnectionConfig.default(
-            wss_url=f"wss://fstream.binance.com/ws/{self.symbol.lower()}@bookTicker"
+            wss_url="wss://fstream.binance.com/public/ws",
+            auto_reconnect=False,
         )
-        self.bbo_pool = await WsPool.new(
-            config=bbo_config,
-            pool_config=WsPoolConfig.default(),
-        )
+        self.bbo_stream = WsSingle(config=bbo_config)
 
-        # Trade stream
+        # The current Futures route map places bookTicker and depth on
+        # /public. It documents @aggTrade under /market but omits raw @trade;
+        # a read-only live probe confirmed raw @trade data on /public. Keep the
+        # raw stream here because downstream trade counts depend on its events.
         trade_config = WsConnectionConfig.default(
-            wss_url=f"wss://fstream.binance.com/ws/{self.symbol.lower()}@trade"
+            wss_url="wss://fstream.binance.com/public/ws",
+            auto_reconnect=False,
         )
-        self.trade_pool = await WsPool.new(
-            config=trade_config,
-            pool_config=WsPoolConfig.default(),
-        )
+        self.trade_stream = WsSingle(config=trade_config)
 
         # Depth stream
         depth_config = WsConnectionConfig.default(
-            wss_url=f"wss://fstream.binance.com/ws/{self.symbol.lower()}@depth@100ms"
+            wss_url="wss://fstream.binance.com/public/ws",
+            auto_reconnect=False,
         )
-        self.depth_pool = await WsPool.new(
-            config=depth_config,
-            pool_config=WsPoolConfig.default(),
-        )
+        self.depth_stream = WsSingle(config=depth_config)
 
-        async with self.bbo_pool, self.trade_pool, self.depth_pool:
-            self.logger.info(
-                "Streams connected, processing BBO + trades + depth...".encode("utf-8")
-            )
-            try:
+        bbo_stream = self.bbo_stream
+        trade_stream = self.trade_stream
+        depth_stream = self.depth_stream
+        assert bbo_stream is not None
+        assert trade_stream is not None
+        assert depth_stream is not None
 
-                async def consume_bbo():
-                    async for msg in self.bbo_pool:
-                        self._process_bbo_message(msg)
+        feeds = [
+            (bbo_stream, "BBO", self._process_bbo_message),
+            (trade_stream, "trades", self._process_trade_message),
+            (depth_stream, "depth", self._process_depth_message),
+        ]
+        try:
+            # Open every idle transport first. The shared runner then starts
+            # readers before sending subscriptions and waits for each logical
+            # feed's successful ACK before publishing readiness or data.
+            async with depth_stream, trade_stream, bbo_stream:
 
-                async def consume_trades():
-                    async for msg in self.trade_pool:
-                        self._process_trade_message(msg)
+                def publish_ready() -> None:
+                    forward_message(
+                        self.data_producer,
+                        self.encoder.encode(StreamMessage("streams_ready", {})),
+                        "data",
+                    )
+                    self.logger.info(
+                        "Streams connected, processing BBO + trades + depth...".encode(
+                            "utf-8"
+                        )
+                    )
 
-                async def consume_depth():
-                    async for msg in self.depth_pool:
-                        self._process_depth_message(msg)
-
-                await asyncio.gather(consume_bbo(), consume_trades(), consume_depth())
-            except KeyboardInterrupt:
-                self.logger.info("Stream interrupted, shutting down...".encode("utf-8"))
+                await run_feeds(
+                    feeds,
+                    subscriptions=[
+                        FeedSubscription((f"{self.symbol.lower()}@bookTicker",), 1),
+                        FeedSubscription((f"{self.symbol.lower()}@trade",), 2),
+                        FeedSubscription((f"{self.symbol.lower()}@depth@100ms",), 3),
+                    ],
+                    on_ready=publish_ready,
+                )
+        except KeyboardInterrupt:
+            self.logger.info("Stream interrupted, shutting down...".encode("utf-8"))
+        finally:
+            for stream, name, _ in feeds:
+                assert_no_receive_loss(stream, name)
 
     def run(self) -> None:
         """Run the stream processor."""
@@ -287,14 +336,22 @@ class BinanceStreamProcessor:
 
     def shutdown(self) -> None:
         """Shutdown the stream processor."""
-        if self.bbo_pool is not None:
-            self.bbo_pool.close()
-        if self.trade_pool is not None:
-            self.trade_pool.close()
-        if self.depth_pool is not None:
-            self.depth_pool.close()
-        self.data_producer.close()
-        self.logger.shutdown()
+        if self._shutdown:
+            return
+        self._shutdown = True
+        if self.bbo_stream is not None:
+            self.bbo_stream.close()
+        if self.trade_stream is not None:
+            self.trade_stream.close()
+        if self.depth_stream is not None:
+            self.depth_stream.close()
+        try:
+            assert_no_transport_loss(self.data_producer, "data")
+        finally:
+            self.data_producer.close()
+            if self._logger is not None:
+                self._logger.shutdown()
+                self._logger = None
 
 
 class BinanceDataProcessor:
@@ -333,6 +390,7 @@ class BinanceDataProcessor:
             except (OSError, RuntimeError):
                 time.sleep(0.01)
         else:
+            self.logger.shutdown()
             raise RuntimeError(f"Failed to attach to data ringbuffer at {data_path}")
 
         # Initialize time candles (1 second candles)
@@ -343,9 +401,11 @@ class BinanceDataProcessor:
 
         # Orderbook state
         self.orderbook: Orderbook | None = None
+        self._pending_orderbook: Orderbook | None = None
         self.last_update_id: int = 0
         self._depth_started: bool = False
         self._depth_update_count: int = 0
+        self._shutdown = False
 
         # TEMA and rounding
         self.tema = TimeExponentialMovingAverage(half_life_s=1.0)
@@ -380,12 +440,13 @@ class BinanceDataProcessor:
             for price, size in snapshot.asks
         ]
 
-        self.orderbook = Orderbook(
+        self._pending_orderbook = Orderbook(
             tick_size=self.tick_size,
             lot_size=self.lot_size,
             size=100,
         )
-        self.orderbook.consume_snapshot(asks=asks, bids=bids)
+        self._pending_orderbook.consume_snapshot(asks=asks, bids=bids)
+        self.orderbook = None
         self.last_update_id = snapshot.last_update_id
         self._depth_started = False
 
@@ -411,6 +472,16 @@ class BinanceDataProcessor:
 
     def _handle_trade(self, trade_data: TradeUpdate) -> None:
         """Handle trade update - build candles with real size."""
+        if not (
+            math.isfinite(trade_data.price)
+            and trade_data.price > 0
+            and math.isfinite(trade_data.quantity)
+            and trade_data.quantity > 0
+        ):
+            self.logger.info(
+                b"Skipping trade with nonpositive or nonfinite price/quantity"
+            )
+            return
         self._trade_count += 1
         if self._trade_count % 100 == 0:
             side = "SELL" if trade_data.is_buyer_maker else "BUY"
@@ -458,33 +529,36 @@ class BinanceDataProcessor:
 
     def _handle_depth(self, depth_data: OrderbookDelta) -> None:
         """Handle orderbook delta update."""
-        if self.orderbook is None:
-            return
+        book = self.orderbook if self._depth_started else self._pending_orderbook
+        if book is None:
+            raise FeedIntegrityError("Depth received before the snapshot")
 
         # Validate sequence continuity
-        if depth_data.final_update_id <= self.last_update_id:
+        if depth_data.final_update_id < self.last_update_id:
             return
 
         if not self._depth_started:
             if (
                 depth_data.first_update_id
-                <= self.last_update_id + 1
+                <= self.last_update_id
                 <= depth_data.final_update_id
             ):
-                self._depth_started = True
+                pass
             else:
-                return
-        else:
-            if depth_data.final_update_id < self.last_update_id + 1:
-                return
-            if depth_data.first_update_id > self.last_update_id + 1:
-                self.logger.warning(
-                    f"Orderbook sequence gap: expected {self.last_update_id + 1}, "
-                    f"got [{depth_data.first_update_id}, {depth_data.final_update_id}]".encode(
-                        "utf-8"
-                    )
+                raise FeedIntegrityError(
+                    f"Orderbook snapshot {self.last_update_id} cannot bridge "
+                    f"first depth [{depth_data.first_update_id}, "
+                    f"{depth_data.final_update_id}]; restart the example"
                 )
+        else:
+            if depth_data.final_update_id == self.last_update_id:
                 return
+            if depth_data.previous_update_id != self.last_update_id:
+                self.orderbook = None
+                raise FeedIntegrityError(
+                    f"Orderbook sequence gap: expected pu={self.last_update_id}, "
+                    f"got pu={depth_data.previous_update_id}; restart the example"
+                )
 
         # Apply deltas
         bids = [
@@ -495,31 +569,41 @@ class BinanceDataProcessor:
             OrderbookLevel(price=price, size=size, norders=0)
             for price, size in depth_data.asks
         ]
-        self.orderbook.consume_deltas(asks=asks, bids=bids)
+        book.consume_deltas(asks=asks, bids=bids)
+        self.orderbook = book
+        self._pending_orderbook = None
+        self._depth_started = True
         self.last_update_id = depth_data.final_update_id
 
         self._depth_update_count += 1
         if self._depth_update_count % 100 == 0:
-            depth = len(self.orderbook.get_bids()) + len(self.orderbook.get_asks())
+            depth = len(book.get_bids()) + len(book.get_asks())
             self.logger.info(f"Orderbook depth: {depth} levels".encode("utf-8"))
 
     def _process_message(self, msg_bytes: bytes) -> None:
         """Process a single message."""
-        try:
-            stream_msg = self.decoder.decode(msg_bytes)
-
-            if stream_msg.msg_type == "bbo":
-                bbo_data = msgspec.convert(stream_msg.data, type=BBOUpdate)
-                self._handle_bbo(bbo_data)
-            elif stream_msg.msg_type == "trade":
-                trade_data = msgspec.convert(stream_msg.data, type=TradeUpdate)
-                self._handle_trade(trade_data)
-            elif stream_msg.msg_type == "depth":
-                depth_data = msgspec.convert(stream_msg.data, type=OrderbookDelta)
-                self._handle_depth(depth_data)
-
-        except Exception as e:
-            self.logger.error(f"Error processing message: {e}".encode("utf-8"))
+        stream_msg = self.decoder.decode(msg_bytes)
+        if (
+            stream_msg.msg_type != "streams_ready"
+            and self.orderbook is None
+            and self._pending_orderbook is None
+        ):
+            raise FeedIntegrityError("Market update received before stream startup")
+        if stream_msg.msg_type == "streams_ready":
+            if self.orderbook is not None or self._pending_orderbook is not None:
+                raise FeedIntegrityError("Unexpected stream restart")
+            self._fetch_snapshot()
+        elif stream_msg.msg_type == "bbo":
+            bbo_data = msgspec.convert(stream_msg.data, type=BBOUpdate)
+            self._handle_bbo(bbo_data)
+        elif stream_msg.msg_type == "trade":
+            trade_data = msgspec.convert(stream_msg.data, type=TradeUpdate)
+            self._handle_trade(trade_data)
+        elif stream_msg.msg_type == "depth":
+            depth_data = msgspec.convert(stream_msg.data, type=OrderbookDelta)
+            self._handle_depth(depth_data)
+        else:
+            raise FeedIntegrityError(f"Unknown market message: {stream_msg.msg_type}")
 
     def run(self) -> None:
         """Run the data processor."""
@@ -529,24 +613,13 @@ class BinanceDataProcessor:
 
         try:
             while True:
-                try:
-                    # Consume all available messages
-                    messages = self.data_consumer.consume_all()
-                    if not messages:
-                        time.sleep(0.01)  # Small sleep to avoid busy waiting
-                        continue
-
-                    for msg_bytes in messages:
-                        self._process_message(msg_bytes)
-
-                except KeyboardInterrupt:
-                    self.logger.info(
-                        "Processing interrupted, shutting down...".encode("utf-8")
-                    )
-                    break
-                except Exception as e:
-                    self.logger.error(f"Error in processing loop: {e}".encode("utf-8"))
-                    time.sleep(0.1)
+                messages = consume_batch(self.data_consumer, "data")
+                if not messages:
+                    time.sleep(0.01)
+                    continue
+                for msg_bytes in messages:
+                    assert_no_transport_loss(self.data_consumer, "data")
+                    self._process_message(msg_bytes)
 
         except KeyboardInterrupt:
             self.logger.info("Processing process interrupted".encode("utf-8"))
@@ -555,8 +628,14 @@ class BinanceDataProcessor:
 
     def shutdown(self) -> None:
         """Shutdown the data processor."""
-        self.data_consumer.close()
-        self.logger.shutdown()
+        if self._shutdown:
+            return
+        self._shutdown = True
+        try:
+            assert_no_transport_loss(self.data_consumer, "data")
+        finally:
+            self.data_consumer.close()
+            self.logger.shutdown()
 
 
 def stream_process_entry(
@@ -571,13 +650,17 @@ def stream_process_entry(
     # Create processor (and SHM producer backing file) first before waiting
     processor = BinanceStreamProcessor(symbol, logger_path, data_path)
 
-    # Wait for processing process to initialize MasterLogger and snapshot
-    startup = StartupEvent(startup_event_path)
-    if not startup.wait(timeout=10.0):
-        print("Timeout waiting for processing process to start", file=sys.stderr)
-        sys.exit(1)
+    try:
+        # Wait before attaching WorkerLogger: the processing process creates
+        # the master logger's shared-memory ring before publishing readiness.
+        startup = StartupEvent(startup_event_path)
+        if not startup.wait(timeout=10.0):
+            raise TimeoutError("Timeout waiting for processing process to start")
 
-    processor.run()
+        processor.initialize_logger()
+        processor.run()
+    finally:
+        processor.shutdown()
 
 
 def processing_process_entry(
@@ -593,34 +676,28 @@ def processing_process_entry(
         symbol, tick_size, lot_size, logger_path, data_path
     )
 
-    # Fetch snapshot before signaling ready so stream process does not
-    # produce deltas we are unprepared to handle.
-    processor._fetch_snapshot()
+    try:
+        # Signal logger/consumer readiness. The streams_ready IPC marker
+        # requests a snapshot only after the depth socket is buffering.
+        startup = StartupEvent(startup_event_path)
+        startup.set()
 
-    # Signal that MasterLogger and orderbook snapshot are ready
-    startup = StartupEvent(startup_event_path)
-    startup.set()
-
-    processor.run()
+        processor.run()
+    finally:
+        processor.shutdown()
 
 
-def main() -> None:
-    """Main entry point."""
+def _run_processes(duration_s: float | None, runtime_dir: str) -> None:
+    """Start the stream/processing children using paths owned by runtime_dir."""
     symbol = "BTCUSDT"
     tick_size = 0.01
     lot_size = 0.001
 
-    # Paths - logger and data ringbuffer use raw filesystem paths
-    logger_path = "/tmp/binance_logger"
-    data_path = "/tmp/binance_data"
-    startup_event_path = "/tmp/binance_startup_ready"
-
-    # Clean up any stale files
-    for p in (startup_event_path, data_path):
-        try:
-            os.remove(p)
-        except FileNotFoundError:
-            pass
+    # Each run owns its shared-memory and startup files. TemporaryDirectory
+    # removes them after both children have stopped.
+    logger_path = os.path.join(runtime_dir, "binance_logger")
+    data_path = os.path.join(runtime_dir, "binance_data")
+    startup_event_path = os.path.join(runtime_dir, "binance_startup_ready")
 
     # Create processes
     stream_proc = multiprocessing.Process(
@@ -634,25 +711,72 @@ def main() -> None:
         daemon=True,
     )
 
-    # Start stream first so the SHM producer creates the backing file before
-    # the processing process tries to attach its consumer.
-    stream_proc.start()
-    processing_proc.start()
-
-    print(f"Started stream and processing processes for {symbol}")
-    print("Press Ctrl+C to stop...")
-
+    processes: list[multiprocessing.Process] = []
+    start = time.monotonic()
+    unexpected_exit = False
     try:
-        # Wait for processes
-        stream_proc.join()
-        processing_proc.join()
+        # Start stream first so the SHM producer creates the backing file
+        # before the processing process tries to attach as a consumer.
+        stream_proc.start()
+        processes.append(stream_proc)
+        processing_proc.start()
+        processes.append(processing_proc)
+
+        print(f"Started stream and processing processes for {symbol}")
+        print("Press Ctrl+C to stop...")
+
+        while True:
+            if any(proc.exitcode is not None for proc in processes):
+                unexpected_exit = True
+                print("A child process exited unexpectedly; stopping the example.")
+                break
+            if duration_s is not None and time.monotonic() - start >= duration_s:
+                print(f"Duration limit reached ({duration_s:g}s).")
+                break
+            for proc in processes:
+                proc.join(timeout=0.05)
     except KeyboardInterrupt:
         print("\nShutting down...")
-        stream_proc.terminate()
-        processing_proc.terminate()
-        stream_proc.join(timeout=2)
-        processing_proc.join(timeout=2)
+    finally:
+        # Ask both children to run their finally/shutdown paths before using
+        # terminate() as a last resort.
+        for proc in processes:
+            if proc.is_alive() and proc.pid is not None:
+                try:
+                    os.kill(proc.pid, signal.SIGINT)
+                except ProcessLookupError:
+                    pass
+        for proc in processes:
+            proc.join(timeout=5)
+        for proc in processes:
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=2)
+
+    failed = [proc.name for proc in processes if proc.exitcode not in (0, None)]
+    if failed:
+        raise RuntimeError(f"Example child process failed: {', '.join(failed)}")
+    if unexpected_exit:
+        raise RuntimeError("Example child process exited before shutdown was requested")
+
+
+def main(duration_s: float | None = None) -> None:
+    """Run the example in a temporary directory owned by this invocation."""
+    with tempfile.TemporaryDirectory(prefix="mm-binance-stream-") as runtime_dir:
+        _run_processes(duration_s, runtime_dir)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Stream public Binance futures market data"
+    )
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="Stop after this many seconds (default: run until interrupted)",
+    )
+    args = parser.parse_args()
+    if args.duration is not None and args.duration <= 0:
+        parser.error("--duration must be > 0")
+    main(duration_s=args.duration)

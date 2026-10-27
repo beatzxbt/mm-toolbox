@@ -1,0 +1,507 @@
+# Examples, benchmarks and release review — 2026-10-27
+
+Publication remains on hold in [draft PR #31](https://github.com/beatzxbt/mm-toolbox/pull/31).
+Two GPT-6 Luna max agents exercised the examples and benchmarks; a GPT-6 Sol
+xhigh agent reviewed test organization. After approval, two GPT-6 Luna max
+agents implemented that organization and assertion work, and a GPT-6.1 Sol
+max agent implemented the remaining reliability fixes. The parent reviewed
+the changes and ran the final integration checks.
+
+All four examples and all 13 benchmark entry points have now executed real
+work successfully with bounded settings during the initial audit. The data
+collector also captured ten public messages without changing the tracked
+100,000-line orderbook fixture. This establishes basic execution and cleanup;
+the approved follow-up below adds explicit failure on unproven continuity.
+
+The historical performance measurements below used a freshly built, installed `1.0.0b10` wheel from
+`e4ec6c84958d1a4a6797005254e36558ed8724c7`, with locked runtime dependencies.
+Those measurements predate the current reliability changes; they are retained
+as audit evidence, not presented as new performance measurements of this PR's
+final revision.
+
+## Advanced BBO correction — 2026-10-27
+
+The mixed-feed investigation exposed an independent advanced-orderbook defect:
+a worse BBO price removed only one obsolete top level and could leave an old
+price, quantity or order count in place. With bids 100/99/98/97 and asks
+101/102/103/104, a supplied BBO of bid 97 size 7 and ask 98 size 8 incorrectly
+produced bid 99 size 2 and ask 101 size 1. The standard book applied it correctly.
+
+The core now finds the first valid remaining level with the ladder's binary
+search and advances its ring head past the obsolete prefix. It updates an
+existing quoted price or inserts it ahead of surviving depth. Same-price
+updates and tighter quotes retain their constant-time paths; the operation
+allocates no memory and adds no locks. Both Python ingestion APIs and Cython
+callers use this same core. Normal component tests cover price jumps, metadata,
+full and partial capacity, and wrapped ladders.
+
+Replaying the same saved 10,000-record capture against the rebuilt core removed
+all **220** advanced BBO payload mismatches in arrival order and all **190** in
+the sequence-ordered prototype. The 1,000-record capture also had zero BBO
+payload mismatches. Every accepted BBO was checked for both price and quantity;
+the full book was independently compared with a Decimal reference at depth
+boundaries. Evidence: `/tmp/mm-bbo-fixed-replay-6w2ihnr2/`.
+
+Local validation of this correction passed **1,877 tests, eight skipped** on
+both the Python 3.14 source build and an isolated installed Python 3.15 wheel,
+requiring all seven native test extensions. The wheel was built from the sdist;
+its source and the changed test sources matched the checkout. The standalone C
+suite passed **33/33**, and Ruff format/lint, source typing and diff whitespace
+checks passed. The installed wheel also reproduced zero BBO payload mismatches
+on the 10,000-record capture. Evidence:
+`/tmp/mm-bbo-fix314-full-final-tests.log` and
+`/tmp/mm-bbo-release315-jcmn37_g/wheel-tests.log`, with wheel replay results
+under that directory's `replay/`.
+
+The collector still records independent BBO and depth feeds in arrival order;
+its depth bridge and `pu` chain checks do not establish cross-feed ordering.
+The depth-aware publication gate remains an isolated prototype. Its ordered
+replays had zero full-book mismatches at depth boundaries after this correction,
+while arrival-order replay retained its separate sequencing discrepancies.
+That collector integration remains outstanding.
+
+The advanced logging benchmark explicitly uses **64 MiB** shared transport
+capacity for the master and every worker and prints it in its report. It has
+no capacity command-line option. The earlier capacity experiment is recorded
+in `/tmp/mm-logging-capacity-I8V7iF/RESULTS.md`. A bounded 0.2-second, one-worker
+32-byte smoke run delivered all **586,879** attempted messages, with zero
+overwrites, rejections, transport/worker errors or shutdown timeouts. This
+checks the explicit setting and cleanup; it is not a new sustained-load
+performance comparison. Output:
+`/tmp/mm-bbo-fixed-replay-6w2ihnr2/logger-smoke.log`.
+
+## Final benchmark and collector follow-up — 2026-10-27
+
+All 13 benchmark entry points have now completed substantive bounded checks
+against the final installed Python 3.15 runtime. The 12 non-WebSocket drivers
+ran from the final sdist sources; the standard and advanced orderbook drivers
+were rerun from the checkout after their input-error fix. The WebSocket driver
+was checked separately with strict inbound and outbound workloads. These runs
+do not cover every optional mode or establish performance on other machines.
+The recorded commands, results and scope are in
+`/tmp/mm-bench-remaining-final-CVINNB/RESULTS.md`; the post-fix orderbook runs
+are recorded in `/var/folders/jd/yrb9bcxd58b4bp9ht0phdxbc0000gn/T/mm-orderbook-final-c6t8bgi9/result.json`.
+
+The deliberately saturated MPSC benchmark accounted for **935,614 inserts**:
+930,515 consumed and 5,099 overwritten. The 256-byte advanced logging stress
+cases reported **37.60–45.02%** loss through explicitly counted overwrite-oldest
+batches. Those rows exercise overload; they are not loss-free acceptance
+results. The 32-byte advanced logging case consumed all 8,730,924 attempts.
+
+A fault injection found the orderbook data collector could log a failed depth
+connection yet finish successfully using only BBO data. A subsequent live
+capture contained all three record types but exposed another defect: its first
+depth update did not bridge the snapshot because both feeds were opened after
+the snapshot. That capture is not counted as continuity validation.
+
+The collector now opens and buffers both feeds before fetching the snapshot,
+requires the initial depth bridge and checks each subsequent `pu` link. It
+bounds buffered payloads, propagates errors and timeouts, uses Binance's
+routed public endpoints, and atomically publishes only a completed capture.
+This follows the [Binance futures orderbook guide](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/websocket-market-streams/How-to-manage-a-local-order-book-correctly).
+An interrupt discards the incomplete temporary capture. Buffered update receive
+timestamps can precede the snapshot response even though the snapshot is
+written first for replay.
+
+A live **10,000-record** capture contained one snapshot, 9,663 BBO and 336
+depth updates; its first depth update bridged the snapshot and every later
+depth link matched. A separate **1,000-record** capture used the default
+1,000-level snapshot and passed the same checks. Both orderbook benchmark
+drivers replayed 250 measured records from that capture, including BBO and
+depth messages. Focused tests cover feed failures, startup and snapshot
+timeouts, bridge/gap validation, bounded buffering, cancellation and cleanup.
+Evidence: `mm-collector-verified-qa19gorw/result.json`,
+`mm-collector-verified-69xqnv7m/result.json`, and
+`mm-orderbook-live-replay-ud4p2gc8/result.json` under the host's system
+temporary directory.
+
+Both orderbook benchmark CLIs now exit nonzero with actionable instructions if
+the capture is missing. The 100,000-line fixture is present in the Git checkout
+but omitted from the sdist; provide a capture with `--input`, or generate one
+using `collect_data.py --output <path>` and pass that path to `--input`.
+
+## Receive-burst follow-up — 2026-10-26
+
+The live receive loss was an unresolved release defect. A minimal consumer
+that only retained bytes, without JSON decoding or SHM writes, lost **1,016
+of 2,048 messages** with the old 128-slot buffer when 256-message bursts
+arrived every 50 ms. The corrected wrapper delivered **2,048/2,048** with
+zero loss in that reproducer.
+
+- Wrapper buffers now default to **4,096 messages and 16 MiB of queued payloads**,
+  configurable through `WsConnectionConfig`. Consumed slots release payload
+  references. Shared pool backpressure considers bytes already held in the
+  synchronous Picows parser; pausing a socket cannot interrupt that batch.
+- Readers await one readiness event directly. Closing a single client drains
+  queued bytes; a pending reader from an old pool session cannot consume a new
+  session's data. The general ringbuffer and lock-free SHM core are unchanged.
+- Binance examples open idle routed sockets, start readers, then subscribe.
+  The full group must acknowledge startup before readiness or market state is
+  published. Temporary pre-ACK data is bounded; late pool ACKs are handled
+  without decoding ordinary market frames twice.
+- Longer TLS validation found a second defect: automatically selected
+  `aiofastnet==1.2.0` resumes its fallback TLS engine through an unimplemented
+  method. A verified local TLS reproduction delivered all 2,048 messages but
+  raised 16 callback exceptions. Explicit standard asyncio transport selection
+  delivered the same traffic with **zero callback exceptions**. Certificate and
+  hostname verification remain enabled; there is no retry/fallback of writes.
+- A subsequent live run exposed an intermittent watchdog disconnect. Two false
+  timeout sequences were reproduced locally: ready PONG callbacks losing to
+  the timer, and pause/resume occurring entirely between heartbeat ticks.
+  The correction gives ready I/O a poll before expiry, matches namespaced probe
+  payloads, and excludes actual paused duration from the existing three-interval
+  readable-time budget. Repeated brief pauses cannot reset that budget forever.
+  Matching PONGs still update observed RTT under pressure. Real TLS ordering,
+  cancellation/close and missing-PONG cases preserve these contracts.
+
+Final code at `d79969a` passed **1,814 tests, eight skipped** in each clean-source,
+Cython-aware coverage and installed-wheel suite. Coverage is **85.75%**, passing
+the unchanged 85% gate. Source used Python 3.14.4; the wheel was built from the
+sdist and tested on Python 3.15.1 outside the checkout with all seven native test
+extensions rebuilt. The final artifacts passed twine and version/content checks.
+Evidence is in `/tmp/mm-heartbeat-final-{source314,coverage314,wheel315}-tests.log`
+and `/tmp/mm-heartbeat-final-dist315/`. Live acceptance and the exact-head
+cross-platform matrix results are recorded in [draft PR #31](https://github.com/beatzxbt/mm-toolbox/pull/31).
+
+The final installed Python 3.15 wheel also passed live acceptance: the MPSC
+pipeline ran for **600 seconds**, the stream demo for **60 seconds**, and the
+candle and moving-average demos for **30 seconds each**. All four exited 0,
+with no receive/SHM loss, heartbeat errors, callback exceptions or crashes.
+The candle demo reported two filtered non-execution trades; the other runs
+had empty stderr. A previous attempt included a recorded 279-second clamshell
+suspension and is excluded from acceptance. The successful rerun kept the
+machine awake without changing heartbeat deadlines. Evidence:
+`/tmp/mm-heartbeat-awake-live315/runs.json` and its per-example logs.
+
+The first platform matrix exposed an assertion portability defect: older
+OpenSSL spells its self-signed-certificate error differently. Certificate
+rejection tests now assert the verification code, preserving both untrusted
+issuer and hostname rejection without depending on message punctuation.
+
+Before the heartbeat correction, at `52d158f`, source Python 3.14 and installed Python 3.15 wheel suites each
+passed **1,804 tests, eight skipped**; Cython-aware coverage was **85.55%**
+against the unchanged 85% gate. These checks precede the final heartbeat
+correction. The wheel was built from the sdist, and all seven native test
+extensions were rebuilt against the installed headers. Twine, version/content
+validation, lint/format, source typing and the 33-test C orderbook suite passed.
+
+### Inbound performance at `52d158f`
+
+The source runs in a separate process. Each scenario sends 5,000 unique
+256-byte messages; the pool receives three identical wire copies and filters
+10,000 duplicates. All six paced/first-burst/post-idle cases had zero loss,
+missing or reordered IDs, duplicate app deliveries, or unexplained counts.
+Rates cover first source send through last unique application receipt.
+
+| Receiver / burst | Unique deliveries/s | Source-to-app p50 | Source-to-app p99 |
+| --- | ---: | ---: | ---: |
+| Single, first burst | 171,554 | 0.052 ms | 0.182 ms |
+| Single, post-idle | 212,882 | 0.054 ms | 0.077 ms |
+| Three-socket pool, first burst | 72,425 | 0.082 ms | 0.263 ms |
+| Three-socket pool, post-idle | 66,268 | 0.069 ms | 0.301 ms |
+
+Percentiles use a bounded uniform reservoir of 4,096/5,000 deliveries. The paced
+cases intentionally throttle their source and are acceptance checks, not
+maximum-throughput results. Periodic occupancy sampling observed no pauses in
+these active-consumer runs; separate startup tests deliberately hold consumers
+until reads pause, then verify bounded queues and exact zero-loss delivery.
+
+The outbound 100,000-call check also delivered all expected frames: **3.14M
+single send calls/s**, **1.50M pool-fastest calls/s**, and **2.10M broadcast
+frames/s** (three frames per broadcast call). These are synchronous send-call
+measurements, not RTT. The sink received 201,000 single and 804,000 pool frames,
+including warmup and latency workloads. Send-buffer high/low-water notices
+were informational; there were no callback exceptions or missing deliveries.
+
+These are local reference measurements on the environment below, without
+cross-run confidence intervals. Evidence: `/tmp/mm-receive-diagnosis-fixed.jsonl`,
+`/tmp/mm-receive-final2-inbound5000.stdout`,
+`/tmp/mm-receive-final2-outbound100k.stdout`, and
+`/tmp/mm-receive-final2-{source314,coverage314,wheel315}-tests.log`.
+
+The examples retain existing raw `@trade` semantics on the live-verified
+`/public/ws` route. The current official [Binance route map](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/websocket-market-streams/Important-WebSocket-Change-Notice)
+lists `@aggTrade` under `/market` and omits raw `@trade`; changing to aggregate
+events would change candle input counts. This follow-up does not silently make
+that change. Subscription responses follow the [official ACK format](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/websocket-market-streams/Live-Subscribing-Unsubscribing-to-streams).
+
+## Earlier reliability and test follow-up — 2026-10-25
+
+- WebSocket single/pool wrappers expose exact lifetime receive-overwrite
+  totals, including startup, failed handshakes and replaced/retired sockets.
+  Close preserves the totals. Native overwrite warnings are sampled at
+  counts 1, 2, 4, 8, ... while exact counters remain available. The public
+  runtime-checkable client protocol is unchanged; the concrete getters are
+  additive. The receive path adds no locks.
+- The examples stop on receive/SHM overwrite, rejected SHM writes, disconnects
+  or sequence gaps, including loss before the first state update. They disable
+  automatic reconnect, propagate candle/processor/child failure and clean up
+  owned tasks, processes and files. Restart the whole example after failure;
+  a book snapshot alone cannot repair missing candle or moving-average input.
+- The Binance futures adapter follows the exchange's snapshot bridge
+  (`U <= lastUpdateId <= u`) and subsequent `pu == previous u` rule. Buffered
+  updates start before the snapshot fetch, and no book state is published
+  before the initial bridge. MPSC readiness waits for every snapshot; its BBO
+  streams update the touch of seed depth rather than maintaining full depth.
+- Worker logging exposes cumulative rejected-message, transport-error and
+  overwritten-batch counters after shutdown. The master reports loss that
+  occurred before consumer attachment. The benchmark waits for shutdown
+  before worker success, verifies worker identity/status/exit and fails on
+  lifecycle errors or unexplained missing consumption. Intentional overwrite
+  rows remain supported, with batch units made explicit.
+- Test scenarios now live beside their components, with shared replay helpers,
+  deterministic deadline checks and six additional extreme rounding-boundary
+  cases. New continuity/accounting tests use the normal source and wheel
+  gates. See [the completed test-structure review](TEST_STRUCTURE_REVIEW.md).
+- Installed-wheel tests copy example/benchmark helpers outside the checkout;
+  those helpers and native test sources are present in the sdist. Native
+  library layouts changed, so rebuild the library and dependent Cython
+  extensions together. The SHM core and overwrite-oldest policy are unchanged.
+
+The adapter sequencing follows the [Binance futures local-book guide](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/websocket-market-streams/How-to-manage-a-local-order-book-correctly).
+
+### Validation at `eefd9a6`
+
+The final source suite on Python 3.14.4 passed **1,740 tests, eight skipped**
+with all seven native test modules required; the standalone C orderbook suite
+passed **33/33**. The final collection has 1,748 cases: the prior 1,682, one
+split backend check, six rounding boundary cases and 59 reliability cases.
+The draft PR shows the cross-platform CI status.
+
+| Check | Final local result |
+| --- | --- |
+| Python 3.14.4 source, clean native rebuild | **1,740 passed, eight skipped**, 72.59 s. |
+| Python 3.15.1 installed wheel, isolated test tree | **1,740 passed, eight skipped**, 85.86 s; all seven native test modules rebuilt against installed headers. |
+| Python 3.14 Cython-aware coverage | **85.55%**, passing the unchanged 85% threshold; **1,740 passed, eight skipped**. |
+| Distribution checks | Isolated wheel and sdist builds, a separate wheel build from the sdist, twine and version validation passed. The wheel contains 36 native modules, typing metadata and native SHM sources; the sdist contains example/benchmark helpers and the native test harness. |
+| Opt-in live integration tests | **Three passed** against the installed Python 3.15 wheel, including single/pool WebSockets and exact-reference orderbook replay. |
+| Live examples against the final Python 3.15 wheel | Candles 6 s, averages 6 s, stream 8 s and MPSC 5 s exited 0 with no stderr. Candles/averages/stream processed live updates; the short MPSC run established all four snapshots and started workers. |
+| Extended MPSC live check | The 12 s run processed live trades/BBO, then detected receive overwrites and exited **1**, reporting child failure. The guard contained the failure, but the loss remained a release blocker. The subsequent receive investigation reproduced the defect with a minimal consumer, so machine throughput alone was not an adequate explanation. Owned temporary files were removed. |
+| Native receive-loss fault injection | A localhost burst into a one-slot test buffer makes the real multiprocess stream fail before state output and removes owned files. Included in both full suites. |
+| Advanced logging final-status smoke | One worker, 32-byte messages, one 50 ms window: **144,976 attempted/consumed**, no rejected messages, transport errors, overwrites, worker errors, forced exits or drain timeouts. Exit 0; functional evidence rather than a new performance measurement. |
+| Ruff lint/format, configured source typing, whitespace | Passed. |
+
+The eight default skips are the three opt-in live tests and five legacy Python
+checks that cannot mutate Cython fields; no required native module was skipped.
+Workload processes, owned example paths and logging IPC files were absent
+after the final runs. Evidence: `/tmp/mm-review-full314-final.log`,
+`/tmp/mm-review-wheel315-tests.log`, `/tmp/mm-review-final-coverage314-tests.log`,
+`/tmp/mm-review-final-dist315-build.log` and `/tmp/mm-review-final-live315/`.
+
+## Environment and interpretation
+
+Apple M2, 8 cores, 16 GiB RAM, macOS 26.6.2 arm64, ordinary GIL-enabled
+CPython 3.15.1. Workloads ran serially without `PYTHONPATH=src`. Native runs
+and analytics runs used separate quiet windows; these are local reference
+measurements, not a cross-machine comparison or production latency guarantee.
+
+Most per-call rows use 100,000 measurements after 1,000 warmup calls.
+`numpy.percentile` uses its default linear interpolation. Python call wrappers
+and timer overhead remain in the samples. Inverse mean latency is not treated
+as end-to-end delivery throughput.
+
+## Historical example measurements
+
+| Example | Final bounded check | Result and limits |
+| --- | --- | --- |
+| `candle_types_demo.py` | 6 seconds, plus a 45-second instrumented capture | Exit 0, real trades/candles, clean cancellation. The filtered capture received 568 frames, skipped three zero-value inputs, and built 578 completed candles without zero lows/closes. |
+| `moving_averages_demo.py` | 6 seconds | Exit 0, live BBO prices and all four averages, no stderr in the final run. Two connections exercise the pool. |
+| `binance_stream.py` | 8 seconds, two child processes and three feeds | Exit 0, snapshot, trades, TEMA and candles; children stopped. One `WsSingle` per feed reduces redundant work. The latest run still logged **44 receive-buffer overwrites**. Treat this as observed loss requiring consumer recovery, not a loss-free feed. |
+| `shm_mpsc_pipeline.py` | 5 seconds, four workers | Exit 0, all four snapshots and worker streams started, children and owned temporary files cleaned up; no stderr in the final run. Earlier runs did show receive loss. |
+
+The candle anomaly was traced to real incoming trade-shaped JSON carrying
+`p="0", q="0", X="NA", st=1`. An unfiltered 45-second capture received 725
+frames, including three such inputs, and produced seven candles with zero
+low/close. Direct positive-trade and five-builder async probes were correct.
+The general `Trade`/candle API explicitly accepts zero values; the Binance
+execution examples now skip and report nonpositive/nonfinite execution inputs.
+No candle-core initialization change was made.
+
+## Initial driver repairs
+
+- Bring standard logging benchmark configuration, handler push and shutdown
+  calls into line with the synchronous API; verify produced/consumed counts.
+- Replace removed bytes/numeric ringbuffer operations with supported peeks and
+  `unwrapped`, and label refill-plus-drain workloads accurately.
+- Honor explicit zero warmup/measurement overrides in the shared runner.
+  Preserve a replay suite's measured interval instead of overwriting it with
+  JSON loading/warmup time.
+- Make operation-count aliases consistent; restrict the rounding tick sweep
+  to powers of ten. Give the batch-based candle benchmark a practical default
+  of ten measured batches and two warmup batches (default run also passed).
+- Count successful MPSC writes, rejected writes, overwritten records and
+  remaining records; assert conservation after workers stop. Bound child
+  waits and result collection, propagate failures, and clean up queues/maps.
+- Use a counted local WebSocket sink for outbound send benchmarks, check every
+  expected received frame, and distinguish send-call latency from RTT.
+- Give live examples duration limits, awaited task cancellation, joined child
+  shutdown, unique owned temporary paths and parent-visible child failures.
+  Reserve the master's producer shard in the MPSC example.
+- Fix logger/master startup ordering and avoid overwriting the checked-in
+  market-data fixture with the collector's default output.
+- Remove the advanced logging driver's wait for an unreachable delivery count
+  after overwrite. Use bounded final drain, report lifecycle errors, and make
+  its worker-active time interval and scenario-level percentiles explicit.
+
+## Analytics benchmark results
+
+Candle rows use 100 measured batches of 10,000 trades, five warmup batches,
+1,000 retained candles. Values include factory setup and the batch loop;
+percentiles are distributions of whole batches, not individual trades.
+
+| Candle | No trade storage: mean ns/trade | No storage: trades/s | With storage: mean ns/trade |
+| --- | ---: | ---: | ---: |
+| Time | 254.80 | 3,924,652 | 260.29 |
+| Tick | 256.40 | 3,900,111 | 282.34 |
+| Volume | 296.00 | 3,378,402 | 430.27 |
+| Price | 265.86 | 3,761,329 | 285.94 |
+| Multi | 342.47 | 2,919,937 | 380.76 |
+
+Moving averages use window 100 and 100,000 samples per operation. Normal and
+fast modes both passed. Normal-mode mean update latency: EMA **292.2 ns**,
+SMA **504.5 ns**, TEMA **360.1 ns**, WMA **502.6 ns**. Initialization rows also
+include allocating a new instance; their means were 10.5–14.9 microseconds.
+
+Rate-limiter default and state/burst/per-second configurations both passed.
+With state/burst enabled, mean allowed/denied/burst latencies were
+**194.6 / 207.5 / 226.2 ns**; p99 values were **291 / 292 / 334 ns**. Refill
+setup is outside those individual call timers.
+
+Rounder scalar and vector modes, all four power-of-ten tick sizes, and array
+sizes 1/4/16/64 passed. At tick 0.01, lot 0.001 and 64-element arrays, scalar
+bid/ask/size means were **215.4 / 214.0 / 218.1 ns**. Vector means were
+**633.8 / 618.3 / 607.8 ns per array call**, not per element.
+
+## Logging benchmark results
+
+Standard logger: 128-byte messages, 100,000 measured emits, 1,000 warmup,
+1,000 messages per timed emit batch, 200 shutdown repetitions. All **101,000
+produced messages were consumed**, loss zero. Mean emit compute cost was
+**1,151.7 ns/message**; p50/p95/p99 were **1,129.5 / 1,237.2 / 1,521.4 ns**.
+Those percentiles describe repeated batch averages, not independent
+per-message tail latency. Flushing 128 queued messages at shutdown averaged
+**1.73 microseconds**, p99 **3.21 microseconds**.
+
+Advanced logger: three repetitions of a one-second producer-active window,
+flush interval 20 ms. Startup/drain are excluded from the rates below; the
+rate is not a per-message latency measurement. Worker errors, forced exits
+and drain timeouts were zero in every row. Only three scenario-level samples
+exist per operation, so its printed percentiles cannot establish message
+p99 delivery latency.
+
+| Message bytes | Workers | Attempted | Consumed | Lost | Consumed / producer-active second | Loss |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 32 | 1 | 7,574,403 | 7,574,403 | 0 | 2,524,793 | 0% |
+| 256, size sweep | 1 | 7,066,031 | 4,933,825 | 2,132,206 | 1,644,523 | 30.18% |
+| 256, worker sweep | 1 | 6,670,336 | 4,768,112 | 1,902,224 | 1,589,366 | 28.52% |
+| 256, worker sweep | 2 | 15,264,240 | 8,432,199 | 6,832,041 | 2,810,712 | 44.76% |
+
+These saturated rows intentionally exercise overwrite-oldest transport.
+Accepted/attempted throughput must not be presented as loss-free delivery.
+
+## Historical benchmark validation and evidence
+
+All 17 canonical native/transport smoke/timed commands and all 11 final
+analytics commands exited 0. The final four example commands and the default
+candle benchmark exited 0. Ruff lint/format, configured source type checking
+and diff whitespace checks pass. These were driver-only repairs at the audit
+point. The approved follow-up above changes native library layouts and
+requires a clean rebuild.
+
+Raw local evidence and exact commands:
+
+- Native/transport: `/tmp/mm-toolbox-beta-owned-b10/{RESULTS.md,summary.json,commands.txt}`.
+- Analytics: `/tmp/mm-beta-root-analytics/runs.json` and matching stdout/stderr.
+- Final examples: `/tmp/mm-beta-root-final-examples/runs.json`; the latest
+  single-feed stream output is `binance_stream_single_feed.stdout/.stderr`.
+- Live input diagnosis: `/tmp/mm-beta-b10-live-candle-capture-45.json` and
+  `/tmp/mm-beta-b10-live-candle-capture-filtered.json`.
+- Initial failures: `/tmp/mm-beta-examples-audit-luna6/`.
+
+The previous generic `/tmp/binance_logger` artifact was verified unused and
+removed. Final child processes and owned temporary paths were checked.
+
+## Way forward
+
+Keep publication held until the review is accepted. The focused test
+organization and explicit stop-on-lost-continuity policy are now implemented.
+Review the changes and final validation in the draft PR before choosing a new
+release revision. Existing candidate tags remain unchanged and unpublished.
+
+The detailed native/transport measurements follow.
+
+# Native and transport benchmark details
+
+## Environment and method
+
+Python 3.15.1, `mm-toolbox` 1.0.0b10 installed wheel, macOS 26.6.2 arm64, Apple M2 (8 cores, 16 GiB). Timed commands ran serially with the wheel environment and no `PYTHONPATH=src`. Every canonical smoke and timed command exited 0. Full commands, combined stdout/stderr, and status files are indexed in `summary.json` and `commands.txt`.
+
+Latency percentiles use `numpy.percentile` with its default linear interpolation. Orderbook per-level latency divides each operation latency by the number of levels in that input message. Ringbuffer batch rows count batch calls; at the timed 100,000-operation setting, batch sizes 1/10/100/1,000 divide evenly, so each batch setting processed exactly 100,000 items. For non-divisible inputs, the benchmark uses `ceil(N / batch_size)` calls, so report the actual count as calls × batch size.
+
+The ringbuffer `fill+consume_all` samples include `insert_batch` refill inside the timed callable, followed by `consume_all`; they are not pure `consume_all` latency. Numeric/bytes suite-wide “Total time” and inverse-mean ops/s combine different operations and are not end-to-end throughput.
+
+## Orderbooks
+
+The checked-in 100,000-line fixture was read without modification. Each run skipped the first snapshot from timing, warmed up on 1,000 messages, then measured the remaining 98,999 messages (90,019 BBO, 8,980 delta). The elapsed interval covers only measured message processing.
+
+| Implementation | Levels | Hint | Measured time | Message throughput | BBO ns/level p50/p95/p99 | Delta ns/level p50/p95/p99 |
+|---|---:|---|---:|---:|---:|---:|
+| Standard | — | — | 1.189 s | 83,255 msg/s | 541.5 / 729 / 1,750 | 756.3 / 1,044.5 / 3,019 |
+| Advanced | 2,048 | on | 0.299 s | 330,965 msg/s | 62.5 / 62.5 / 83.5 | 308.8 / 701.4 / 953.6 |
+| Advanced | 4,096 | on | 0.483 s | 204,970 msg/s | 62.5 / 83.5 / 166.5 | 534.9 / 1,331.9 / 2,051.7 |
+
+## In-process ringbuffers
+
+Numeric ran 100,000 operations with 1,000 warmup at capacities 16, 64, 256, 1,024, and 4,096. Mean latency in ns (multi-size comparative output):
+
+| Capacity | Insert | Consume | Contains | Peek right | Unwrapped |
+|---:|---:|---:|---:|---:|---:|
+| 16 | 282.3 | 1,377.9 | 492.0 | 71.9 | 263.3 |
+| 64 | 272.0 | 1,489.0 | 530.4 | 70.2 | 299.0 |
+| 256 | 289.6 | 1,468.2 | 566.8 | 70.7 | 276.2 |
+| 1,024 | 285.3 | 1,341.5 | 951.8 | 68.5 | 264.6 |
+| 4,096 | 270.2 | 1,295.1 | 511.5 | 75.1 | 260.3 |
+
+At capacity 1,024, numeric p50/p95/p99 ns were: insert 250/292/375; consume 1,333/1,750/2,000; combined fill+consume_all 28,625/35,458/51,583; contains 500/583/709; peek left 83/84/125; peek right 83/84/125; unwrapped 250/292/375. The batch-call counts were 100,000 / 10,000 / 1,000 / 100 for batch sizes 1 / 10 / 100 / 1,000.
+
+Bytes used capacity 256, item sizes 32/128/512/2,048 bytes, and 100,000 operations with 1,000 warmup. p50/p95/p99 ns:
+
+| Item bytes | Insert | Consume | Combined fill+consume_all |
+|---:|---:|---:|---:|
+| 32 | 167/209/291 | 291/417/709 | 2,125/2,916/4,791 |
+| 128 | 167/209/2,667 | 250/292/375 | 2,083/2,209/3,000 |
+| 512 | 208/333/4,666 | 292/417/500 | 2,500/3,417/4,916 |
+| 2,048 | 250/3,625/5,458 | 333/458/833 | 5,125/5,625/7,250 |
+
+## Shared-memory ringbuffers
+
+SPSC used a 1 MiB requested capacity, 100,000 insert/consume latency samples, and a separate 100,000-message producer/consumer run for each payload. The benchmark enlarged the mapped ring to 4 MiB for 32-byte payloads and 64 MiB for 512-byte payloads to fit all records without loss. Producer and consumer counts both matched 100,000. Latency p50/p95/p99 ns: for 32-byte messages, insert 125/166/208 and consume 333/666/791; for 512-byte messages, insert 125/208/1,208 and consume 375/500/1,375. The per-process throughput run was a single sample: 32-byte producer/consumer 5.85/5.88M msg/s; 512-byte producer/consumer 3.14/3.16M msg/s. These are producer/consumer process rates, not a separate end-to-end latency percentile.
+
+MPSC used 1 MiB total capacity split across four 256 KiB sub-rings, one-second producer/consumer windows, payloads 128/512 bytes, producer counts 1/2/4, plus scalability and fairness runs. The reported counts below are for each nominal one-second consumer window; producer success includes accepted records that may overwrite older records. Accounting verifies successful inserts = consumed + overwritten + remaining, with zero rejected writes in these runs.
+
+| Payload | Producers | Successful inserts | Overwritten | Consumer received | Remaining |
+|---:|---:|---:|---:|---:|---:|
+| 128 B | 1 | 4,006,409 | 18,856 | 3,987,553 | 0 |
+| 128 B | 2 | 8,625,408 | 0 | 8,625,408 | 0 |
+| 128 B | 4 | 13,789,599 | 8,423,329 | 5,363,861 | 2,409 |
+| 512 B | 1 | 3,508,455 | 1,371 | 3,507,084 | 0 |
+| 512 B | 2 | 8,206,729 | 1,094,448 | 7,112,281 | 0 |
+| 512 B | 4 | 14,726,492 | 10,601,380 | 4,125,112 | 0 |
+
+MPSC insert and consume latency samples were capacity-limited to 2,730 for 128-byte payloads and 1,365 for 512-byte payloads, below the requested 4,096. The timed MPSC output contains one sample for each throughput run, so those rows do not provide throughput percentiles.
+
+## Local WebSocket benchmark
+
+Configuration: 128-byte payload, 100,000 send calls per mode, 1,000 warmup send calls per mode, three pool connections. The local sink received the exact expected totals: 201,000 single-connection messages and 804,000 pool messages. Connect p50/p95/p99 was 0.409/0.656/0.926 ms for WsSingle and 0.734/1.153/1.894 ms for WsPool.
+
+| Mode | Send-call duration | Calls | Frames | Measured rate | Send-call p50/p95/p99 |
+|---|---:|---:|---:|---:|---:|
+| WsSingle | 28.898 ms | 100,000 | 100,000 | 3.46M frames/s | 250/334/1,125 ns |
+| WsPool fastest | 63.594 ms | 100,000 | 100,000 | 1.57M frames/s | 625/709/1,584 ns |
+| WsPool broadcast | 138.856 ms | 100,000 | 300,000 | 2.16M frames/s; 0.72M calls/s | 1,167/1,750/2,500 ns |
+
+The throughput timer covers synchronous `send_data()` calls. The sink confirms delivery after each timed section, but the send-call percentiles are not network RTT. The 100k runs logged transport high-watermark pause/resume notices; all expected frames arrived and both child processes exited 0.
+
+## Cleanup and caveats
+
+The collector captured 10 public Binance market-data messages to a `/tmp` JSONL file. Its default output now points to `btcusdt_capture.jsonl`, not the tracked `btcusdt_100k.jsonl` fixture. No SHM files or benchmark/collector child processes remained after the final runs. Results are single serial runs on this machine; repeated-run confidence intervals were not collected. Treat latency percentiles as observed sample distributions, and throughput samples as one-run results.

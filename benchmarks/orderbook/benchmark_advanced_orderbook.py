@@ -589,8 +589,11 @@ def _run_single(config: AdvancedOrderbookBenchmarkConfig) -> None:
             stats, str(input_path), config.warmup_operations, config.num_levels
         )
     except FileNotFoundError as exc:
-        print(f"Error: {exc}")
-        print("Run collect_data.py first to generate the input file.")
+        raise SystemExit(
+            f"Input file not found: {config.input_path}. Supply an existing capture "
+            "with --input, or run benchmarks/orderbook/collect_data.py "
+            "--output <path> and pass that path with --input."
+        ) from exc
 
 
 def _run_multi_size(base_config: AdvancedOrderbookBenchmarkConfig) -> None:
@@ -667,8 +670,11 @@ def _run_multi_size(base_config: AdvancedOrderbookBenchmarkConfig) -> None:
             )
 
     except FileNotFoundError as exc:
-        print(f"Error: {exc}")
-        print("Run collect_data.py first to generate the input file.")
+        raise SystemExit(
+            f"Input file not found: {base_config.input_path}. Supply an existing capture "
+            "with --input, or run benchmarks/orderbook/collect_data.py "
+            "--output <path> and pass that path with --input."
+        ) from exc
 
 
 def main() -> None:

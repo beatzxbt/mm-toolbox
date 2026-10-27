@@ -35,14 +35,14 @@ class BenchmarkCLI:
             "-n",
             type=int,
             default=100_000,
-            help="Number of operations to benchmark (default: 100,000)",
+            help="Number of operations to benchmark (default: %(default)s)",
         )
         self.parser.add_argument(
             "--warmup",
             "-w",
             type=int,
             default=1_000,
-            help="Number of warmup operations (default: 1,000)",
+            help="Number of warmup operations (default: %(default)s)",
         )
         self.parser.add_argument(
             "--multi-size",

@@ -218,6 +218,16 @@ def test_core_bbo_update_same_tick():
     _native.test_core_bbo_update_same_tick()
 
 
+def test_core_bbo_replaces_all_levels_better_than_quote():
+    """Given a quote beyond retained depth, replace every obsolete top level."""
+    _native.test_core_bbo_replaces_all_levels_better_than_quote()
+
+
+def test_core_bbo_prunes_wrapped_ladders_and_preserves_deeper_levels():
+    """Given wrapped ladders, update the touch and retain valid deeper levels."""
+    _native.test_core_bbo_prunes_wrapped_ladders_and_preserves_deeper_levels()
+
+
 def test_core_bbo_delete_matching():
     """Given BBO deletion matching existing, When consumed, Then removes level."""
     _native.test_core_bbo_delete_matching()

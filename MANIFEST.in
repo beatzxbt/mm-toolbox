@@ -24,6 +24,9 @@ recursive-include src *.py
 # Include examples
 recursive-include examples *.py
 
+# Benchmark driver contracts are tested with the installed wheel too.
+recursive-include benchmarks *.py
+
 # Include scripts
 recursive-include scripts *.py
 

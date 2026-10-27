@@ -2,7 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
-## 1.0.0b10 (2026-10-25)
+## Unreleased
+
+- Apply advanced-orderbook BBO prices across all obsolete top levels, including multi-level jumps and quotes outside retained depth. Refresh the quoted quantity and order count when its price already exists, and preserve valid deeper levels without allocation or locks.
+- Fix the advanced logging benchmark's shared transport capacity at an explicit 64 MiB for both the master and workers, and include that setting in its report.
+- Start both orderbook collector feeds before fetching a snapshot, buffer updates with bounded backpressure, validate the snapshot bridge and subsequent depth sequence, and publish only complete captures. Use routed public endpoints and propagate startup, stream and timeout failures. Orderbook benchmark drivers now fail clearly when their input capture is missing.
+- Bound WebSocket wrapper receive queues by message count and retained payload bytes, with shared pool backpressure that accounts for frames already read by the parser. Default limits are 4,096 messages and 16 MiB; consumed slots release their payload references.
+- Wake WebSocket readers directly on data or close, preserving queued single-client data and isolating readers across pool restarts.
+- Explicitly select verified standard asyncio transports; avoid the optional aiofastnet TLS fallback defect when paused reads resume. Certificate and hostname verification remain enabled.
+- Correlate internal PING/PONG probes, preserve their readable-time deadline across short pauses, and service ready I/O before confirming expiry. Keep observed latency samples fresh under backpressure and include heartbeat state in timeout diagnostics.
+- Subscribe the Binance examples only after every transport opens, validate subscription acknowledgements before publishing readiness, and handle late pool acknowledgements. Preserve raw trade event semantics.
+- Add an inbound WebSocket benchmark with an independent source process, exact receive/deduplication accounting, and strict no-loss paced/startup/post-idle scenarios.
+- Retain exact WebSocket receive-overwrite totals across startup, reconnects, retired connections and close; sample overload diagnostics at powers of two. The concrete single/pool getters are additive and the public client protocol is unchanged.
+- Stop market-data examples on lost continuity, disconnects or rejected SHM writes; propagate processing and child failures, and follow Binance futures snapshot/`pu` sequencing. Rebuild the whole example after a failure.
+- Expose cumulative worker-logger transport counters after shutdown, report startup loss at the master, and reject benchmark runs with worker/shutdown errors or unexplained missing deliveries. Intentional overwrite stress remains explicitly counted.
+- Repair example and benchmark API calls, accounting, workload labels, bounded cleanup and input filtering; record the measured workloads in `EXAMPLES_BENCHMARK_REVIEW.md`.
+- Move release-named test collections into ordinary component suites, share replay helpers, make shutdown checks deterministic and extend extreme power-of-ten rounding boundaries. Preserve native and cross-backend contracts in source and installed-wheel tests.
+- Rebuild the library and any dependent Cython extensions together when upgrading this candidate; native layouts have changed.
+
+## 1.0.0b10 (2026-10-25, unpublished candidate)
 
 - Validate live orderbook replay against an exact decimal reference so floating-point representation does not turn valid prices or one-lot quantities into incorrect reference ticks.
 - Check logging shutdown's shared deadline deterministically instead of relying on a tight elapsed-time threshold on shared CI runners.

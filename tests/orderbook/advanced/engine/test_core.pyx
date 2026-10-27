@@ -1131,6 +1131,54 @@ def test_core_bbo_update_same_tick():
     assert _entry_size(bids, 0) == 5.0
 
 
+def test_core_bbo_replaces_all_levels_better_than_quote():
+    """A BBO outside the snapshot replaces all obsolete prices and metadata."""
+    cdef CoreAdvancedOrderbook core = _create_core()
+    _populate_standard_book(core)
+    core.consume_bbo_values(100.04, 8.0, 99.97, 7.0, 17, 19)
+
+    cdef OrderbookLadderData* asks = core.get_asks_data()
+    cdef OrderbookLadderData* bids = core.get_bids_data()
+    assert asks.num_levels == 1
+    assert bids.num_levels == 1
+    assert _entry_ticks(asks, 0) == 10004
+    assert _entry_ticks(bids, 0) == 9997
+    assert c_ladder_at(asks, 0).lots == 8000
+    assert c_ladder_at(bids, 0).lots == 7000
+    assert c_ladder_at(asks, 0).norders == 17
+    assert c_ladder_at(bids, 0).norders == 19
+
+
+def test_core_bbo_prunes_wrapped_ladders_and_preserves_deeper_levels():
+    """Moving away from a wrapped top retains depth and overwrites the new touch."""
+    cdef CoreAdvancedOrderbook core
+    cdef OrderbookLadderData* asks
+    cdef OrderbookLadderData* bids
+    cdef u64 capacity
+
+    for capacity in (4, 7):
+        core = _create_core(num_levels=capacity)
+        _populate_wide_spread_book(core)
+        # Both insertions wrap the head from slot zero to the final slot.
+        core.consume_bbo_values(100.02, 6.0, 100.01, 5.0, 13, 11)
+        core.consume_bbo_values(100.04, 8.0, 99.99, 7.0, 17, 19)
+
+        asks = core.get_asks_data()
+        bids = core.get_bids_data()
+        assert asks.num_levels == 2
+        assert bids.num_levels == 2
+        assert _entry_ticks(asks, 0) == 10004
+        assert _entry_ticks(asks, 1) == 10005
+        assert _entry_ticks(bids, 0) == 9999
+        assert _entry_ticks(bids, 1) == 9998
+        assert c_ladder_at(asks, 0).lots == 8000
+        assert c_ladder_at(bids, 0).lots == 7000
+        assert c_ladder_at(asks, 0).norders == 17
+        assert c_ladder_at(bids, 0).norders == 19
+        assert _entry_size(asks, 1) == 3.5
+        assert _entry_size(bids, 1) == 3.0
+
+
 def test_core_bbo_delete_matching():
     """Test deleting BBO with lots=0."""
     cdef CoreAdvancedOrderbook core = _create_core()

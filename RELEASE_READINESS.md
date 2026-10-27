@@ -1,5 +1,76 @@
 # Public release readiness and hardening
 
+## Current review candidate — 2026-10-26
+
+[Draft PR #31](https://github.com/beatzxbt/mm-toolbox/pull/31) contains the
+approved example/benchmark repairs, component test organization and receive
+reliability fixes. The original live loss was reproduced with a minimal
+consumer: batched delivery could overflow the fixed 128-message queue before
+its consumer ran. Wrapper queues now have configurable message/byte bounds,
+shared backpressure and direct reader wakeups. Examples subscribe only after
+all transports open and require acknowledged group startup before publishing
+state.
+
+Longer checks also exposed an optional aiofastnet TLS-resume defect and two
+false heartbeat timeout orderings. Connections now explicitly select verified
+standard asyncio transports. Namespaced PING/PONG matching, cumulative paused-
+time accounting and an I/O poll before deadline confirmation preserve the
+existing readable-time timeout while preventing false closures and stale
+acknowledgements. Bursty traffic still updates observed latency samples.
+
+Before the collector follow-up, clean-source, Cython-aware coverage and installed-wheel suites each
+passed **1,814 tests, eight skipped**, requiring all seven native test
+extensions. Source/coverage used Python 3.14.4; the wheel built from the sdist
+was tested outside the checkout on Python 3.15.1. Coverage is **85.75%** against
+the unchanged 85% gate. The standalone C orderbook suite passed **33/33**;
+distribution, metadata, lint/format and source type checks passed. The draft
+PR records the exact-head Python 3.12–3.15/platform wheel matrix and live
+acceptance results.
+
+Live acceptance against the final installed Python 3.15 wheel passed the
+600-second MPSC pipeline, 60-second stream and both 30-second analytics demos.
+All exited 0 without receive loss, heartbeat errors or callback exceptions.
+An earlier run interrupted by recorded clamshell suspension is excluded.
+
+On 2026-10-27, all 13 benchmark drivers completed bounded checks against the
+final runtime. A follow-up fixed the collector's false-success path and a real
+snapshot/depth gap: it now buffers both feeds before the snapshot, validates
+depth continuity, and atomically publishes complete captures. A 10,000-record
+live capture and a separate default-depth snapshot capture passed bridge and
+sequence checks; both orderbook drivers replayed the latter. Both drivers now
+return nonzero when the input is missing. The large Git fixture is not in the
+sdist; supply or collect an input explicitly. Saturation benchmarks deliberately
+exercise overwrite-oldest and report their losses; they are not evidence of
+loss-free delivery under overload. The PR records the validated revisions and
+their CI status.
+
+The subsequent mixed-feed review found and corrected an independent advanced
+BBO defect: quotes that moved past several levels could leave obsolete prices
+and quantities at the touch. The core now removes the whole obsolete prefix
+by advancing the ring head, then updates or inserts the authoritative quote.
+Both captured workloads now have zero advanced BBO payload mismatches after
+rebuilding. The independent collector cross-feed sequencing gate remains a
+prototype and still needs integration; the BBO correction does not establish
+globally ordered capture output. The example/benchmark report records the
+reproduction, checks and remaining scope.
+
+Local validation of the BBO correction passed **1,877 tests, eight skipped**
+on Python 3.14 source and the isolated installed Python 3.15 wheel built from
+the sdist, requiring every native test extension. The C suite passed **33/33**;
+Ruff, source typing and whitespace checks passed. These are local results;
+the latest platform matrix is recorded separately in the draft PR.
+
+[The example and benchmark report](EXAMPLES_BENCHMARK_REVIEW.md) records the
+reproductions, measured workloads, limits and evidence;
+[the test-structure report](TEST_STRUCTURE_REVIEW.md) records the preserved
+scenarios and their destinations. Native layouts changed: rebuild the library
+and dependent Cython extensions together. The public client protocol, general
+ringbuffer overwrite policy and lock-free SHM core are unchanged.
+
+Publication remains held for user review. Existing b9/b10 tags remain unchanged
+and unpublished; the fixes are untagged. Choose and validate the release
+revision after review. Earlier sections below are dated historical evidence.
+
 ## Initial hardening status — 2026-10-19
 
 The fixes are implemented on `fix/b9-release-hardening` for review against

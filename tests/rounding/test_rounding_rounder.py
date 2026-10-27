@@ -5,6 +5,9 @@ custom configurations, different tick/lot sizes, array operations, and edge
 cases including extreme values, boundary conditions, and numerical stability.
 """
 
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, localcontext
+import math
+
 import numpy as np
 import pytest
 
@@ -545,3 +548,98 @@ class TestRounderEdgeCases:
 
             assert abs(bid_result - tick_multiple_bid * 0.01) < 1e-12
             assert abs(ask_result - tick_multiple_ask * 0.01) < 1e-12
+
+    @pytest.mark.parametrize("exponent", [-8, -5, -2, -1, 0, 1, 6])
+    def test_decimal_reference_and_adjacent_values(self, exponent):
+        """Canonical grid points stay fixed and neighboring floats keep direction."""
+        step = float(f"1e{exponent}")
+        rounder = Rounder(RounderConfig.default(step, step))
+        values = []
+        for tick in [-1001, -29, -7, -1, 0, 1, 7, 29, 1001]:
+            point = float(Decimal(tick).scaleb(exponent))
+            values.extend(
+                [
+                    point,
+                    math.nextafter(point, -math.inf),
+                    math.nextafter(point, math.inf),
+                ]
+            )
+        array = np.array(values, dtype=np.float64)
+        expected_down, expected_up = [], []
+        with localcontext() as context:
+            context.prec = 400
+            quantum = Decimal(1).scaleb(exponent)
+            for value in values:
+                decimal = Decimal(str(value))
+                expected_down.append(
+                    float(
+                        (decimal / quantum).to_integral_value(rounding=ROUND_FLOOR)
+                        * quantum
+                    )
+                )
+                expected_up.append(
+                    float(
+                        (decimal / quantum).to_integral_value(rounding=ROUND_CEILING)
+                        * quantum
+                    )
+                )
+        assert [rounder.bid(value) for value in values] == expected_down
+        assert [rounder.ask(value) for value in values] == expected_up
+        assert rounder.bids(array).tolist() == expected_down
+        assert rounder.asks(array).tolist() == expected_up
+        assert rounder.sizes(array).tolist() == expected_up
+
+    @pytest.mark.parametrize("exponent", [-308, -100, -15, 15, 100, 308])
+    def test_supported_extreme_grid_points(self, exponent):
+        """A canonical finite increment is stable even at extreme exponents."""
+        step = float(f"1e{exponent}")
+        rounder = Rounder(RounderConfig.default(step, step))
+        assert rounder.bid(step) == step
+        assert rounder.ask(step) == step
+
+    @pytest.mark.parametrize("exponent", [-308, -100, -15, 15, 100, 308])
+    def test_adjacent_representable_extreme_grid_values(self, exponent):
+        """Neighbors round in the correct direction, including finite-range limits."""
+        step = float(f"1e{exponent}")
+        below = math.nextafter(step, -math.inf)
+        above = math.nextafter(step, math.inf)
+        values = np.array([below, step, above], dtype=np.float64)
+        rounder = Rounder(RounderConfig.default(step, step))
+
+        expected_down = [0.0, step, step]
+        assert [rounder.bid(value) for value in values] == expected_down
+        assert rounder.bids(values).tolist() == expected_down
+
+        assert rounder.ask(below) == step
+        assert rounder.ask(step) == step
+        assert rounder.size(below) == step
+        assert rounder.size(step) == step
+        assert rounder.asks(values[:2]).tolist() == [step, step]
+        assert rounder.sizes(values[:2]).tolist() == [step, step]
+
+        if exponent == 308:
+            # The next grid point is 2e308, outside the finite float range.
+            with pytest.raises(ValueError, match="finite float range"):
+                rounder.ask(above)
+            with pytest.raises(ValueError, match="finite float range"):
+                rounder.size(above)
+            with pytest.raises(ValueError, match="finite float range"):
+                rounder.asks(values[2:])
+            with pytest.raises(ValueError, match="finite float range"):
+                rounder.sizes(values[2:])
+        else:
+            next_step = float(f"2e{exponent}")
+            expected_up = [step, step, next_step]
+            assert rounder.ask(above) == next_step
+            assert rounder.size(above) == next_step
+            assert rounder.asks(values).tolist() == expected_up
+            assert rounder.sizes(values).tolist() == expected_up
+
+    @pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf, 1e100])
+    def test_unrepresentable_inputs_fail_explicitly(self, value):
+        """Nonfinite or excessive tick counts cannot silently misround."""
+        rounder = Rounder(RounderConfig.default(0.01, 0.01))
+        with pytest.raises(ValueError):
+            rounder.bid(value)
+        with pytest.raises(ValueError):
+            rounder.asks(np.array([value], dtype=np.float64))

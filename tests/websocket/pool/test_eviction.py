@@ -21,7 +21,7 @@ from types import SimpleNamespace
 import pytest
 
 import mm_toolbox.websocket.pool as pool_module
-from mm_toolbox.websocket.connection import ConnectionState
+from mm_toolbox.websocket.connection import ConnectionState, WsConnectionConfig
 from mm_toolbox.websocket.pool import WsPool, WsPoolConfig
 
 
@@ -92,9 +92,7 @@ class TestWsPoolEvictionLogic:
         connection would degrade overall throughput."""
         config = WsPoolConfig(num_connections=3, evict_interval_s=1)
         pool = WsPool(
-            config=SimpleNamespace(
-                wss_url="wss://test", on_connect=[], auto_reconnect=True
-            ),
+            config=WsConnectionConfig.default("wss://test", auto_reconnect=True),
             on_message=noop_message_handler,
             pool_config=config,
         )
@@ -125,9 +123,7 @@ class TestWsPoolEvictionLogic:
         """Given three connections with different latencies, When the fastest is selected, Then it is the one with the lowest latency."""
         config = WsPoolConfig(num_connections=3, evict_interval_s=1)
         pool = WsPool(
-            config=SimpleNamespace(
-                wss_url="wss://test", on_connect=[], auto_reconnect=True
-            ),
+            config=WsConnectionConfig.default("wss://test", auto_reconnect=True),
             on_message=noop_message_handler,
             pool_config=config,
         )
@@ -143,9 +139,7 @@ class TestWsPoolEvictionLogic:
         """Given an empty pool, When eviction or fast selection runs, Then no errors occur and fast_conn is None."""
         config = WsPoolConfig(num_connections=2, evict_interval_s=1)
         pool = WsPool(
-            config=SimpleNamespace(
-                wss_url="wss://test", on_connect=[], auto_reconnect=True
-            ),
+            config=WsConnectionConfig.default("wss://test", auto_reconnect=True),
             on_message=noop_message_handler,
             pool_config=config,
         )
@@ -157,9 +151,7 @@ class TestWsPoolEvictionLogic:
         """Given a pool with no event loop set, When replacement scheduling is triggered, Then it remains safe and does not crash."""
         config = WsPoolConfig(num_connections=2, evict_interval_s=1)
         pool = WsPool(
-            config=SimpleNamespace(
-                wss_url="wss://test", on_connect=[], auto_reconnect=True
-            ),
+            config=WsConnectionConfig.default("wss://test", auto_reconnect=True),
             on_message=noop_message_handler,
             pool_config=config,
         )
@@ -226,9 +218,7 @@ class TestWsPoolEvictionLogic:
         against connection storm risk."""
         config_3 = WsPoolConfig(num_connections=3, evict_interval_s=1)
         pool_3 = WsPool(
-            config=SimpleNamespace(
-                wss_url="wss://test", on_connect=[], auto_reconnect=True
-            ),
+            config=WsConnectionConfig.default("wss://test", auto_reconnect=True),
             on_message=noop_message_handler,
             pool_config=config_3,
         )
@@ -246,9 +236,7 @@ class TestWsPoolEvictionLogic:
 
         config_5 = WsPoolConfig(num_connections=5, evict_interval_s=1)
         pool_5 = WsPool(
-            config=SimpleNamespace(
-                wss_url="wss://test", on_connect=[], auto_reconnect=True
-            ),
+            config=WsConnectionConfig.default("wss://test", auto_reconnect=True),
             on_message=noop_message_handler,
             pool_config=config_5,
         )

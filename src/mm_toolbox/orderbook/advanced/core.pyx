@@ -428,6 +428,35 @@ cdef class CoreAdvancedOrderbook:
             self._asks.decrement_count()
 
     cdef inline void _assign_top(self, OrderbookLadder ladder, OrderbookEntry* entry):
+        """Set a nonzero authoritative touch, retaining only valid deeper levels.
+
+        Args:
+            ladder: The ask or bid ladder receiving the quote.
+            entry: Normalized quote with a nonzero quantity.
+        """
+        cdef OrderbookLadderData* data = ladder.get_data()
+        cdef u64 skipped
+        cdef u64 top_ticks
+
+        if data.num_levels > 0:
+            top_ticks = ladder.top().ticks
+            if entry.ticks == top_ticks:
+                ladder.assign_entry(0, entry)
+                return
+
+            if (
+                (data.is_price_ascending and entry.ticks > top_ticks)
+                or (not data.is_price_ascending and entry.ticks < top_ticks)
+            ):
+                # A worse quote invalidates every better-priced level. Seek
+                # once and drop the prefix without copying the surviving depth.
+                skipped = ladder.seek_start(entry.ticks)
+                data.head = (data.head + skipped) % data.max_levels
+                data.num_levels -= skipped
+                if data.num_levels > 0 and ladder.top().ticks == entry.ticks:
+                    ladder.assign_entry(0, entry)
+                    return
+
         ladder.roll_right(0)
         ladder.insert_entry(0, entry)
         ladder.increment_count()
@@ -643,49 +672,19 @@ cdef class CoreAdvancedOrderbook:
         if not self._check_if_empty():
             return
 
-        cdef OrderbookEntry* top
-
-        if self._asks_data.num_levels > 0:
-            top = self._asks.top()
-            if ask_entry.lots == 0 and ask_entry.ticks == top.ticks:
-                self._asks.roll_left(0)
-                self._asks.decrement_count()
-            elif ask_entry.ticks == top.ticks:
-                self._asks.assign_entry(0, &ask_entry)
-            elif ask_entry.ticks < top.ticks:
-                if ask_entry.lots != 0:
-                    self._assign_top(self._asks, &ask_entry)
-            else:
-                self._asks.roll_left(0)
-                self._asks.decrement_count()
-                if self._asks_data.num_levels == 0 and ask_entry.lots != 0:
-                    self._assign_top(self._asks, &ask_entry)
-        elif ask_entry.lots != 0:
+        if ask_entry.lots != 0:
             self._assign_top(self._asks, &ask_entry)
+        elif ask_entry.ticks >= self._asks.top().ticks:
+            self._asks.roll_left(0)
+            self._asks.decrement_count()
 
-        if self._bids_data.num_levels > 0:
-            top = self._bids.top()
-            if bid_entry.lots == 0 and bid_entry.ticks == top.ticks:
-                self._bids.roll_left(0)
-                self._bids.decrement_count()
-            elif bid_entry.ticks == top.ticks:
-                self._bids.assign_entry(0, &bid_entry)
-            elif bid_entry.ticks > top.ticks:
-                if bid_entry.lots != 0:
-                    self._assign_top(self._bids, &bid_entry)
-            else:
-                self._bids.roll_left(0)
-                self._bids.decrement_count()
-                if self._bids_data.num_levels == 0 and bid_entry.lots != 0:
-                    self._assign_top(self._bids, &bid_entry)
-        elif bid_entry.lots != 0:
+        if bid_entry.lots != 0:
             self._assign_top(self._bids, &bid_entry)
+        elif bid_entry.ticks <= self._bids.top().ticks:
+            self._bids.roll_left(0)
+            self._bids.decrement_count()
 
         self._remove_crossed_asks()
-        if self._asks_data.num_levels == 0 and ask_entry.lots != 0:
-            self._assign_top(self._asks, &ask_entry)
-        if self._bids_data.num_levels == 0 and bid_entry.lots != 0:
-            self._assign_top(self._bids, &bid_entry)
 
     cdef void consume_bbo(self, OrderbookLevel ask, OrderbookLevel bid):
         self.consume_bbo_values(

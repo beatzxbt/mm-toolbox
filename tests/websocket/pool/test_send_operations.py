@@ -11,6 +11,7 @@ import asyncio
 import pytest
 
 from mm_toolbox.websocket.pool import WsPool, WsPoolConfig
+from tests.websocket.conftest import _until
 
 
 def noop_message_handler(msg: bytes) -> None:
@@ -109,3 +110,20 @@ class TestWsPoolSendOperations:
             )
             with pytest.raises(RuntimeError, match="Connection not running"):
                 pool.send_data(b"fail", only_fastest=False)
+
+
+@pytest.mark.asyncio
+async def test_pool_reselects_dead_fastest(basic_server, connection_config_factory):
+    async with basic_server:
+        pool = WsPool(
+            connection_config_factory(basic_server), pool_config=WsPoolConfig(2, 60)
+        )
+        async with pool:
+            dead = pool._fast_conn
+            dead.close()
+            pool.send_data(b"exactly-once", only_fastest=True)
+            await _until(
+                lambda: b"exactly-once" in basic_server.get_received_messages()
+            )
+            assert basic_server.get_received_messages().count(b"exactly-once") == 1
+            assert pool._fast_conn is not dead

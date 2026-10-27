@@ -14,10 +14,16 @@ Skipped gracefully when the native test module has not been built.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
+from types import SimpleNamespace
 
 import pytest
+from mm_toolbox.ringbuffer.bytes import BytesRingBuffer
+from mm_toolbox.websocket.connection import WsConnection, WsConnectionConfig
+import mm_toolbox.websocket.connection as connection_module
+from mm_toolbox.websocket import WsSingle
 
 # Go up to tests/ directory to find the compiled .so files
 test_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -46,6 +52,88 @@ def test_ping_tracker_starts_at_zero():
 def test_receive_overflow_count():
     """Receive loss is counted exactly and the oldest payload is overwritten."""
     _native.test_receive_overflow_count()
+
+
+def test_pong_must_match_outstanding_probe():
+    _native.test_pong_must_match_outstanding_probe()
+
+
+def test_pause_affected_matching_pongs_refresh_latency():
+    _native.test_pause_affected_matching_pongs_refresh_latency()
+
+
+def test_receive_tail_reserve_and_retired_transport_cleanup():
+    _native.test_receive_tail_reserve_and_retired_transport_cleanup()
+
+
+def test_receive_byte_limit_multiple_evictions_and_reference_release():
+    _native.test_receive_byte_limit_multiple_evictions_and_reference_release()
+
+
+def test_close_unregisters_receive_transport():
+    _native.test_close_unregisters_receive_transport()
+
+
+@pytest.mark.asyncio
+async def test_paused_receive_does_not_expire_unread_pong(
+    basic_server, connection_config_factory, monkeypatch
+):
+    async with basic_server:
+        async with WsSingle(connection_config_factory(basic_server)) as client:
+            conn = client._ws_conn
+            _native.pause_client_reads(conn)
+            _native.expire_ping(conn)
+            calls = 0
+
+            async def one_tick(interval):
+                nonlocal calls
+                calls += 1
+                if calls > 1:
+                    raise asyncio.CancelledError
+
+            with monkeypatch.context() as patched:
+                patched.setattr(
+                    connection_module,
+                    "asyncio",
+                    SimpleNamespace(
+                        sleep=one_tick, CancelledError=asyncio.CancelledError
+                    ),
+                )
+                await conn._latency_loop()
+            assert conn.is_connected()
+            assert _native.ping_sent_time(conn) > 0.0
+            assert conn._heartbeat_snapshot()["pings_sent"] == 0
+            _native.resume_client_reads(conn)
+
+
+@pytest.mark.asyncio
+async def test_partial_fragment_does_not_pause_before_message_can_wake_reader():
+    import websockets
+
+    release = asyncio.Event()
+
+    async def source(socket):
+        async def parts():
+            yield b"x" * 3500
+            await release.wait()
+            yield b"y" * 400
+
+        await socket.send(parts())
+        await socket.wait_closed()
+
+    async with websockets.serve(source, "127.0.0.1", 0, compression=None) as server:
+        uri = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+        config = WsConnectionConfig.default(
+            uri, max_frame_size=4096, receive_buffer_max_bytes=4096
+        )
+        async with WsSingle(config) as client:
+            async with asyncio.timeout(2):
+                while _native.unfinished_size(client._ws_conn) != 3500:
+                    await asyncio.sleep(0)
+            assert not client._ringbuffer.is_reading_paused()
+            release.set()
+            assert await asyncio.wait_for(anext(client), 2) == b"x" * 3500 + b"y" * 400
+            assert client.get_dropped_messages() == 0
 
 
 @pytest.mark.asyncio
@@ -141,3 +229,34 @@ def test_get_state_returns_enum():
 def test_config_cache_reflects_updates():
     """Given a config update, When the cache is read, Then it reflects the new values."""
     _native.test_config_cache_reflects_updates()
+
+
+@pytest.mark.asyncio
+async def test_connection_open_cancellation_closes_created_listener(monkeypatch):
+    listeners = []
+    entered = asyncio.Event()
+
+    class Listener:
+        def __init__(self, ringbuffer, config):
+            self.closed = False
+            listeners.append(self)
+
+        def close(self):
+            self.closed = True
+
+    async def connect(**kwargs):
+        kwargs["ws_listener_factory"]()
+        entered.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr("mm_toolbox.websocket.connection.ws_connect", connect)
+    task = asyncio.create_task(
+        WsConnection.new.__func__(
+            Listener, BytesRingBuffer(8), WsConnectionConfig.default("ws://localhost")
+        )
+    )
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert listeners and all(listener.closed for listener in listeners)

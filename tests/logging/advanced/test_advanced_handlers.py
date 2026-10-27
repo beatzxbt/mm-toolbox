@@ -571,3 +571,78 @@ class TestRateLimiter:
         await asyncio.gather(*(limiter.acquire(1) for _ in range(3)))
         elapsed = asyncio.get_running_loop().time() - start
         assert elapsed >= 0.07
+
+
+class _Advanced(BaseLogHandler):
+    def push(self, logs):
+        pass
+
+
+def test_advanced_close_bounds_total_wait_across_many_futures():
+    handler = _Advanced()
+    total_futures = 20
+    started = threading.Event()
+    cancelled = threading.Event()
+    started_count = 0
+    cancelled_count = 0
+    count_lock = threading.Lock()
+
+    async def never():
+        nonlocal started_count, cancelled_count
+        with count_lock:
+            started_count += 1
+            if started_count == total_futures:
+                started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            with count_lock:
+                cancelled_count += 1
+                if cancelled_count == total_futures:
+                    cancelled.set()
+
+    futures = [handler._submit_coro(never()) for _ in range(total_futures)]
+    assert started.wait(timeout=1.0)
+    thread = handler._loop_thread
+    assert thread is not None
+
+    timeout_s = 0.1
+    wait_elapsed_s = 0.03
+    clock = [10.0]
+    wait_timeouts = []
+
+    def wait_until_deadline(futures, timeout):
+        wait_timeouts.append(timeout)
+        clock[0] += wait_elapsed_s
+        return set(), set(futures)
+
+    original_join = thread.join
+    try:
+        with (
+            patch(
+                "mm_toolbox.logging.advanced.handlers.base.wait",
+                side_effect=wait_until_deadline,
+            ),
+            patch(
+                "mm_toolbox.logging.advanced.handlers.base.time",
+                new=SimpleNamespace(monotonic=lambda: clock[0]),
+            ),
+            patch.object(thread, "join", wraps=original_join) as thread_join,
+        ):
+            handler.close(timeout_s=timeout_s)
+
+        assert wait_timeouts == [pytest.approx(timeout_s)]
+        assert thread_join.call_count == 1
+        assert thread_join.call_args.kwargs["timeout"] == pytest.approx(
+            timeout_s - wait_elapsed_s
+        )
+        assert thread_join.call_args.kwargs["timeout"] < timeout_s
+    finally:
+        if thread.is_alive():
+            handler.close(timeout_s=1.0)
+            original_join(timeout=1.0)
+
+    assert not handler._loop_thread.is_alive()
+    assert cancelled.is_set()
+    assert all(future.done() and future.cancelled() for future in futures)
+    assert handler._submit_coro(never()) is None
