@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Start both orderbook collector feeds before fetching a snapshot, buffer updates with bounded backpressure, validate the snapshot bridge and subsequent depth sequence, and publish only complete captures. Use routed public endpoints and propagate startup, stream and timeout failures. Orderbook benchmark drivers now fail clearly when their input capture is missing.
 - Bound WebSocket wrapper receive queues by message count and retained payload bytes, with shared pool backpressure that accounts for frames already read by the parser. Default limits are 4,096 messages and 16 MiB; consumed slots release their payload references.
 - Wake WebSocket readers directly on data or close, preserving queued single-client data and isolating readers across pool restarts.
 - Explicitly select verified standard asyncio transports; avoid the optional aiofastnet TLS fallback defect when paused reads resume. Certificate and hostname verification remain enabled.

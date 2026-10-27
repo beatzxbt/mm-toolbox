@@ -18,7 +18,7 @@ time accounting and an I/O poll before deadline confirmation preserve the
 existing readable-time timeout while preventing false closures and stale
 acknowledgements. Bursty traffic still updates observed latency samples.
 
-Final clean-source, Cython-aware coverage and installed-wheel suites each
+Before the collector follow-up, clean-source, Cython-aware coverage and installed-wheel suites each
 passed **1,814 tests, eight skipped**, requiring all seven native test
 extensions. Source/coverage used Python 3.14.4; the wheel built from the sdist
 was tested outside the checkout on Python 3.15.1. Coverage is **85.75%** against
@@ -31,6 +31,18 @@ Live acceptance against the final installed Python 3.15 wheel passed the
 600-second MPSC pipeline, 60-second stream and both 30-second analytics demos.
 All exited 0 without receive loss, heartbeat errors or callback exceptions.
 An earlier run interrupted by recorded clamshell suspension is excluded.
+
+On 2026-10-27, all 13 benchmark drivers completed bounded checks against the
+final runtime. A follow-up fixed the collector's false-success path and a real
+snapshot/depth gap: it now buffers both feeds before the snapshot, validates
+depth continuity, and atomically publishes complete captures. A 10,000-record
+live capture and a separate default-depth snapshot capture passed bridge and
+sequence checks; both orderbook drivers replayed the latter. Both drivers now
+return nonzero when the input is missing. The large Git fixture is not in the
+sdist; supply or collect an input explicitly. Saturation benchmarks deliberately
+exercise overwrite-oldest and report their losses; they are not evidence of
+loss-free delivery under overload. The PR records the remaining local pool
+tail-latency uncertainty and exact-head CI status.
 
 [The example and benchmark report](EXAMPLES_BENCHMARK_REVIEW.md) records the
 reproductions, measured workloads, limits and evidence;

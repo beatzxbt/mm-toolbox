@@ -1,4 +1,4 @@
-# Examples, benchmarks and release review — 2026-10-26
+# Examples, benchmarks and release review — 2026-10-27
 
 Publication remains on hold in [draft PR #31](https://github.com/beatzxbt/mm-toolbox/pull/31).
 Two GPT-6 Luna max agents exercised the examples and benchmarks; a GPT-6 Sol
@@ -18,6 +18,62 @@ The historical performance measurements below used a freshly built, installed `1
 Those measurements predate the current reliability changes; they are retained
 as audit evidence, not presented as new performance measurements of this PR's
 final revision.
+
+## Final benchmark and collector follow-up — 2026-10-27
+
+All 13 benchmark entry points have now completed substantive bounded checks
+against the final installed Python 3.15 runtime. The 12 non-WebSocket drivers
+ran from the final sdist sources; the standard and advanced orderbook drivers
+were rerun from the checkout after their input-error fix. The WebSocket driver
+was checked separately with strict inbound and outbound workloads. These runs
+do not cover every optional mode or establish performance on other machines.
+The recorded commands, results and scope are in
+`/tmp/mm-bench-remaining-final-CVINNB/RESULTS.md`; the post-fix orderbook runs
+are recorded in `/var/folders/jd/yrb9bcxd58b4bp9ht0phdxbc0000gn/T/mm-orderbook-final-c6t8bgi9/result.json`.
+
+The deliberately saturated MPSC benchmark accounted for **935,614 inserts**:
+930,515 consumed and 5,099 overwritten. The 256-byte advanced logging stress
+cases reported **37.60–45.02%** loss through explicitly counted overwrite-oldest
+batches. Those rows exercise overload; they are not loss-free acceptance
+results. The 32-byte advanced logging case consumed all 8,730,924 attempts.
+
+A fault injection found the orderbook data collector could log a failed depth
+connection yet finish successfully using only BBO data. A subsequent live
+capture contained all three record types but exposed another defect: its first
+depth update did not bridge the snapshot because both feeds were opened after
+the snapshot. That capture is not counted as continuity validation.
+
+The collector now opens and buffers both feeds before fetching the snapshot,
+requires the initial depth bridge and checks each subsequent `pu` link. It
+bounds buffered payloads, propagates errors and timeouts, uses Binance's
+routed public endpoints, and atomically publishes only a completed capture.
+This follows the [Binance futures orderbook guide](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/websocket-market-streams/How-to-manage-a-local-order-book-correctly).
+An interrupt discards the incomplete temporary capture. Buffered update receive
+timestamps can precede the snapshot response even though the snapshot is
+written first for replay.
+
+A live **10,000-record** capture contained one snapshot, 9,663 BBO and 336
+depth updates; its first depth update bridged the snapshot and every later
+depth link matched. A separate **1,000-record** capture used the default
+1,000-level snapshot and passed the same checks. Both orderbook benchmark
+drivers replayed 250 measured records from that capture, including BBO and
+depth messages. Focused tests cover feed failures, startup and snapshot
+timeouts, bridge/gap validation, bounded buffering, cancellation and cleanup.
+Evidence: `mm-collector-verified-qa19gorw/result.json`,
+`mm-collector-verified-69xqnv7m/result.json`, and
+`mm-orderbook-live-replay-ud4p2gc8/result.json` under the host's system
+temporary directory.
+
+Both orderbook benchmark CLIs now exit nonzero with actionable instructions if
+the capture is missing. The 100,000-line fixture is present in the Git checkout
+but omitted from the sdist; provide a capture with `--input`, or generate one
+using `collect_data.py --output <path>` and pass that path to `--input`.
+
+The independent-source WebSocket pool tail investigation is recorded in the
+draft PR. Ten uninstrumented repeats had startup p99 between 0.116 and 0.284 ms
+with no loss, but the original 50.851 ms outlier remains unattributed. A slower
+instrumented run showed substantial off-CPU delay while data was queued. These
+local results do not establish a production tail-latency guarantee.
 
 ## Receive-burst follow-up — 2026-10-26
 
