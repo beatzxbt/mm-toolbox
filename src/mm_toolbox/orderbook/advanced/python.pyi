@@ -291,7 +291,7 @@ class PyAdvancedOrderbook:
             ask_price: Best ask price from another orderbook
 
         Returns:
-            True if the BBOs cross (this bid >= other ask or this ask <= other bid)
+            True if the BBOs cross (this bid > other ask or this ask < other bid)
 
         Raises:
             RuntimeError: If orderbook is empty

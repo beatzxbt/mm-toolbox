@@ -10,7 +10,8 @@ Connects to Binance Futures WebSocket streams and REST API to collect:
 
 Output is JSON Lines with type tags and nanosecond receive timestamps. The
 snapshot is written first for replay, followed by the first bridging depth
-event; a buffered event can have been received before the snapshot response.
+event. Future BBOs wait for covering depth and publish in increasing update-ID
+order; receive timestamps are preserved and can precede the snapshot response.
 An incomplete capture is not published if collection fails or is interrupted.
 """
 
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import heapq
 import os
 import sys
 import tempfile
@@ -34,6 +36,9 @@ _SNAPSHOT_TIMEOUT_S = 10.0
 _BRIDGE_TIMEOUT_S = 10.0
 _MAX_BUFFERED_EVENTS = 4096
 _MAX_BUFFERED_BYTES = 16 * 1024 * 1024
+_MAX_PENDING_BBO_EVENTS = 4096
+_MAX_PENDING_BBO_BYTES = 16 * 1024 * 1024
+_PENDING_DEPTH_TIMEOUT_S = 10.0
 
 
 class CollectorConfig(msgspec.Struct):
@@ -175,6 +180,14 @@ class BinanceDataCollector:
                 ready.set()
                 await start.wait()
                 async for msg in ws:
+                    # An already pending read can report failure in the same
+                    # turn that the publication owner reaches its target.
+                    # Cancellation ends healthy feeds; observed errors cannot
+                    # be hidden by that target being reached.
+                    if msg.type == aiohttp.WSMsgType.ERROR:
+                        raise RuntimeError(
+                            "WebSocket reported an error"
+                        ) from ws.exception()
                     if self._stop_event.is_set():
                         return
                     if msg.type == aiohttp.WSMsgType.TEXT:
@@ -182,12 +195,7 @@ class BinanceDataCollector:
                         if message_type == "delta":
                             first_depth.set()
                         await events.put(message_type, msg.data, recv_ts_ns)
-                    elif msg.type == aiohttp.WSMsgType.ERROR:
-                        raise RuntimeError(
-                            "WebSocket reported an error"
-                        ) from ws.exception()
-                if not self._stop_event.is_set():
-                    raise RuntimeError("WebSocket closed before collection completed")
+                raise RuntimeError("WebSocket closed before collection completed")
         except Exception as exc:
             raise RuntimeError(f"{stream_name} stream failed: {exc}") from exc
 
@@ -217,6 +225,9 @@ class BinanceDataCollector:
                             snapshot = await asyncio.wait_for(
                                 self.fetch_snapshot(session), _SNAPSHOT_TIMEOUT_S
                             )
+                            snapshot_id = snapshot.get("lastUpdateId")
+                            if type(snapshot_id) is not int or snapshot_id < 0:
+                                raise ValueError("Snapshot has an invalid lastUpdateId")
                             self._write_message("snapshot", snapshot)
                         else:
                             await self._collect_streams(session)
@@ -324,32 +335,61 @@ class BinanceDataCollector:
                 raise result
 
     async def _process_events(self, events: _BufferedEvents, snapshot_id: int) -> None:
-        """Bridge the snapshot and reject later gaps before recording updates."""
-        last_update_id = snapshot_id
+        """Sequence publication without allowing BBOs to hide required depth.
+
+        The receive FIFO supplies bounded startup staging and backpressure. This
+        single owner controls insertion into the capture: future BBOs wait for
+        a covering depth event, then publish in ID order before that depth.
+        """
+        depth_id = published_id = snapshot_id
         bridged = False
-        deadline = asyncio.get_running_loop().time() + _BRIDGE_TIMEOUT_S
+        loop = asyncio.get_running_loop()
+        bridge_deadline = loop.time() + _BRIDGE_TIMEOUT_S
+        pending_deadline: float | None = None
+        pending: dict[int, tuple[dict, int, int]] = {}
+        pending_ids: list[int] = []
+        pending_bytes = 0
+
         while not self._stop_event.is_set():
-            if not bridged:
-                remaining = deadline - asyncio.get_running_loop().time()
+            deadline = pending_deadline if bridged else bridge_deadline
+            phase = (
+                "depth progress for pending BBOs"
+                if bridged
+                else "a depth snapshot bridge"
+            )
+            if deadline is None:
+                message_type, raw, recv_ts_ns = await events.get()
+            else:
+                remaining = deadline - loop.time()
                 if remaining <= 0:
-                    raise TimeoutError("Timed out waiting for a depth snapshot bridge")
+                    raise TimeoutError(f"Timed out waiting for {phase}")
                 try:
                     message_type, raw, recv_ts_ns = await asyncio.wait_for(
                         events.get(), remaining
                     )
                 except asyncio.TimeoutError as exc:
-                    raise TimeoutError(
-                        "Timed out waiting for a depth snapshot bridge"
-                    ) from exc
-            else:
-                message_type, raw, recv_ts_ns = await events.get()
+                    raise TimeoutError(f"Timed out waiting for {phase}") from exc
 
             data = msgspec.json.decode(raw, type=dict)
             if message_type == "bbo":
-                # Before the bridge, BBO can describe an older book than the
-                # REST snapshot and cannot safely be replayed after it.
-                if bridged:
-                    self._write_message("bbo", data, recv_ts_ns)
+                update_id = data.get("u")
+                if type(update_id) is not int or update_id < 0:
+                    raise ValueError("BBO event has an invalid update ID")
+                if update_id <= published_id or update_id in pending:
+                    continue
+                size = len(raw.encode("utf-8"))
+                if (
+                    len(pending) >= _MAX_PENDING_BBO_EVENTS
+                    or size > _MAX_PENDING_BBO_BYTES - pending_bytes
+                ):
+                    raise RuntimeError(
+                        "Pending BBO buffer limit exceeded before depth progress"
+                    )
+                pending[update_id] = (data, recv_ts_ns, size)
+                heapq.heappush(pending_ids, update_id)
+                pending_bytes += size
+                if pending_deadline is None:
+                    pending_deadline = loop.time() + _PENDING_DEPTH_TIMEOUT_S
                 continue
 
             first, final, previous = data.get("U"), data.get("u"), data.get("pu")
@@ -368,13 +408,35 @@ class BinanceDataCollector:
                     continue
                 if first > snapshot_id:
                     raise RuntimeError("Depth stream cannot bridge the snapshot")
-                bridged = True
-            elif previous != last_update_id:
-                raise RuntimeError(
-                    f"Depth sequence gap: expected pu={last_update_id}, got {previous}"
-                )
+            else:
+                # Repeated or late depth packets cannot mutate the book again
+                # and do not extend the pending-depth deadline.
+                if final <= depth_id:
+                    continue
+                if previous != depth_id:
+                    raise RuntimeError(
+                        f"Depth sequence gap: expected pu={depth_id}, got {previous}"
+                    )
+
+            while pending_ids and pending_ids[0] <= final:
+                update_id = heapq.heappop(pending_ids)
+                bbo, received, size = pending.pop(update_id)
+                pending_bytes -= size
+                # The initial bridge is always second. Depth also wins all
+                # equal-ID ties; stale BBOs never enter the final stream.
+                if not bridged or update_id <= published_id or update_id == final:
+                    continue
+                self._write_message("bbo", bbo, received)
+                published_id = update_id
+                if self._stop_event.is_set():
+                    return
+
             self._write_message("delta", data, recv_ts_ns)
-            last_update_id = final
+            depth_id = published_id = final
+            bridged = True
+            pending_deadline = (
+                loop.time() + _PENDING_DEPTH_TIMEOUT_S if pending else None
+            )
 
 
 def main() -> None:

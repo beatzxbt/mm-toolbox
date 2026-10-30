@@ -1,5 +1,33 @@
 # Public release readiness and hardening
 
+## Integrated orderbook candidate — 2026-10-30
+
+[Draft PR #31](https://github.com/beatzxbt/mm-toolbox/pull/31) now includes the
+approved independent orderbook reference suite, the collector publication gate
+and fixes exposed by those scenarios. The reference checks the standard book,
+advanced Python API and actual compiled Cython API. Duplicate behavior tests
+are consolidated; native memory and focused ingestion/ownership tests remain.
+All agreed scenarios and the normal/extended workload are documented in
+[the test guide](tests/orderbook/README.md).
+
+Completed batches now preserve valid tails before bounded truncation, depleted
+sides recover, zero BBO rejection is atomic, and normalized large values,
+exact weighted midpoints and execution-impact calculations respect their
+boundaries. Collector output is
+published by a single depth-aware sequence owner with bounded pending quotes
+and explicit failure cleanup. The recorded-feed test verifies completed depth
+against an independent raw-depth replay.
+
+Source Python 3.14 and isolated installed-wheel Python 3.15 suites each passed
+**2,310 tests, eight skipped, one extended case deselected**, with all seven
+native modules required. The standalone C suite
+passed **40/40** through both compiler-wide and portable arithmetic under
+ASan/UBSan. Cython-aware coverage is **86.53%**, above the unchanged 85% gate.
+The final extended replay passed all **600,000 operation comparisons** in
+**317.93 seconds** across capacities 4, 7, 64 and 1,024.
+
+Publication remains held for user review; no tag or release is created.
+
 ## Current review candidate — 2026-10-26
 
 [Draft PR #31](https://github.com/beatzxbt/mm-toolbox/pull/31) contains the
@@ -48,11 +76,10 @@ The subsequent mixed-feed review found and corrected an independent advanced
 BBO defect: quotes that moved past several levels could leave obsolete prices
 and quantities at the touch. The core now removes the whole obsolete prefix
 by advancing the ring head, then updates or inserts the authoritative quote.
-Both captured workloads now have zero advanced BBO payload mismatches after
-rebuilding. The independent collector cross-feed sequencing gate remains a
-prototype and still needs integration; the BBO correction does not establish
-globally ordered capture output. The example/benchmark report records the
-reproduction, checks and remaining scope.
+Both captured workloads had zero advanced BBO payload mismatches after
+rebuilding. At this review point the collector cross-feed gate was still a
+prototype; the 2026-10-30 follow-up above integrates it. The example/benchmark
+report records the reproduction and checks.
 
 Local validation of the BBO correction passed **1,877 tests, eight skipped**
 on Python 3.14 source and the isolated installed Python 3.15 wheel built from

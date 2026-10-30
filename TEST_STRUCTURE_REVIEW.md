@@ -1,4 +1,43 @@
-# Test structure review — implementation status (2026-10-26)
+# Test structure review — implementation status (2026-10-30)
+
+## Integrated orderbook coverage
+
+The approved orderbook follow-up replaces duplicated behavioral collections
+with one independent dictionary reference and exactly three targets: the
+standard Python book, advanced Python API and actual compiled Cython API.
+The native adapter calls `cdef` methods directly. NumPy/scalar ingestion and
+export ownership retain focused contract tests rather than complete extra
+copies of the scenario matrix.
+
+[The orderbook test guide](tests/orderbook/README.md) maps all agreed S, D, B,
+C, M, N and F scenarios to their inputs and assertions. Ordinary CI includes
+ten deterministic 2,000-action traces per target; a dedicated job runs forty
+5,000-action traces, including capacity 1,024. Accepted operations compare the
+whole retained book, metadata and BBO. Rejections and getters must preserve
+state. Arithmetic expectations use independent integer/Decimal/Fraction logic.
+
+The old `test_backend_contract.py`, advanced property, calculation, NumPy
+ingestion and wrapper-boundary collections are removed after their stronger
+replacement cases were added. Standard behavior, advanced integration,
+boundary and small-capacity files now retain only their distinct API,
+precision, constructor or limit contracts. Direct native C and engine tests
+remain. There is one normal component collection, with the long workload
+explicitly deselected unless requested; no named scenario silently skips.
+
+Collector cases cover sequencing and failure cleanup beside the benchmark
+driver. A checked-in compact real capture runs through the same three targets,
+with independent raw-depth truth at completed depth boundaries. It is included
+in the sdist so installed-wheel tests exercise the same replay.
+
+Source and isolated installed-wheel suites passed **2,310 tests, eight skipped,
+one extended case deselected** on Python 3.14 and 3.15 respectively, requiring
+all seven native extensions. Cython-aware coverage is **86.53%**, above the
+unchanged 85% gate. The standalone C suite
+passed **40/40** through both compiler-wide and portable arithmetic, including
+ASan/UBSan checks and the new large-unit conversion boundaries. The extended
+run passed all **600,000 operation comparisons** in
+**317.93 seconds**. Earlier counts and destinations below describe the previous
+organization stage.
 
 ## Implementation status
 
@@ -14,7 +53,7 @@ complete; publication remains held for review.
 | --- | --- |
 | Candles | Cross-type limit validation is in `tests/candles/test_candles.py`; invalid-trade, replay, async delivery, cancellation, and overrun scenarios are in `tests/candles/test_candles_base.py`; quantity-conserving volume splits are in `tests/candles/test_candles_volume.py`. The shared trade factory is in `tests/candles/support.py`. The release umbrella was removed. |
 | Rounding | Decimal-oracle, adjacent-float, precision-limit, and scalar/vector cases were folded into `tests/rounding/test_rounding_rounder.py`; `test_rounding_power10.py` was removed. Phase 2 adds six adjacent-representable-value cases at exponents -308, -100, -15, 15, 100, and 308. At 1e308, a request to round upward past the finite float range is expected to raise `ValueError`. |
-| Orderbook | The three-backend/two-orientation public contract matrix is retained unchanged as `tests/orderbook/test_backend_contract.py`. Live capture and offline reference tests both import replay types and helpers from `tests/orderbook/standard/binance_replay.py`; the offline oracle no longer imports the live test module. |
+| Orderbook | The initial three-backend/two-orientation contract move was superseded by the integrated reference suite described above. Live capture and offline reference tests still share `tests/orderbook/standard/binance_replay.py` support without importing the live test module. |
 | WebSocket | Partial pool-start rollback, connection recovery, dead-fastest selection, single-client terminal-close/cancellation, and listener cleanup cases now live in the existing pool, single-client, and connection test modules, reusing shared fixtures in `tests/websocket/conftest.py`. |
 | Logging | Standard drain/loss cases are in `tests/logging/standard/test_standard_handlers.py`; advanced future-shutdown coverage is in `tests/logging/advanced/test_advanced_handlers.py`; shared remote-delivery behavior is in `tests/logging/test_remote_delivery_contract.py`. |
 | Shared-memory ring buffers | Shared SPSC/MPSC behavior is in `tests/ringbuffer/test_ringbuffer_shm_contract.py`; MPSC producer-lease and simultaneous-claim cases are in `tests/ringbuffer/test_ringbuffer_shm_mpsc.py`; legacy-format rejection is next to each mapping implementation. The combined legacy-layout case is now separate SPSC and MPSC cases, adding one collected case. |

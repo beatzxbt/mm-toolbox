@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from libc.float cimport DBL_EPSILON, DBL_MAX as INFINITY_DOUBLE
+from libc.float cimport DBL_EPSILON
 from libc.math cimport INFINITY, fabs, isfinite
 from libc.stdint cimport uint64_t as u64
 from libc.stdlib cimport free, malloc
@@ -33,6 +33,15 @@ from .level.level cimport (
     create_orderbook_entry,
     create_orderbook_level,
 )
+
+cdef extern from "c/orderbook_helpers.h":
+    u64 orderbook_weighted_mid_tick(
+        u64 bid_ticks,
+        u64 ask_ticks,
+        u64 bid_lots,
+        u64 ask_lots,
+    ) noexcept nogil
+
 
 cdef enum:
     SMALL_DELTA_LIMIT = 8
@@ -137,7 +146,7 @@ cdef class CoreAdvancedOrderbook:
             )
 
     cdef inline bint _check_if_empty(self):
-        return not self._bids.is_empty() and not self._asks.is_empty()
+        return not self._bids.is_empty() or not self._asks.is_empty()
 
     cdef inline OrderbookLevel _level_from_entry(self, OrderbookEntry* entry):
         return create_orderbook_level(
@@ -205,33 +214,36 @@ cdef class CoreAdvancedOrderbook:
         cdef:
             bint has_ask_replacements = self._has_nonzero_entries(asks, ask_count)
             bint has_bid_replacements = self._has_nonzero_entries(bids, bid_count)
-            u64 best_ask_ticks = self._asks.top().ticks
-            u64 worst_ask_ticks = self._asks.bottom().ticks
-            u64 best_bid_ticks = self._bids.top().ticks
-            u64 worst_bid_ticks = self._bids.bottom().ticks
+            u64 best_ask_ticks
+            u64 worst_ask_ticks
+            u64 best_bid_ticks
+            u64 worst_bid_ticks
             OrderbookEntry* incoming_ask = NULL
             OrderbookEntry* incoming_bid = NULL
+            u64 i
+            OrderbookEntry* candidate
 
-        if ask_count > 0:
-            incoming_ask = self._ordered_entry(
-                asks,
-                ask_count,
-                ask_order,
-                ORDER_ASCENDING,
-                0,
-            )
-        if bid_count > 0:
-            incoming_bid = self._ordered_entry(
-                bids,
-                bid_count,
-                bid_order,
-                ORDER_DESCENDING,
-                0,
-            )
+        # Replenishment must not read a depleted side's top or bottom.
+        if self._asks.is_empty() or self._bids.is_empty():
+            return False
+        best_ask_ticks = self._asks.top().ticks
+        worst_ask_ticks = self._asks.bottom().ticks
+        best_bid_ticks = self._bids.top().ticks
+        worst_bid_ticks = self._bids.bottom().ticks
+
+        for i in range(ask_count):
+            candidate = self._ordered_entry(asks, ask_count, ask_order, ORDER_ASCENDING, i)
+            if candidate.lots != 0:
+                incoming_ask = candidate
+                break
+        for i in range(bid_count):
+            candidate = self._ordered_entry(bids, bid_count, bid_order, ORDER_DESCENDING, i)
+            if candidate.lots != 0:
+                incoming_bid = candidate
+                break
 
         if (
-            ask_count > 0
-            and incoming_ask[0].lots != 0
+            incoming_ask != NULL
             and incoming_ask[0].ticks < best_ask_ticks
             and incoming_ask[0].ticks <= worst_bid_ticks
             and not has_bid_replacements
@@ -239,8 +251,7 @@ cdef class CoreAdvancedOrderbook:
             return True
 
         if (
-            bid_count > 0
-            and incoming_bid[0].lots != 0
+            incoming_bid != NULL
             and incoming_bid[0].ticks > best_bid_ticks
             and incoming_bid[0].ticks >= worst_ask_ticks
             and not has_ask_replacements
@@ -248,6 +259,85 @@ cdef class CoreAdvancedOrderbook:
             return True
 
         return False
+
+    cdef OrderbookEntry* _completed_side_top(
+        self,
+        OrderbookLadder ladder,
+        OrderbookLadderData* data,
+        OrderbookEntry* entries,
+        u64 count,
+        int source_order,
+        int target_order,
+    ) noexcept:
+        """Find the completed side's touch without applying capacity or copying."""
+        cdef:
+            u64 old_i = 0
+            u64 update_i = 0
+            OrderbookEntry* old
+            OrderbookEntry* update
+            OrderbookEntry* candidate
+            bint update_first
+        while old_i < data.num_levels or update_i < count:
+            if update_i >= count:
+                return ladder.at(old_i)
+            update = self._ordered_entry(entries, count, source_order, target_order, update_i)
+            if old_i >= data.num_levels:
+                candidate = update
+                update_i += 1
+            else:
+                old = ladder.at(old_i)
+                if old.ticks == update.ticks:
+                    candidate = update
+                    old_i += 1
+                    update_i += 1
+                else:
+                    update_first = (update.ticks < old.ticks if data.is_price_ascending
+                                    else update.ticks > old.ticks)
+                    if update_first:
+                        candidate = update
+                        update_i += 1
+                    else:
+                        return old
+            if candidate.lots != 0:
+                return candidate
+        return NULL
+
+    cdef void _prune_completed_crossing(
+        self,
+        OrderbookEntry* asks,
+        u64 ask_count,
+        int ask_order,
+        OrderbookEntry* bids,
+        u64 bid_count,
+        int bid_order,
+    ) noexcept:
+        """Discard crossed depth before bounded insertion can evict valid tails."""
+        cdef:
+            OrderbookEntry* touch
+            u64 ticks
+            u64 i
+        if ask_count > 0:
+            touch = self._completed_side_top(self._asks, self._asks_data, asks,
+                                             ask_count, ask_order, ORDER_ASCENDING)
+            if touch != NULL:
+                ticks = touch.ticks
+                while self._bids_data.num_levels and self._bids.top().ticks >= ticks:
+                    self._bids.roll_left(0)
+                    self._bids.decrement_count()
+                for i in range(bid_count):
+                    if bids[i].ticks >= ticks:
+                        bids[i].lots = 0
+        if bid_count > 0:
+            touch = self._completed_side_top(self._bids, self._bids_data, bids,
+                                             bid_count, bid_order, ORDER_DESCENDING)
+            if touch != NULL:
+                ticks = touch.ticks
+                while self._asks_data.num_levels and self._asks.top().ticks <= ticks:
+                    self._asks.roll_left(0)
+                    self._asks.decrement_count()
+                for i in range(ask_count):
+                    if asks[i].ticks <= ticks:
+                        asks[i].lots = 0
 
     cdef bint _can_apply_replacement_side(
         self,
@@ -400,10 +490,20 @@ cdef class CoreAdvancedOrderbook:
     ) noexcept:
         cdef u64 i
 
+        # Delete first: temporary capacity pressure must not evict an unchanged
+        # tail that belongs in the completed batch's retained best levels.
         for i in range(ask_count):
-            self._apply_entry_delta(self._asks, self._asks_data, &asks[i])
+            if asks[i].lots == 0:
+                self._apply_entry_delta(self._asks, self._asks_data, &asks[i])
         for i in range(bid_count):
-            self._apply_entry_delta(self._bids, self._bids_data, &bids[i])
+            if bids[i].lots == 0:
+                self._apply_entry_delta(self._bids, self._bids_data, &bids[i])
+        for i in range(ask_count):
+            if asks[i].lots != 0:
+                self._apply_entry_delta(self._asks, self._asks_data, &asks[i])
+        for i in range(bid_count):
+            if bids[i].lots != 0:
+                self._apply_entry_delta(self._bids, self._bids_data, &bids[i])
         if ask_count > 0:
             self._remove_crossed_bids()
         if bid_count > 0:
@@ -553,7 +653,6 @@ cdef class CoreAdvancedOrderbook:
         if ask_order == ORDER_UNKNOWN:
             inferred = _infer_entries_order(asks, ask_count)
             if inferred != ORDER_UNKNOWN:
-                self._delta_ask_order = inferred
                 ask_order = inferred
         if ask_order == ORDER_UNKNOWN:
             ask_order = ORDER_ASCENDING
@@ -561,10 +660,15 @@ cdef class CoreAdvancedOrderbook:
         if bid_order == ORDER_UNKNOWN:
             inferred = _infer_entries_order(bids, bid_count)
             if inferred != ORDER_UNKNOWN:
-                self._delta_bid_order = inferred
                 bid_order = inferred
         if bid_order == ORDER_UNKNOWN:
             bid_order = ORDER_DESCENDING
+
+        # Both inference passes must succeed before either order is committed.
+        if ask_count > 1:
+            self._delta_ask_order = ask_order
+        if bid_count > 1:
+            self._delta_bid_order = bid_order
 
         if ask_count + bid_count <= SMALL_DELTA_LIMIT:
             if self._should_ignore_crossed_deltas(
@@ -576,6 +680,7 @@ cdef class CoreAdvancedOrderbook:
                 bid_order,
             ):
                 return
+            self._prune_completed_crossing(asks, ask_count, ask_order, bids, bid_count, bid_order)
             self._apply_small_deltas(asks, ask_count, bids, bid_count)
             return
 
@@ -599,6 +704,7 @@ cdef class CoreAdvancedOrderbook:
         ):
             return
 
+        self._prune_completed_crossing(asks, ask_count, ask_order, bids, bid_count, bid_order)
         if ask_count > 0:
             if ask_order != ORDER_ASCENDING:
                 reverse_entries(asks, ask_count)
@@ -669,18 +775,29 @@ cdef class CoreAdvancedOrderbook:
                 free(bid_entries)
 
     cdef void consume_bbo_entries(self, OrderbookEntry ask_entry, OrderbookEntry bid_entry):
+        if bid_entry.ticks >= ask_entry.ticks:
+            raise ValueError("Crossed BBO; bid price must be below ask price")
+        # Reject ambiguous deletion quotes before changing either side.
+        if ask_entry.lots == 0 and (
+            self._asks.is_empty() or ask_entry.ticks != self._asks.top().ticks
+        ):
+            raise ValueError("Zero ask BBO must match the current best ask")
+        if bid_entry.lots == 0 and (
+            self._bids.is_empty() or bid_entry.ticks != self._bids.top().ticks
+        ):
+            raise ValueError("Zero bid BBO must match the current best bid")
         if not self._check_if_empty():
             return
 
         if ask_entry.lots != 0:
             self._assign_top(self._asks, &ask_entry)
-        elif ask_entry.ticks >= self._asks.top().ticks:
+        else:
             self._asks.roll_left(0)
             self._asks.decrement_count()
 
         if bid_entry.lots != 0:
             self._assign_top(self._bids, &bid_entry)
-        elif bid_entry.ticks <= self._bids.top().ticks:
+        else:
             self._bids.roll_left(0)
             self._bids.decrement_count()
 
@@ -726,16 +843,13 @@ cdef class CoreAdvancedOrderbook:
 
         if bid_ticks >= ask_ticks:
             raise ValueError("Crossed BBO; bid price must be below ask price")
-        if not self._check_if_empty():
-            return
-
         self.consume_bbo_entries(ask_entry, bid_entry)
 
     cdef inline double get_mid_price(self):
         self._ensure_not_empty()
         cdef u64 bid_ticks = self._bids.top().ticks
         cdef u64 ask_ticks = self._asks.top().ticks
-        return convert_price_from_tick((bid_ticks + ask_ticks) // 2, self._tick_size)
+        return convert_price_from_tick(bid_ticks + (ask_ticks - bid_ticks) // 2, self._tick_size)
 
     cdef inline double get_bbo_spread(self):
         self._ensure_not_empty()
@@ -747,17 +861,12 @@ cdef class CoreAdvancedOrderbook:
 
     cdef inline double get_wmid_price(self):
         self._ensure_not_empty()
-        cdef:
-            OrderbookEntry* bid = self._bids.top()
-            OrderbookEntry* ask = self._asks.top()
-            u64 total_lots = bid.lots + ask.lots
-            double weighted_ticks
-        if total_lots == 0:
-            return 0.0
-        weighted_ticks = (
-            <double>bid.ticks * <double>bid.lots + <double>ask.ticks * <double>ask.lots
-        ) / <double>total_lots
-        return convert_price_from_tick(<u64>weighted_ticks, self._tick_size)
+        cdef OrderbookEntry* bid = self._bids.top()
+        cdef OrderbookEntry* ask = self._asks.top()
+        cdef u64 weighted_ticks = orderbook_weighted_mid_tick(
+            bid.ticks, ask.ticks, bid.lots, ask.lots,
+        )
+        return convert_price_from_tick(weighted_ticks, self._tick_size)
 
     cdef inline double get_volume_weighted_mid_price(self, double size, bint is_base_currency):
         self._ensure_not_empty()
@@ -804,28 +913,25 @@ cdef class CoreAdvancedOrderbook:
             u64 touch_anchor_ticks = side.top().ticks
             double touch_anchor_price = convert_price_from_tick(touch_anchor_ticks, self._tick_size)
             double target_base = size if is_base_currency else (size / touch_anchor_price)
-            u64 target_lots = convert_size_to_lot(target_base, self._lot_size_recip)
-            u64 remaining_lots = target_lots
-            u64 consumed_lots
-            u64 available_lots
+            double tolerance = target_base * DBL_EPSILON * 4.0
+            double remaining = target_base
+            double consumed
+            double available
             u64 last_touched_ticks = touch_anchor_ticks
             u64 i
-        if target_lots == 0:
-            return 0.0
         for i in range(side_data.num_levels):
-            available_lots = side.at(i).lots
-            consumed_lots = available_lots if available_lots < remaining_lots else remaining_lots
-            if consumed_lots > 0:
+            available = convert_size_from_lot(side.at(i).lots, self._lot_size)
+            consumed = available if available < remaining else remaining
+            if consumed > 0.0:
                 last_touched_ticks = side.at(i).ticks
-            remaining_lots -= consumed_lots
-            if remaining_lots == 0:
+            remaining -= consumed
+            # Stop before an arithmetic residual falsely touches the next tick.
+            if remaining <= tolerance:
                 break
-        if remaining_lots > 0:
-            return INFINITY_DOUBLE
-        return fabs(
-            convert_price_from_tick(last_touched_ticks, self._tick_size)
-            - touch_anchor_price
-        )
+        if remaining > tolerance:
+            return INFINITY
+        return fabs(convert_price_from_tick(last_touched_ticks, self._tick_size)
+                    - touch_anchor_price)
 
     cdef inline double get_size_for_price_impact_bps(
         self,
@@ -836,24 +942,26 @@ cdef class CoreAdvancedOrderbook:
         self._ensure_not_empty()
         if impact_bps <= 0.0:
             return 0.0
+        if not isfinite(impact_bps):
+            raise ValueError("Invalid impact_bps; expected a finite value")
         cdef:
             OrderbookLadder side = self._asks if is_buy else self._bids
             OrderbookLadderData* side_data = side.get_data()
             u64 touch_anchor_ticks = side.top().ticks
-            double touch_anchor_price = convert_price_from_tick(
-                touch_anchor_ticks,
-                self._tick_size,
-            )
-            double limit_price
+            double limit_scaled
+            double ceiling_tolerance
             u64 limit_ticks
             u64 ticks
             u64 lots
-            u64 total_lots = 0
+            double total_lots = 0.0
             double total_ticks_times_lots = 0.0
             u64 i
         if is_buy:
-            limit_price = touch_anchor_price * (1.0 + impact_bps / 10000.0)
-            limit_ticks = convert_price_to_tick(limit_price, self._tick_size_recip)
+            limit_scaled = <double>touch_anchor_ticks * (1.0 + impact_bps / 10000.0)
+            if not isfinite(limit_scaled) or limit_scaled >= 18446744073709551616.0:
+                limit_ticks = <u64>-1
+            else:
+                limit_ticks = convert_price_to_tick(limit_scaled, 1.0)
             for i in range(side_data.num_levels):
                 ticks = side.at(i).ticks
                 if ticks > limit_ticks:
@@ -862,9 +970,16 @@ cdef class CoreAdvancedOrderbook:
                 total_lots += lots
                 total_ticks_times_lots += <double>ticks * <double>lots
         else:
-            limit_price = touch_anchor_price * (1.0 - impact_bps / 10000.0)
-            limit_ticks = convert_price_to_tick(limit_price, self._tick_size_recip)
-            if convert_price_from_tick(limit_ticks, self._tick_size) < limit_price:
+            limit_scaled = <double>touch_anchor_ticks * (1.0 - impact_bps / 10000.0)
+            if limit_scaled < 0.0:
+                limit_scaled = 0.0
+            limit_ticks = convert_price_to_tick(limit_scaled, 1.0)
+            ceiling_tolerance = fabs(limit_scaled) * DBL_EPSILON * 4.0
+            if ceiling_tolerance > 0.5:
+                ceiling_tolerance = 0.5
+            # A mathematical integer boundary can round a few ULPs above
+            # its tick. Only a meaningful fraction requires the next tick.
+            if limit_scaled - <double>limit_ticks > ceiling_tolerance:
                 limit_ticks += 1
             for i in range(side_data.num_levels):
                 ticks = side.at(i).ticks
@@ -874,7 +989,7 @@ cdef class CoreAdvancedOrderbook:
                 total_lots += lots
                 total_ticks_times_lots += <double>ticks * <double>lots
         if is_base_currency:
-            return convert_size_from_lot(total_lots, self._lot_size)
+            return total_lots * self._lot_size
         return (self._tick_size * self._lot_size) * total_ticks_times_lots
 
     cdef inline bint is_bbo_crossed(
@@ -894,8 +1009,8 @@ cdef class CoreAdvancedOrderbook:
             self._tick_size_recip,
         )
         return (
-            self._bids.top().ticks >= other_ask_ticks
-            or self._asks.top().ticks <= other_bid_ticks
+            self._bids.top().ticks > other_ask_ticks
+            or self._asks.top().ticks < other_bid_ticks
         )
 
     cdef inline bint does_bbo_price_change(self, double bid_price, double ask_price):

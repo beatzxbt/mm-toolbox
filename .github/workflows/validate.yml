@@ -64,3 +64,34 @@ jobs:
         uv run ruff format --check .
         uv run ruff check .
         make typecheck
+
+  orderbook-extended:
+    name: Extended orderbook reference scenarios
+    runs-on: ubuntu-latest
+    env:
+      UV_NO_SYNC: "1"
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.sha }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        version: "latest"
+        enable-cache: true
+
+    - name: Install Python
+      run: uv python install 3.15
+
+    - name: Install dependencies
+      run: uv sync --locked --all-groups --no-install-project --python 3.15
+
+    - name: Build Cython extensions and test adapter
+      run: make build
+
+    - name: Run forty long reference replays through all three targets
+      run: |
+        PYTHONPATH=src uv run pytest --require-native --orderbook-extended \
+          --timeout=600 -q tests/orderbook/test_scenarios.py::test_extended_orderbook_replay

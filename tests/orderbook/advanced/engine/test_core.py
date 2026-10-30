@@ -391,7 +391,7 @@ def test_core_is_crossed_ask_crosses_bid():
 
 
 def test_core_is_crossed_equal_touch_prices():
-    """Given equal touch prices, When is_crossed checked, Then returns True."""
+    """Given equal touch prices, When is_crossed checked, Then returns False."""
     _native.test_core_is_crossed_equal_touch_prices()
 
 

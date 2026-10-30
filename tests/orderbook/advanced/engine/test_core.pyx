@@ -1730,12 +1730,12 @@ def test_core_is_crossed_ask_crosses_bid():
 
 
 def test_core_is_crossed_equal_touch_prices():
-    """Test equality at either touch is treated as crossed."""
+    """Test equality at either touch does not strictly cross."""
     cdef CoreAdvancedOrderbook core = _create_core()
     _populate_standard_book(core)
 
-    assert core.is_bbo_crossed(100.01, 100.05) == True
-    assert core.is_bbo_crossed(99.95, 100.00) == True
+    assert core.is_bbo_crossed(100.01, 100.05) == False
+    assert core.is_bbo_crossed(99.95, 100.00) == False
 
 
 def test_core_is_crossed_empty_raises():

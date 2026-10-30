@@ -1,4 +1,4 @@
-# Examples, benchmarks and release review — 2026-10-27
+# Examples, benchmarks and release review — 2026-10-30
 
 Publication remains on hold in [draft PR #31](https://github.com/beatzxbt/mm-toolbox/pull/31).
 Two GPT-6 Luna max agents exercised the examples and benchmarks; a GPT-6 Sol
@@ -18,6 +18,38 @@ The historical performance measurements below used a freshly built, installed `1
 Those measurements predate the current reliability changes; they are retained
 as audit evidence, not presented as new performance measurements of this PR's
 final revision.
+
+## Integrated orderbook and collector follow-up — 2026-10-30
+
+The approved follow-up used three GPT-6.1 Sol agents with high reasoning.
+The collector now has one depth-aware publication owner: future BBOs wait for
+covering depth, equal IDs publish the depth event, and stale/duplicate quotes
+are discarded. Pending count/byte bounds and a depth-progress deadline fail
+explicitly. Transport errors observed at the requested capture limit also fail
+the capture, preserving any previously completed output.
+
+The shared orderbook suite compares the standard book and both advanced APIs
+with an independent dictionary reference after every operation. It covers all
+agreed named scenarios, deterministic generated traces and an actual recorded
+capture. The compact 950-row fixture retains the prefix's complete 33-update
+depth chain; its publication replay is checked against separate raw-depth truth at each
+completed depth boundary. It requires no live network or temporary capture.
+See [the scenario and cleanup guide](tests/orderbook/README.md).
+
+These checks exposed and fixed completed-batch truncation, depleted-side
+recovery, ambiguous zero-BBO handling, mutable standard input ownership,
+unsigned normalization/aggregate overflow, exact bounded weighted midpoints
+and execution-impact boundaries.
+No new per-update native allocations or locks were added.
+Python 3.14 source and isolated installed Python 3.15 wheel suites each passed
+**2,310 tests, eight skipped, one extended case deselected**, requiring every
+native extension. Cython-aware coverage is **86.53%**, above the unchanged 85%
+gate. The standalone C suite passed **40/40** through both arithmetic paths,
+including ASan/UBSan. The extended run passed
+**600,000 operation comparisons** (40 seeds × 5,000 actions × three targets)
+in **317.93 seconds**, including capacities 4, 7, 64 and 1,024. No new performance
+measurement is claimed by these correctness checks; the bounded benchmark
+and example results below remain dated evidence.
 
 ## Advanced BBO correction — 2026-10-27
 
@@ -53,12 +85,11 @@ on the 10,000-record capture. Evidence:
 `/tmp/mm-bbo-release315-jcmn37_g/wheel-tests.log`, with wheel replay results
 under that directory's `replay/`.
 
-The collector still records independent BBO and depth feeds in arrival order;
-its depth bridge and `pu` chain checks do not establish cross-feed ordering.
-The depth-aware publication gate remains an isolated prototype. Its ordered
-replays had zero full-book mismatches at depth boundaries after this correction,
-while arrival-order replay retained its separate sequencing discrepancies.
-That collector integration remains outstanding.
+At this review point the collector still recorded independent BBO and depth
+feeds in arrival order; its depth bridge and `pu` chain checks did not establish
+cross-feed ordering. The isolated gate's ordered replays had zero full-book
+mismatches at depth boundaries, while arrival-order replay retained sequencing
+discrepancies. The 2026-10-30 follow-up above integrates that gate and its tests.
 
 The advanced logging benchmark explicitly uses **64 MiB** shared transport
 capacity for the master and every worker and prints it in its report. It has

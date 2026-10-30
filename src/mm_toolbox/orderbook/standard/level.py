@@ -7,11 +7,22 @@ single price level on either side of an orderbook.
 
 from __future__ import annotations
 
-from math import floor
+from math import floor, isfinite
 from sys import float_info
 from typing import Self
 
 from msgspec import Struct
+
+
+def _floor_scaled_units(value: float) -> int:
+    """Correct representation noise without advancing an exact whole unit."""
+    if not isfinite(value) or value < 0.0 or value >= 18446744073709551616.0:
+        raise ValueError("Normalized price/size must fit in unsigned 64-bit units")
+    integer = floor(value)
+    if value == integer:
+        return integer
+    epsilon = min(abs(value) * float_info.epsilon * 4.0, 0.5)
+    return integer + 1 if 1.0 - (value - integer) <= epsilon else integer
 
 
 def price_to_ticks(price: float, tick_size: float) -> int:
@@ -53,8 +64,7 @@ def price_to_ticks_fast(price: float, inv_tick_size: float) -> int:
         int: Equivalent number of ticks.
 
     """
-    value = price * inv_tick_size
-    return floor(value + abs(value) * float_info.epsilon * 4.0)
+    return _floor_scaled_units(price * inv_tick_size)
 
 
 def size_to_lots_fast(size: float, inv_lot_size: float) -> int:
@@ -68,8 +78,7 @@ def size_to_lots_fast(size: float, inv_lot_size: float) -> int:
         int: Equivalent number of lots.
 
     """
-    value = size * inv_lot_size
-    return floor(value + abs(value) * float_info.epsilon * 4.0)
+    return _floor_scaled_units(size * inv_lot_size)
 
 
 def price_from_ticks(ticks: int, tick_size: float) -> float:

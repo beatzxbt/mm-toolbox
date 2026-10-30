@@ -32,6 +32,9 @@ recursive-include scripts *.py
 
 # Include tests
 recursive-include tests *.py *.pyx *.pxd *.c *.h
+recursive-include tests *.jsonl
+include tests/orderbook/README.md
+include tests/orderbook/data/README.md
 recursive-include tests Makefile
 include src/mm_toolbox/py.typed
 

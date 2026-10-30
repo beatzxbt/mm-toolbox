@@ -9,6 +9,8 @@ SRCS = munit.c test_helpers.c test_ladder.c test_runner.c \
 test: $(SRCS)
 	$(CC) $(CFLAGS) -o test_runner $(SRCS) -lm
 	./test_runner
+	$(CC) $(CFLAGS) -DMM_TOOLBOX_FORCE_PORTABLE_WMID -o test_runner $(SRCS) -lm
+	./test_runner
 
 clean:
 	rm -f test_runner

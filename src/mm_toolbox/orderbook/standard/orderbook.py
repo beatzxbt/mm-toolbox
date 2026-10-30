@@ -144,6 +144,16 @@ class Orderbook:
             level (OrderbookLevel): Level to populate in-place.
 
         """
+        try:
+            norders = int(level.norders)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError(
+                "Invalid norders; expected an integer in unsigned 64-bit range"
+            ) from None
+        if level.norders != norders or norders < 0 or norders >= 1 << 64:
+            raise ValueError(
+                "Invalid norders; expected an integer in unsigned 64-bit range"
+            )
         if level.price < 0.0 or not isfinite(level.price):
             raise ValueError(
                 f"Invalid price; expected finite >=0 but got {level.price}"
@@ -162,7 +172,10 @@ class Orderbook:
         normalized = {}
         for level in levels:
             self._ensure_level_precision(level)
-            normalized[level.ticks] = level
+            # Retain owned values so callers can reuse mutable feed buffers.
+            normalized[level.ticks] = OrderbookLevel(
+                level.price, level.size, int(level.norders), level.ticks, level.lots
+            )
         return normalized
 
     def _consume_side_deltas(
@@ -294,10 +307,12 @@ class Orderbook:
         normalized_asks = self._normalize_side(asks)
         normalized_bids = self._normalize_side(bids)
         if self._is_populated:
-            incoming_ask = min(normalized_asks) if normalized_asks else None
-            incoming_bid = max(normalized_bids) if normalized_bids else None
-            has_asks = any(level.lots != 0 for level in normalized_asks.values())
-            has_bids = any(level.lots != 0 for level in normalized_bids.values())
+            live_asks = [tick for tick, level in normalized_asks.items() if level.lots]
+            live_bids = [tick for tick, level in normalized_bids.items() if level.lots]
+            incoming_ask = min(live_asks) if live_asks else None
+            incoming_bid = max(live_bids) if live_bids else None
+            has_asks = bool(live_asks)
+            has_bids = bool(live_bids)
             if (
                 incoming_ask is not None
                 and normalized_asks[incoming_ask].lots != 0
@@ -338,7 +353,6 @@ class Orderbook:
                 self._asks.pop(self._sorted_ask_ticks.pop(0))
         if self._is_initialized:
             self._refresh_population_state()
-        if self._is_populated:
             self._update_bbo_cache()
 
     def consume_bbo(
@@ -348,9 +362,9 @@ class Orderbook:
     ) -> None:
         """Update the best bid and offer.
 
-        BBO updates usually don't supply size=0 updates for signalling level
-        deletion, therefore, we ignore it and directly update the best bid/ask for now,
-        fixing any issues arising with the orderbook by assuming this source of truth.
+        Positive quotes are authoritative and remove obsolete better levels.
+        A zero quote deletes only a matching current touch; an unmatched zero
+        quote is ambiguous and rejects the paired update before any mutation.
 
         Args:
             ask: Ask level.
@@ -370,9 +384,21 @@ class Orderbook:
         if bid_ticks >= ask_ticks:
             raise ValueError("Crossed BBO; bid price must be below ask price")
 
+        if bid_lots == 0 and (
+            not sorted_bid_ticks or bid_ticks != sorted_bid_ticks[-1]
+        ):
+            raise ValueError("Zero bid BBO must match the current best bid")
+        if ask_lots == 0 and (not sorted_ask_ticks or ask_ticks != sorted_ask_ticks[0]):
+            raise ValueError("Zero ask BBO must match the current best ask")
+
+        # The retained levels belong to the book, while getters keep returning
+        # the same live book objects as before.
+        bid = OrderbookLevel(bid.price, bid.size, int(bid.norders), bid_ticks, bid_lots)
+        ask = OrderbookLevel(ask.price, ask.size, int(ask.norders), ask_ticks, ask_lots)
+
         if bid_lots == 0:
             if sorted_bid_ticks:
-                best_bid_ticks = self._best_bid_ticks
+                best_bid_ticks = sorted_bid_ticks[-1]
                 bids.pop(best_bid_ticks, None)
                 sorted_bid_ticks.pop()
         else:
@@ -383,7 +409,7 @@ class Orderbook:
 
         if ask_lots == 0:
             if sorted_ask_ticks:
-                best_ask_ticks = self._best_ask_ticks
+                best_ask_ticks = sorted_ask_ticks[0]
                 asks.pop(best_ask_ticks, None)
                 sorted_ask_ticks.pop(0)
         else:
@@ -692,36 +718,37 @@ class Orderbook:
         best_bid_ticks = self._best_bid_ticks
 
         if is_buy:
-            touch_anchor_price = asks[best_ask_ticks].price
+            touch_anchor_price = best_ask_ticks * self._tick_size
         else:
-            touch_anchor_price = bids[best_bid_ticks].price
+            touch_anchor_price = best_bid_ticks * self._tick_size
 
         if not is_base_currency:
             size = size / touch_anchor_price
 
+        tolerance = size * float_info.epsilon * 4.0
         remaining_size = size
         last_touched_price = touch_anchor_price
 
         if is_buy:
             for tick in sorted_ask_ticks:
                 level = asks[tick]
-                consumed_size = min(remaining_size, level.size)
+                consumed_size = min(remaining_size, level.lots * self._lot_size)
                 remaining_size -= consumed_size
                 if consumed_size > 0.0:
-                    last_touched_price = level.price
-                if remaining_size <= 0.0:
+                    last_touched_price = tick * self._tick_size
+                if remaining_size <= tolerance:
                     break
         else:
             for tick in reversed(sorted_bid_ticks):
                 level = bids[tick]
-                consumed_size = min(remaining_size, level.size)
+                consumed_size = min(remaining_size, level.lots * self._lot_size)
                 remaining_size -= consumed_size
                 if consumed_size > 0.0:
-                    last_touched_price = level.price
-                if remaining_size <= 0.0:
+                    last_touched_price = tick * self._tick_size
+                if remaining_size <= tolerance:
                     break
 
-        if remaining_size > 0.0:
+        if remaining_size > tolerance:
             return float("inf")
 
         return abs(last_touched_price - touch_anchor_price)
@@ -740,6 +767,8 @@ class Orderbook:
         self._ensure_bbo_available()
         if impact_bps <= 0.0:
             return 0.0
+        if not isfinite(impact_bps):
+            raise ValueError("Invalid impact_bps; expected a finite value")
 
         asks = self._asks
         bids = self._bids
@@ -747,32 +776,37 @@ class Orderbook:
         sorted_bid_ticks = self._sorted_bid_ticks
         best_ask_ticks = self._best_ask_ticks
         best_bid_ticks = self._best_bid_ticks
-        inv_tick_size = self._inv_tick_size
         tick_size = self._tick_size
 
         total_base = 0.0
         total_quote = 0.0
 
         if is_buy:
-            max_price = asks[best_ask_ticks].price * (1.0 + impact_bps / 10_000.0)
-            max_ticks = price_to_ticks_fast(max_price, inv_tick_size)
+            max_scaled = best_ask_ticks * (1.0 + impact_bps / 10_000.0)
+            if not isfinite(max_scaled) or max_scaled >= 18446744073709551616.0:
+                max_ticks = (1 << 64) - 1
+            else:
+                max_ticks = price_to_ticks_fast(max_scaled, 1.0)
             for tick in sorted_ask_ticks:
                 if tick > max_ticks:
                     break
                 level = asks[tick]
-                total_base += level.size
-                total_quote += level.size * level.price
+                base_size = level.lots * self._lot_size
+                total_base += base_size
+                total_quote += base_size * tick * tick_size
         else:
-            min_price = bids[best_bid_ticks].price * (1.0 - impact_bps / 10_000.0)
-            min_ticks = price_to_ticks_fast(min_price, inv_tick_size)
-            if min_ticks * tick_size < min_price:
+            min_scaled = max(0.0, best_bid_ticks * (1.0 - impact_bps / 10_000.0))
+            min_ticks = price_to_ticks_fast(min_scaled, 1.0)
+            ceiling_tolerance = min(abs(min_scaled) * float_info.epsilon * 4.0, 0.5)
+            if min_scaled - min_ticks > ceiling_tolerance:
                 min_ticks += 1
             for tick in reversed(sorted_bid_ticks):
                 if tick < min_ticks:
                     break
                 level = bids[tick]
-                total_base += level.size
-                total_quote += level.size * level.price
+                base_size = level.lots * self._lot_size
+                total_base += base_size
+                total_quote += base_size * tick * tick_size
 
         return total_base if is_base_currency else total_quote
 
