@@ -223,7 +223,7 @@ class RateLimiterBenchmark(BenchmarkRunner[RateLimiterBenchmarkConfig]):
 def _build_config(args: argparse.Namespace) -> RateLimiterBenchmarkConfig:
     """Build benchmark config from CLI args."""
     return RateLimiterBenchmarkConfig(
-        num_operations=max(1, int(args.num_operations)),
+        num_operations=max(1, int(args.operations)),
         warmup_operations=max(0, int(args.warmup)),
         capacity=max(1, int(args.capacity)),
         window_s=max(1, int(args.window_s)),
@@ -310,9 +310,10 @@ def main() -> None:
     )
     cli.parser.add_argument(
         "--num-operations",
+        dest="operations",
         type=int,
-        default=100_000,
-        help="Number of operations to benchmark (default: 100,000)",
+        default=argparse.SUPPRESS,
+        help="Alias for --operations/-n",
     )
 
     args = cli.parse()

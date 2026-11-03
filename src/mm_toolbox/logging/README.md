@@ -266,3 +266,13 @@ discarded at that deadline and is reported. A user-supplied synchronous handler
 cannot be forcibly interrupted: a timed-out master leaves its mappings owned
 by the drain thread until it can finish safely. Stop workers before the master
 to include their final batches. File handlers append existing logs on restart.
+
+`WorkerLogger.get_transport_stats()` returns cumulative `rejected_messages`,
+`transport_errors` and `overwritten_batches`, including the final flush and
+transport cleanup. Read it after `shutdown()` to inspect the final totals.
+Overwritten batches can contain multiple log records; that count is not a
+message count. Overwrite diagnostics are sampled while the counters retain
+exact totals. These transport statistics do not acknowledge downstream handler
+delivery. The advanced logging benchmark checks both final worker status and
+observed handler consumption, and exits nonzero on lifecycle errors or missing
+deliveries without recorded overwrites.

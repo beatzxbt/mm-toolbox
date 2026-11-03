@@ -14,6 +14,7 @@ import queue
 import threading
 import tempfile
 import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -490,3 +491,82 @@ class TestTelegramPush:
         assert len(session.calls) == 3
         assert "returned 500" in str(errors[0][0])
         assert errors[0][1] == "remote delivery"
+
+
+class _Standard(BaseLogHandler):
+    def push(self, buffer):
+        pass
+
+
+def test_standard_immediate_close_drains_every_queued_delivery():
+    handler = _Standard()
+    delivered = []
+
+    async def deliver(item):
+        delivered.append(item)
+
+    for item in range(20):
+        assert handler._enqueue_delivery(item, deliver)
+    handler.close()
+    assert delivered == list(range(20))
+    assert not handler._delivery_thread.is_alive()
+
+
+def test_standard_close_has_one_deadline_and_reports_queued_loss():
+    handler = _Standard()
+    handler._delivery_close_timeout_s = 0.1
+    errors = []
+    entered = threading.Event()
+    cancelled = threading.Event()
+    discarded = threading.Event()
+    release_discard_callback = threading.Event()
+
+    def on_error(error, context):
+        errors.append(error)
+        if "discarded" in str(error):
+            discarded.set()
+            release_discard_callback.wait(timeout=2.0)
+
+    handler.set_error_handler(on_error)
+
+    async def never(item):
+        entered.set()
+        try:
+            await asyncio.Future()
+        finally:
+            cancelled.set()
+
+    for item in range(20):
+        handler._enqueue_delivery(item, never)
+    assert entered.wait(timeout=1)
+    thread = handler._delivery_thread
+    assert thread is not None
+    original_join = thread.join
+    clock_reads = 0
+
+    def monotonic_at_deadline():
+        nonlocal clock_reads
+        clock_reads += 1
+        return 10.0 if clock_reads == 1 else 10.1
+
+    with (
+        patch(
+            "mm_toolbox.logging.standard.handlers.base.time",
+            new=SimpleNamespace(monotonic=monotonic_at_deadline),
+        ),
+        patch.object(thread, "join", wraps=original_join) as thread_join,
+    ):
+        try:
+            handler.close()
+            assert thread_join.call_args.kwargs["timeout"] == pytest.approx(0.0)
+            assert cancelled.wait(timeout=2.0)
+            assert discarded.wait(timeout=2.0)
+        finally:
+            release_discard_callback.set()
+            original_join(timeout=2.0)
+
+    assert not handler._delivery_thread.is_alive()
+    assert errors
+    assert any("discarded" in str(error) for error in errors)
+    assert handler._delivery_queue.empty()
+    assert cancelled.is_set()

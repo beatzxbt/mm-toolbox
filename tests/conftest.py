@@ -20,6 +20,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store_true",
         help="Fail if any configured Cython test extension cannot be imported",
     )
+    parser.addoption(
+        "--orderbook-extended",
+        action="store_true",
+        default=False,
+        help="Run the 40-seed, 5,000-action orderbook reference workload",
+    )
     try:
         parser.addoption(
             "--run-live",
@@ -74,6 +80,9 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers", "live: mark test as requiring live internet connection"
     )
     config.addinivalue_line("markers", "slow: mark test as slow running")
+    config.addinivalue_line(
+        "markers", "orderbook_extended: explicit larger reference replay workload"
+    )
 
 
 def pytest_collection_modifyitems(
@@ -91,6 +100,14 @@ def pytest_collection_modifyitems(
     Returns:
         None
     """
+    if not config.getoption("--orderbook-extended"):
+        extended = [item for item in items if "orderbook_extended" in item.keywords]
+        if extended:
+            items[:] = [
+                item for item in items if "orderbook_extended" not in item.keywords
+            ]
+            config.hook.pytest_deselected(items=extended)
+
     if config.getoption("--run-live"):
         return
 

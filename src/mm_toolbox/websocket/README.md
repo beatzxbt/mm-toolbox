@@ -3,6 +3,12 @@
 WebSocket connection management built on PicoWs with byte ring buffers and
 latency tracking.
 
+Connections explicitly use the event loop's standard asyncio TCP/TLS transport.
+Picows's optional aiofastnet backend is not auto-selected: its locked TLS fallback
+engine can raise callback errors when paused reads resume. Backend selection does
+not retry a connection or replay writes. Secure connections retain Picows's normal
+certificate and hostname verification defaults.
+
 ## Core components
 
 - `WsConnection`: low-level connection wrapper with ping/pong latency tracking.
@@ -59,11 +65,20 @@ config = WsConnectionConfig.default(
     auto_reconnect=True,
     max_frame_size=1_048_576,
     latency_ping_interval_ms=1000,
+    receive_buffer_capacity=4096,
+    receive_buffer_max_bytes=16 * 1024 * 1024,
 )
 ```
 
 - `max_frame_size`: maximum allowed frame size in bytes (default 1 MB).
 - `latency_ping_interval_ms`: interval between internal latency pings in milliseconds (default 1000).
+- `receive_buffer_capacity`: maximum queued messages in a wrapper, rounded up to
+  a power of two (default 4096; positive 32-bit integer).
+- `receive_buffer_max_bytes`: maximum queued payload bytes in a wrapper (default
+  16 MiB; integer between `max_frame_size` and `sys.maxsize`). A pool shares both
+  limits across all its sockets. Slot references, Python object overhead, the
+  current fragmented message and Picows's parser storage are additional memory.
+  Low-level `WsConnection` callers still supply and own their ring buffer.
 
 ## Quick start
 
@@ -145,13 +160,59 @@ asyncio.run(main())
   and callback work, and wakes idle readers. Iteration drains already buffered
   messages before raising `StopAsyncIteration`. Create a new single client for a
   new session. Context exit also waits for owned tasks to terminate.
-- Missing PONGs for three ping intervals disconnect the socket so the configured
-  reconnect path can replace a half-open connection.
+- An internal PING carries a namespaced sequence payload. Only its matching PONG
+  acknowledges that probe; empty, unrelated manual or stale PONGs cannot clear it.
+  Missing acknowledgement for three ping intervals of readable time disconnects
+  the socket so configured recovery can replace a half-open connection.
+- Native cumulative pause duration excludes only time when this client deliberately
+  stopped reading. Brief pause/resume cycles do not reset an outstanding probe or
+  grant a fresh deadline. At expiry, a zero-delay timer allows a selector/I/O turn
+  before rechecking the identical probe, avoiding closure ahead of an already
+  readable PONG. Cancellation or close during that check ends the owned work.
+- Matching PONGs keep latency samples fresh, including under burst pressure.
+  Reported RTT includes application backpressure and event-loop scheduling; it is
+  not a pure network measurement. Timeout diagnostics include wall/readable probe
+  age, last PONG and buffer data age, queue/read state, loop lag and control-frame
+  counters. Buffer data age is shared across sockets in a pool.
 - Pool eviction periodically replaces slower connections based on latency.
-- Receive buffers retain the newest 128 messages. Overflow discards the oldest
-  message and logs a warning through `mm_toolbox.websocket.connection`, including
-  the connection ID and cumulative drop count. The connection also exposes
-  get_dropped_messages(). Sequence-dependent market data
-  consumers must treat this as lost feed validity and resynchronize (for example,
-  by fetching a fresh orderbook snapshot). Hash deduplication does not detect
-  exchange sequence gaps or establish continuity.
+- Wrapper receive buffers retain the newest messages within both configured
+  limits. Overload discards the oldest payloads; one incoming message may evict
+  several older messages to fit the byte limit. Consumed slots release their
+  payload references. General-purpose ringbuffer overwrite behavior is unchanged.
+- Wrapper sockets pause reading under queue pressure and resume once both count
+  and payload bytes drain to one quarter of their bounds. The high watermarks
+  are three quarters of the bounds (byte watermark rounded up). All pool sockets
+  share this flow control, including sockets that finish opening while paused.
+  Retired sockets unregister from it.
+- Picows delivers all complete frames in an already-read parser batch
+  synchronously. Pausing cannot interrupt that batch. The pause decision reserves
+  its remaining bytes and a conservative frame count derived from `tail_size`
+  before later socket reads are allowed. This absorbs ordinary bursts and startup
+  delays; a batch exceeding the finite queue bounds can still overwrite data.
+  An indefinitely stalled application can also trigger the peer's heartbeat
+  timeout. Probe deadlines suspend while reading is deliberately paused, so
+  unread PONGs do not cause a false local timeout.
+- Readers await one readiness event directly; inserts and close wake it without
+  creating per-message tasks or polling. A pending single-client reader can drain
+  a payload queued just before close. Pool close clears its queue; pending readers
+  from an old pool session cannot consume data after reentry.
+- `WsConnection.get_dropped_messages()` counts exact overwrites by that
+  listener; `WsSingle.get_dropped_messages()` and `WsPool.get_dropped_messages()`
+  count exact overwrites throughout the wrapper's lifetime, including startup,
+  failed handshakes, reconnects and retired pool sockets. Close does not reset
+  these counters. Pool counts describe the shared buffer before deduplication;
+  an overwritten redundant copy still counts, even if another copy arrived.
+- Overwrite warnings through `mm_toolbox.websocket.connection` include the
+  listener ID and count, sampled at the first loss and power-of-two thresholds
+  thereafter. A multi-payload eviction can cross a threshold in one insert.
+  Read the counters for exact totals; warning lines are not loss counts.
+- Consumers that require continuity must check loss from the initial zero
+  baseline before applying buffered startup messages and monitor disconnects
+  even when no messages arrive. Hash deduplication and reconnection do not
+  establish exchange sequence continuity. A fresh orderbook snapshot cannot
+  repair already missing trades, candles or moving-average inputs.
+- The standalone market-data examples stop on receive/SHM loss, rejected SHM
+  writes, sequence gaps and disconnects. They disable automatic reconnect and
+  propagate child failure to the parent, which exits nonzero. Restart the whole
+  example to rebuild its state. Their bounded buffers keep overwrite-oldest
+  semantics; they do not promise loss-free throughput.

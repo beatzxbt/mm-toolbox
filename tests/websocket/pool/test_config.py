@@ -12,8 +12,35 @@ Key coverage:
 from __future__ import annotations
 
 import pytest
+from types import SimpleNamespace
 
-from mm_toolbox.websocket.pool import WsPoolConfig
+from mm_toolbox.websocket.pool import WsPool, WsPoolConfig
+from mm_toolbox.websocket import WsConnectionConfig
+from mm_toolbox.websocket import pool as pool_module
+from tests.websocket.conftest import _Connection
+
+
+@pytest.mark.asyncio
+async def test_receive_limits_are_forwarded_to_every_pool_listener(monkeypatch):
+    opened = []
+
+    async def connect(ringbuffer, config):
+        opened.append(config)
+        return _Connection(config)
+
+    monkeypatch.setattr(pool_module, "WsConnection", SimpleNamespace(new=connect))
+    config = WsConnectionConfig.default(
+        "ws://localhost",
+        receive_buffer_capacity=512,
+        receive_buffer_max_bytes=2 * 1024 * 1024,
+    )
+    pool = WsPool(config, pool_config=WsPoolConfig(2, 60))
+    async with pool:
+        assert len(opened) == 2
+        assert all(child.receive_buffer_capacity == 512 for child in opened)
+        assert all(
+            child.receive_buffer_max_bytes == 2 * 1024 * 1024 for child in opened
+        )
 
 
 class TestWsPoolConfig:

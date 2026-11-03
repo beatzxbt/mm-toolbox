@@ -1,8 +1,3 @@
-# cython: language_level=3
-# cython: boundscheck=False
-# cython: wraparound=False
-# cython: cdivision=True
-
 """SPSC shared-memory bytes ring buffers."""
 
 import ctypes

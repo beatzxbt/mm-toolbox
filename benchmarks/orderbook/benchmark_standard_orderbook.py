@@ -473,8 +473,11 @@ def main() -> None:
         print()
         _print_detailed_report(stats, str(input_path), config.warmup_operations)
     except FileNotFoundError as exc:
-        print(f"Error: {exc}")
-        print("Run collect_data.py first to generate the input file.")
+        raise SystemExit(
+            f"Input file not found: {config.input_path}. Supply an existing capture "
+            "with --input, or run benchmarks/orderbook/collect_data.py "
+            "--output <path> and pass that path with --input."
+        ) from exc
     except KeyboardInterrupt:
         print("\nBenchmark interrupted.")
     finally:

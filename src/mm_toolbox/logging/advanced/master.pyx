@@ -209,7 +209,8 @@ cdef class MasterLogger:
         try:
             # Create IPC transport in this thread and own its lifetime here.
             self._transport = ShmMpscConsumer(path=self._config.path)
-            self._last_reported_drops = self._transport.dropped_count
+            # Loss before this thread attaches still belongs to this fresh
+            # mapping and must be reported from the zero creation baseline.
             while not self._stop_event.is_set():
                 try:
                     # Non-blocking drain

@@ -8,6 +8,7 @@ no-op behaviour of logging after shutdown.
 from pathlib import Path
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,6 +17,7 @@ from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
 from mm_toolbox.logging.advanced.handlers.file import FileLogHandler
 from mm_toolbox.logging.advanced.master import MasterLogger
 from mm_toolbox.logging.advanced.worker import WorkerLogger
+import mm_toolbox.logging.advanced.master as master_module
 
 pytestmark = pytest.mark.timeout(10, method="thread")
 
@@ -103,7 +105,7 @@ class TestMasterLogger:
         logger.info(msg_bytes=b"msg after shutdown")
 
     def test_shutdown_deadline_keeps_transport_mapped_while_handler_is_active(
-        self, tmp_path: Path
+        self, tmp_path: Path, monkeypatch
     ):
         """A stalled dispatch cannot make shutdown unmap transport in use by its thread."""
 
@@ -117,6 +119,23 @@ class TestMasterLogger:
                 self.started.set()
                 self.release.wait(2.0)
 
+        joined = []
+
+        class ObservedThread(threading.Thread):
+            def join(self, timeout=None):
+                joined.append(timeout)
+                # Keep the stalled drain alive without a wall-clock assertion.
+                return super().join(timeout=0)
+
+        monkeypatch.setattr(
+            master_module,
+            "threading",
+            SimpleNamespace(Thread=ObservedThread, Event=threading.Event),
+        )
+        monkeypatch.setattr(
+            master_module, "time", SimpleNamespace(monotonic=lambda: 10.0)
+        )
+
         path = tmp_path / "blocked_master.shm"
         config = LoggerConfig(path=str(path), flush_interval_s=0.01)
         handler = BlockingHandler()
@@ -128,9 +147,8 @@ class TestMasterLogger:
             assert handler.started.wait(2.0)
             assert path.exists()
 
-            began = time.monotonic()
             logger.shutdown(timeout_s=0.05)
-            assert time.monotonic() - began < 0.25
+            assert joined == [pytest.approx(0.05)]
             assert path.exists()
         finally:
             handler.release.set()
@@ -140,3 +158,41 @@ class TestMasterLogger:
         while path.exists() and time.monotonic() < cleanup_deadline:
             time.sleep(0.01)
         assert not path.exists()
+
+    def test_receive_loss_before_consumer_attachment_is_reported(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """The master starts its drop baseline at mapping creation, not attachment."""
+        attached, release = threading.Event(), threading.Event()
+        original_consumer = master_module.ShmMpscConsumer
+
+        def delayed_consumer(**kwargs):
+            attached.set()
+            assert release.wait(2)
+            return original_consumer(**kwargs)
+
+        monkeypatch.setattr(master_module, "ShmMpscConsumer", delayed_consumer)
+        config = LoggerConfig(
+            path=str(tmp_path / "startup_loss.shm"),
+            shm_capacity_bytes=4096,
+            max_batch_messages=1,
+        )
+        logger = MasterLogger(config=config)
+        worker = None
+        try:
+            assert attached.wait(1)
+            worker = WorkerLogger(config=config, name="early-worker")
+            for _ in range(100):
+                worker.info(b"x" * 64)
+            worker.shutdown()
+            dropped = worker.get_transport_stats()["overwritten_batches"]
+            assert dropped > 0
+        finally:
+            release.set()
+            if worker is not None:
+                worker.shutdown()
+            logger.shutdown()
+        assert (
+            f"[MasterLogger] SHM transport dropped {dropped} log batches (cumulative {dropped})"
+            in capsys.readouterr().err
+        )

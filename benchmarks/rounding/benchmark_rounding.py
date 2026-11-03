@@ -161,7 +161,7 @@ def run_single(config: RoundingBenchmarkConfig) -> None:
 
 def run_multi_tick(args: argparse.Namespace) -> None:
     """Run tick-size comparison benchmark and print comparative summary."""
-    tick_sizes = [1.0, 0.5, 0.01, 0.0001]
+    tick_sizes = [1.0, 0.1, 0.01, 0.0001]
     results = []
 
     print("=" * 100)
@@ -177,7 +177,7 @@ def run_multi_tick(args: argparse.Namespace) -> None:
             round_bids_down=args.round_bids_down,
             round_asks_up=args.round_asks_up,
             round_size_up=args.round_size_up,
-            num_operations=args.num_operations,
+            num_operations=max(1, int(args.operations)),
             warmup_operations=args.warmup,
         )
 
@@ -222,7 +222,7 @@ def run_multi_array(args: argparse.Namespace) -> None:
             round_bids_down=args.round_bids_down,
             round_asks_up=args.round_asks_up,
             round_size_up=args.round_size_up,
-            num_operations=args.num_operations,
+            num_operations=max(1, int(args.operations)),
             warmup_operations=args.warmup,
         )
 
@@ -292,14 +292,15 @@ def main() -> None:
     )
     cli.parser.add_argument(
         "--num-operations",
+        dest="operations",
         type=int,
-        default=100_000,
-        help="Number of operations to benchmark (default: 100,000)",
+        default=argparse.SUPPRESS,
+        help="Alias for --operations/-n",
     )
     cli.parser.add_argument(
         "--multi-tick",
         action="store_true",
-        help="Run across tick sizes [1.0, 0.5, 0.01, 0.0001] and print comparative table",
+        help="Run across tick sizes [1.0, 0.1, 0.01, 0.0001] and print comparative table",
     )
     cli.parser.add_argument(
         "--multi-array",
@@ -324,7 +325,7 @@ def main() -> None:
         round_bids_down=args.round_bids_down,
         round_asks_up=args.round_asks_up,
         round_size_up=args.round_size_up,
-        num_operations=args.num_operations,
+        num_operations=max(1, int(args.operations)),
         warmup_operations=args.warmup,
     )
     run_single(config)

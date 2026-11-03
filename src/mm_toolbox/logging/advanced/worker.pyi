@@ -53,3 +53,7 @@ class WorkerLogger:
     def get_config(self) -> LoggerConfig:
         """Get the configuration of the logger."""
         ...
+
+    def get_transport_stats(self) -> dict[str, int]:
+        """Return cumulative rejected messages, transport errors and overwritten batches."""
+        ...

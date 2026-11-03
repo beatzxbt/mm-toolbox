@@ -213,6 +213,8 @@ def run_benchmarks(
 
 def main() -> None:
     cli = BenchmarkCLI("Benchmark candles module")
+    # Each operation processes a full trade batch, rather than one trade.
+    cli.parser.set_defaults(operations=10, warmup=2)
 
     cli.parser.add_argument(
         "--trade-count",

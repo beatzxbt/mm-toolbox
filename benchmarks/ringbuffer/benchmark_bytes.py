@@ -6,7 +6,7 @@ Usage:
 
 Measures BytesRingBuffer operations:
 - insert, insert_batch, consume, consume_all
-- overwrite_latest, contains
+- peekright, peekleft, contains
 - Async operations: aconsume, aconsume_iterable
 - Comparison: disable_async=True vs False, only_insert_unique=True vs False
 """
@@ -124,7 +124,7 @@ class BytesRingBufferBenchmark(BenchmarkRunner[BytesBenchmarkConfig]):
         rb = self._create_subject()
         self._benchmark_insert(rb, item_size)
         self._benchmark_insert_batch(rb, item_size)
-        self._benchmark_overwrite_latest(rb, item_size)
+        self._benchmark_peek(rb, item_size)
         self._benchmark_consume(rb, item_size)
         self._benchmark_consume_all(rb, item_size)
         self._benchmark_contains(rb, item_size)
@@ -158,8 +158,12 @@ class BytesRingBufferBenchmark(BenchmarkRunner[BytesBenchmarkConfig]):
         data = self.data_by_size[item_size]
 
         for batch_size in self.config.batch_sizes:
-            num_batches = self.config.num_operations // batch_size
-            warmup_batches = self.config.warmup_operations // batch_size
+            num_batches = max(
+                1, (self.config.num_operations + batch_size - 1) // batch_size
+            )
+            warmup_batches = (
+                self.config.warmup_operations + batch_size - 1
+            ) // batch_size
             batch_idx = 0
 
             def operation():
@@ -178,18 +182,13 @@ class BytesRingBufferBenchmark(BenchmarkRunner[BytesBenchmarkConfig]):
                 measure_count=num_batches,
             )
 
-    def _benchmark_overwrite_latest(self, rb: BytesRingBuffer, item_size: int) -> None:
-        """Benchmark overwrite_latest operation."""
+    def _benchmark_peek(self, rb: BytesRingBuffer, item_size: int) -> None:
+        """Benchmark reading the newest and oldest queued items."""
         data = self.data_by_size[item_size]
-        rb.insert(data[0])
-        idx = 0
+        rb.insert_batch(data[: min(self.config.buffer_size, 100)])
 
-        def operation():
-            nonlocal idx
-            rb.overwrite_latest(data[idx % len(data)])
-            idx += 1
-
-        self.measure_operation(f"overwrite_latest(size={item_size})", operation)
+        for name in ("peekright", "peekleft"):
+            self.measure_operation(f"{name}(size={item_size})", getattr(rb, name))
 
     def _benchmark_consume(self, rb: BytesRingBuffer, item_size: int) -> None:
         """Benchmark single consume operation."""
@@ -210,19 +209,19 @@ class BytesRingBufferBenchmark(BenchmarkRunner[BytesBenchmarkConfig]):
         self.measure_operation(f"consume(size={item_size})", operation)
 
     def _benchmark_consume_all(self, rb: BytesRingBuffer, item_size: int) -> None:
-        """Benchmark consume_all operation."""
+        """Benchmark the combined buffer refill and consume_all workload."""
         data = self.data_by_size[item_size]
         fill_size = min(self.config.buffer_size, 1000)
-        num_iterations = self.config.num_operations // 100
+        num_iterations = max(1, self.config.num_operations)
 
         def operation():
             rb.insert_batch(data[:fill_size])
             rb.consume_all()
 
         self.measure_operation(
-            f"consume_all(size={item_size})",
+            f"fill+consume_all(size={item_size})",
             operation,
-            warmup_count=0,
+            warmup_count=self.config.warmup_operations,
             measure_count=num_iterations,
         )
 
@@ -267,8 +266,12 @@ class BytesRingBufferBenchmark(BenchmarkRunner[BytesBenchmarkConfig]):
     ) -> None:
         """Benchmark async consume iterable."""
         data = self.data_by_size[item_size]
-        fill_size = min(self.config.buffer_size, 1000)
-        num_iterations = self.config.num_operations // fill_size
+        fill_size = min(
+            self.config.buffer_size, 1000, max(1, self.config.num_operations)
+        )
+        num_iterations = max(
+            1, (self.config.num_operations + fill_size - 1) // fill_size
+        )
 
         metrics = self.stats.add_operation(f"aconsume_iterable(size={item_size})")
 

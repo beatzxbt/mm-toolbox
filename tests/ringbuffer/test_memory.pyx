@@ -1,6 +1,3 @@
-# cython: language_level=3
-# cython: boundscheck=False
-# cython: wraparound=False
 """
 Layered tests for shared-memory ring buffer memory utilities.
 

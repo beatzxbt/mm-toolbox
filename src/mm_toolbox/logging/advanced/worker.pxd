@@ -22,6 +22,10 @@ cdef class WorkerLogger:
         object          _stop_event
         object          _timed_operations_thread
         object          _batch_lock
+        object          _rejected_messages
+        object          _transport_errors
+        object          _overwritten_batches
+        object          _overwrite_events
 
     cpdef void          _timed_operations(self)
     cdef void           _flush_logs(self) except *
@@ -38,3 +42,4 @@ cdef class WorkerLogger:
     cpdef bint          is_running(self)
     cpdef str           get_name(self)
     cpdef object        get_config(self)
+    cpdef dict          get_transport_stats(self)

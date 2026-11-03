@@ -1,7 +1,3 @@
-# cython: language_level=3
-# cython: boundscheck=False
-# cython: wraparound=False
-# cython: cdivision=True
 # distutils: language = c
 # distutils: sources = src/mm_toolbox/orderbook/advanced/c/orderbook_ladder.c src/mm_toolbox/orderbook/advanced/c/orderbook_helpers.c
 # distutils: include_dirs = src/mm_toolbox/orderbook/advanced/c
