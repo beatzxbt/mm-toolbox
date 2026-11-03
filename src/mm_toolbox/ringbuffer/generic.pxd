@@ -31,5 +31,6 @@ cdef class GenericRingBuffer:
 
     # def           __contains__(self, object item)
     # def           __len__(self)
+    # def           __getitem__(self, index)
     cdef inline bint __enforce_ringbuffer_not_empty(self)
     cdef inline bint __enforce_async_not_disabled(self)

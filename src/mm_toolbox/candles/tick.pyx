@@ -4,7 +4,7 @@ Creates a new candle after a fixed number of trades (ticks).
 """
 
 from mm_toolbox.candles.base cimport BaseCandles
-from libc.math cimport fmax, fmin, isfinite, nextafter
+from libc.math cimport fmax, fmin
 
 cdef class TickCandles(BaseCandles):
     """Candle aggregator triggered by a fixed number of trades.
@@ -44,8 +44,7 @@ cdef class TickCandles(BaseCandles):
             double size = trade.size
             double volume = price * size
 
-        self.validate_trade(price, size)
-        if self.is_stale_trade(time_ms):
+        if not self.accept_trade(time_ms, price, size):
             return
 
         # Initialize a new candle if this is the first trade

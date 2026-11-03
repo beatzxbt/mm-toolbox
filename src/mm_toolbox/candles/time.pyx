@@ -3,7 +3,7 @@
 Creates a new candle at fixed time intervals (e.g. every N seconds).
 """
 
-from libc.math cimport fmax, fmin, isfinite, nextafter
+from libc.math cimport fmax, fmin, isfinite, INFINITY
 from mm_toolbox.candles.base cimport BaseCandles
 
 cdef class TimeCandles(BaseCandles):
@@ -30,11 +30,12 @@ cdef class TimeCandles(BaseCandles):
             raise ValueError("secs_per_bucket must be finite and positive")
         BaseCandles.__init__(self, num_candles, store_trades)
         self.millis_per_bucket = secs_per_bucket * 1000.0
-        self.next_candle_close_time = 0.0
+        # Zero is a valid boundary when replaying trades before the epoch.
+        self.next_candle_close_time = -INFINITY
 
-    cdef void _reset_aggregation(self):
+    cdef void _reset_trigger_state(self):
         """Anchor replay boundaries to its first trade instead of construction time."""
-        self.next_candle_close_time = 0.0
+        self.next_candle_close_time = -INFINITY
 
     cpdef void process_trade(self, object trade):
         """Process a single trade tick.
@@ -49,11 +50,10 @@ cdef class TimeCandles(BaseCandles):
             double size = trade.size
             double volume = price * size
 
-        self.validate_trade(price, size)
-        if self.is_stale_trade(time_ms):
+        if not self.accept_trade(time_ms, price, size):
             return
 
-        if self.next_candle_close_time == 0.0:
+        if self.next_candle_close_time == -INFINITY:
             self.next_candle_close_time = time_ms + self.millis_per_bucket
         elif self.next_candle_close_time <= time_ms:
             if self.latest_candle.num_trades > 0:

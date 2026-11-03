@@ -5,7 +5,7 @@ from the opening price of the current candle.
 """
 
 from mm_toolbox.candles.base cimport BaseCandles
-from libc.math cimport fmax, fmin, isfinite, nextafter
+from libc.math cimport fmax, fmin, isfinite
 
 cdef class PriceCandles(BaseCandles):
     """Candle aggregator triggered by price movement.
@@ -49,8 +49,7 @@ cdef class PriceCandles(BaseCandles):
             double size = trade.size
             double volume = price * size
 
-        self.validate_trade(price, size)
-        if self.is_stale_trade(time_ms):
+        if not self.accept_trade(time_ms, price, size):
             return
 
         if self.latest_candle.num_trades == 0:

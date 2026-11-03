@@ -11,7 +11,7 @@ format: ## Format code using ruff
 	uv run ruff check --fix --unsafe-fixes .
 
 typecheck: ## Run static type checking
-	uv run ty check src/
+	uv run ty check src/ tests/candles/
 
 fix: ## Run all formatters and typecheck
 	$(MAKE) format typecheck

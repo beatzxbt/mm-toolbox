@@ -426,3 +426,68 @@ class TestGenericRingBufferTimestamps:
         t2 = rb.latest_consume_time_ns
         assert t2 > 0
         assert t2 >= t1
+
+
+class TestGenericRingBufferIndexing:
+    """Non-consuming logical indexing remains correct across buffer mutations."""
+
+    @pytest.mark.parametrize("capacity", [1, 3, 8])
+    def test_indexing_matches_fifo_reference(self, capacity: int) -> None:
+        from collections import deque
+
+        actual_capacity = 1 << (capacity - 1).bit_length()
+        expected: deque[object] = deque(maxlen=actual_capacity)
+        rb: GenericRingBuffer[object] = GenericRingBuffer(capacity)
+
+        def check() -> None:
+            items = list(expected)
+            insert_time = rb.latest_insert_time_ns
+            consume_time = rb.latest_consume_time_ns
+            for i, item in enumerate(items):
+                assert rb[i] is item
+                assert rb[i - len(items)] is item
+            for index in (len(items), -len(items) - 1, 10**100, -(10**100)):
+                with pytest.raises(IndexError):
+                    _ = rb[index]
+            assert len(rb) == len(items)
+            assert rb.latest_insert_time_ns == insert_time
+            assert rb.latest_consume_time_ns == consume_time
+            assert rb.unwrapped() == items
+
+        check()
+        for i in range(actual_capacity * 4):
+            item = {"id": i}
+            rb.insert(item)
+            expected.append(item)
+            check()
+            if i % 3 == 0:
+                assert rb.consume() is expected.popleft()
+                check()
+        batch: list[object] = [object() for _ in range(actual_capacity * 2 + 1)]
+        rb.insert_batch(batch)
+        expected.extend(batch)
+        check()
+        rb.clear()
+        expected.clear()
+        check()
+        rb.insert(None)
+        expected.append(None)
+        check()
+
+    def test_index_protocol(self) -> None:
+        class Index:
+            def __index__(self) -> int:
+                return -1
+
+        rb: GenericRingBuffer[str] = GenericRingBuffer(4)
+        rb.insert_batch(["oldest", "newest"])
+        assert rb[Index()] == "newest"
+        assert rb[False] == "oldest"
+        assert rb[True] == "newest"
+
+    @pytest.mark.parametrize("index", [1.0, "1", None, slice(None)])
+    def test_non_integer_indices_are_rejected(self, index) -> None:
+        rb = GenericRingBuffer(4)
+        rb.insert("item")
+        with pytest.raises(TypeError):
+            _ = rb[index]

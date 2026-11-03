@@ -7,5 +7,10 @@ __all__ = ["TimeCandles"]
 class TimeCandles(BaseCandles):
     """Candle aggregator with fixed time buckets."""
 
-    def __init__(self, secs_per_bucket: float, num_candles: int = 1000) -> None: ...
+    def __init__(
+        self,
+        secs_per_bucket: float,
+        num_candles: int = 1000,
+        store_trades: bool = True,
+    ) -> None: ...
     def process_trade(self, trade: Trade) -> None: ...

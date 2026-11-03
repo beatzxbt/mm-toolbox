@@ -10,8 +10,7 @@ Provides:
 
 import asyncio
 from collections import deque
-from abc import ABC, abstractmethod
-from typing import final, AsyncIterator, Self
+from typing import Iterator, Self, SupportsIndex
 from msgspec import Struct
 
 from libc.stdint cimport uint64_t as u64
@@ -161,14 +160,15 @@ cdef class BaseCandles:
         """Initialize the ring buffer and trade storage setting.
 
         Args:
-            num_candles (int): Maximum number of closed candles to retain.
+            num_candles (int): Requested history capacity (rounded up to a power
+                of two) and maximum number of pending async deliveries.
             store_trades (bool): Whether to keep per-trade records in each candle.
 
         Raises:
             ValueError: If num_candles is not positive.
         """
         if num_candles <= 0:
-            raise ValueError(f"Invalid number of candles; expected >1 but got {num_candles}")
+            raise ValueError(f"Invalid number of candles; expected >0 but got {num_candles}")
         self._ringbuffer = GenericRingBuffer(max_capacity=num_candles)
         self._store_trades = store_trades
         self._pending_candles = deque(maxlen=num_candles)
@@ -189,28 +189,22 @@ cdef class BaseCandles:
             return self.__cum_volume / self.__total_size
         return 0.0
 
-    cdef inline bint is_stale_trade(self, double time_ms):
-        """Check if a trade is older than the latest candle close time.
+    cdef inline bint accept_trade(self, double time_ms, double price, double size):
+        """Validate a trade, reject stale input, and advance stream time.
 
-        Args:
-            time_ms (double): Trade timestamp in milliseconds.
-
-        Returns:
-            bool: True if the trade is stale and should be skipped.
+        Invalid values raise before changing state, including on stale input.
+        Equal timestamps are accepted, even immediately after a candle closes.
         """
+        if not isfinite(price) or not isfinite(size) or size < 0.0 or not isfinite(price * size):
+            raise ValueError("Trade price and size must be finite, with nonnegative size")
         if not isfinite(time_ms):
             raise ValueError("Trade timestamp must be finite")
         if time_ms < self._last_trade_time_ms:
-            return True
+            return False
         self._last_trade_time_ms = time_ms
-        return False
+        return True
 
-    cdef inline void validate_trade(self, double price, double size):
-        """Reject nonfinite or negative trade quantities before changing state."""
-        if not isfinite(price) or not isfinite(size) or size < 0.0 or not isfinite(price * size):
-            raise ValueError("Trade price and size must be finite, with nonnegative size")
-
-    cdef void _reset_aggregation(self):
+    cdef void _reset_trigger_state(self):
         """Reset subclass trigger state when replaying a fresh history."""
         pass
 
@@ -255,7 +249,7 @@ cdef class BaseCandles:
         cdef object t
         for t in trades:
             if not isinstance(t, Trade):
-                raise ValueError(f"Invalid object typing in list; expected list[Trade] but got {type(trades)}")
+                raise ValueError(f"Invalid object typing in list; expected Trade but got {type(t)}")
 
         self.latest_candle.reset()
         self._ringbuffer.clear()
@@ -265,7 +259,7 @@ cdef class BaseCandles:
             future.cancel()
         self.candle_push_event = []
         self._last_trade_time_ms = -INFINITY
-        self._reset_aggregation()
+        self._reset_trigger_state()
         self.__cum_volume = 0.0
         self.__total_size = 0.0
 
@@ -293,11 +287,11 @@ cdef class BaseCandles:
         """
         return len(self._ringbuffer)
 
-    def __getitem__(self, index: int) -> Candle:
+    def __getitem__(self, index: SupportsIndex) -> Candle:
         """Access a closed candle by index.
 
         Args:
-            index (int): Candle index (supports negative indexing).
+            index (SupportsIndex): Candle index (supports negative indexing).
 
         Returns:
             Candle: The requested candle.
@@ -305,18 +299,18 @@ cdef class BaseCandles:
         Raises:
             IndexError: If index is out of range.
         """
-        candles = self._ringbuffer.unwrapped()
-        if index < 0:
-            index += len(candles)
-        if index < 0 or index >= len(candles):
-            raise IndexError(f"Index out of range; expected within (0 <> {len(candles)}) but got {index}")
-        return candles[index]
+        return self._ringbuffer[index]
 
-    def __aiter__(self) -> AsyncIterator[Candle]:
+    def __iter__(self) -> Iterator[Candle]:
+        """Iterate over retained closed candles from oldest to newest."""
+        for index in range(len(self._ringbuffer)):
+            yield self._ringbuffer[index]
+
+    def __aiter__(self) -> Self:
         """Return self as an async iterator.
 
         Returns:
-            AsyncIterator[Candle]: Iterator over closed candles.
+            Self: Iterator over closed candles.
         """
         return self
 

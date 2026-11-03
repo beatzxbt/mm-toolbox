@@ -1,192 +1,74 @@
-"""Layer 2 — Component tests for ``VolumeCandles``.
+"""Size thresholds, trade splitting and allocation-free aggregation."""
 
-Validates volume-threshold-based candle completion: candles close when the
-cumulative trade size reaches a configured limit. Covers exact
-thresholds, buy/sell separation, zero-volume trades, single high-volume trades,
-and boundary conditions.
-"""
-
-import asyncio
 import math
 
 import pytest
 
-from mm_toolbox.candles import MultiCandles, VolumeCandles
+import mm_toolbox.candles.volume as volume_module
+from mm_toolbox.candles import VolumeCandles
 from mm_toolbox.candles.base import Trade
-from tests.candles.support import trade as make_trade
+from tests.candles.bank import (
+    VOLUME_SCENARIOS,
+    Scenario,
+    assert_candle,
+    assert_scenario,
+    trade,
+)
 
 
-class TestVolumeCandlesSpecific:
-    """Layer 2 — ``VolumeCandles``-specific ``process_trade`` behaviour."""
-
-    def setup_method(self):
-        """Create a fresh asyncio event loop for each test method."""
-        self.loop = asyncio.new_event_loop()
-
-    def test_volume_based_candle_completion(self):
-        """Given a 500-volume bucket, the candle completes when cumulative volume exceeds the threshold."""
-        volume_candles = VolumeCandles(5.0)
-
-        trades = [
-            Trade(time_ms=1000, is_buy=True, price=100.0, size=2.0),
-            Trade(time_ms=2000, is_buy=True, price=100.0, size=2.5),
-        ]
-
-        for trade in trades:
-            volume_candles.process_trade(trade)
-
-        final_trade = Trade(time_ms=3000, is_buy=True, price=101.0, size=1.0)
-        volume_candles.process_trade(final_trade)
-
-        assert len(volume_candles) == 1
-        assert volume_candles[0].buy_size == 5.0
-        assert volume_candles[0].buy_volume == pytest.approx(500.5)
-        assert volume_candles.latest_candle.buy_size == 0.5
-
-    def test_volume_accumulation_accuracy(self):
-        """Given known price/size pairs, the computed total volume equals the manual sum.
-
-        Volume is calculated as ``price * size``. An off-by-one or rounding
-        error here would silently corrupt candle statistics.
-        """
-        volume_candles = VolumeCandles(1000.0)
-
-        volume_test_cases = [
-            (100.0, 1.0, 100.0),
-            (99.5, 2.0, 199.0),
-            (101.25, 0.8, 81.0),
-            (98.75, 1.6, 158.0),
-        ]
-
-        total_expected_volume = 0.0
-        for index, (price, size, expected_volume) in enumerate(volume_test_cases):
-            trade = Trade(
-                time_ms=1640995200000 + index,
-                is_buy=True,
-                price=price,
-                size=size,
-            )
-            volume_candles.process_trade(trade)
-            total_expected_volume += expected_volume
-
-        assert total_expected_volume == 538.0
-        assert volume_candles.latest_candle.buy_volume == pytest.approx(
-            total_expected_volume
-        )
-        assert volume_candles.latest_candle.buy_size == pytest.approx(5.4)
-
-    def test_buy_sell_volume_separation(self):
-        """Given buy and sell trades, buy_volume and sell_volume are tracked independently.
-
-        Accurate side-separated volume is essential for order-flow analysis.
-        """
-        volume_candles = VolumeCandles(2000.0)
-
-        trades = [
-            Trade(time_ms=1000, is_buy=True, price=100.0, size=2.0),
-            Trade(time_ms=2000, is_buy=False, price=99.0, size=1.0),
-            Trade(time_ms=3000, is_buy=True, price=101.0, size=1.5),
-            Trade(time_ms=4000, is_buy=False, price=98.0, size=0.5),
-        ]
-
-        for trade in trades:
-            volume_candles.process_trade(trade)
-
-        assert volume_candles.latest_candle.buy_volume == pytest.approx(351.5)
-        assert volume_candles.latest_candle.sell_volume == pytest.approx(148.0)
-        assert volume_candles.latest_candle.buy_size == 3.5
-        assert volume_candles.latest_candle.sell_size == 1.5
-
-    def test_volume_threshold_boundary_conditions(self):
-        """Given trades at exactly the threshold and just over it, both paths complete without error."""
-        volume_candles = VolumeCandles(10.0)
-
-        exact_trades = [
-            Trade(time_ms=1000, is_buy=True, price=100.0, size=5.0),
-            Trade(time_ms=2000, is_buy=True, price=100.0, size=5.0),
-        ]
-
-        for trade in exact_trades:
-            volume_candles.process_trade(trade)
-
-        assert len(volume_candles) == 1
-        assert volume_candles[0].buy_size == 10.0
-        assert volume_candles.latest_candle.num_trades == 0
-
-        vc_over = VolumeCandles(10.0)
-        over_trades = [
-            Trade(time_ms=1000, is_buy=True, price=100.0, size=5.0),
-            Trade(time_ms=2000, is_buy=True, price=100.0, size=5.1),
-        ]
-
-        for trade in over_trades:
-            vc_over.process_trade(trade)
-
-        assert len(vc_over) == 1
-        assert vc_over[0].buy_size == 10.0
-        assert vc_over.latest_candle.buy_size == pytest.approx(0.1)
-
-    def test_zero_volume_trade_handling(self):
-        """Given a zero-size trade, it contributes zero volume and does not corrupt the accumulator."""
-        volume_candles = VolumeCandles(500.0)
-
-        trades = [
-            Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0),
-            Trade(time_ms=2000, is_buy=True, price=100.0, size=0.0),
-            Trade(time_ms=3000, is_buy=False, price=99.0, size=2.0),
-        ]
-
-        for trade in trades:
-            volume_candles.process_trade(trade)
-
-        assert volume_candles.latest_candle.buy_volume == 100.0
-        assert volume_candles.latest_candle.sell_volume == 198.0
-        assert volume_candles.latest_candle.num_trades == 2
-
-    def test_high_volume_single_trades(self):
-        """Given a single trade whose volume exceeds the bucket size, the candle completes immediately.
-
-        This guards against infinite loops where the aggregator waits for
-        more trades that will never arrive.
-        """
-        volume_candles = VolumeCandles(10.0)
-
-        high_volume_trade = Trade(
-            time_ms=1640995200000,
-            is_buy=True,
-            price=100.0,
-            size=15.0,
-        )
-
-        volume_candles.process_trade(high_volume_trade)
-
-        assert len(volume_candles) == 1
-        assert volume_candles[0].buy_size == 10.0
-        assert volume_candles.latest_candle.buy_size == 5.0
-
-    @pytest.mark.parametrize("tiny", [False, True])
-    @pytest.mark.parametrize("multi", [False, True])
-    def test_split_conserves_stored_trade_quantities(self, tiny, multi):
-        """Splits terminate below the old epsilon and retain correct last chunks."""
-        threshold = 1e-13 if tiny else 1.0
-        size = threshold * 2.5
-        candles = (
-            MultiCandles(10.0, 100, threshold) if multi else VolumeCandles(threshold)
-        )
-        candles.process_trade(make_trade(1000, size=size))
-        buckets = [candles[i] for i in range(len(candles))] + [candles.latest_candle]
-        assert len(candles) == 2
-        assert math.fsum(c.buy_size for c in buckets) == pytest.approx(
-            size, rel=1e-14, abs=0
-        )
-        assert math.fsum(c.buy_volume for c in buckets) == pytest.approx(
-            size * 100, rel=1e-14, abs=0
-        )
-        assert math.fsum(t.size for c in buckets for t in c.trades) == pytest.approx(
-            size, rel=1e-14, abs=0
-        )
-        assert all(c.num_trades == 1 for c in buckets)
+@pytest.mark.parametrize("case", VOLUME_SCENARIOS, ids=lambda case: case.name)
+@pytest.mark.parametrize("store_trades", [False, True])
+@pytest.mark.parametrize("replay", [False, True], ids=["stream", "replay"])
+def test_volume_scenarios(
+    case: Scenario[float], store_trades: bool, replay: bool
+) -> None:
+    candles = VolumeCandles(case.limit, max(1, len(case.closed)), store_trades)
+    if replay:
+        if case.trades:
+            candles.initialize(list(case.trades))
+        else:
+            with pytest.raises(ValueError, match="empty"):
+                candles.initialize([])
+    else:
+        for record in case.trades:
+            candles.process_trade(record)
+    assert_scenario(candles, case, store_trades)
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+@pytest.mark.parametrize("limit", [0.0, -1.0, math.nan, math.inf, -math.inf])
+def test_invalid_volume_limit(limit: float) -> None:
+    with pytest.raises(ValueError, match="volume_per_bucket"):
+        VolumeCandles(limit)
+
+
+def test_threshold_too_small_to_split_raises() -> None:
+    candles = VolumeCandles(1e-300)
+    with pytest.raises(ValueError, match="too small relative"):
+        candles.process_trade(trade(1000))
+
+
+@pytest.mark.parametrize("store_trades", [False, True])
+def test_split_trade_allocation_respects_storage(
+    monkeypatch: pytest.MonkeyPatch, store_trades: bool
+) -> None:
+    created: list[Trade] = []
+
+    def counting_trade(time_ms: int, is_buy: bool, price: float, size: float) -> Trade:
+        record = Trade(time_ms, is_buy, price, size)
+        created.append(record)
+        return record
+
+    monkeypatch.setattr(volume_module, "Trade", counting_trade)
+    candles = VolumeCandles(1.0, store_trades=store_trades)
+    candles.process_trade(trade(1000, size=2.5))
+    assert len(created) == (3 if store_trades else 0)
+    for closed in candles:
+        assert_candle(closed, (trade(1000),), store_trades)
+    assert_candle(candles.latest_candle, (trade(1000, size=0.5),), store_trades)
+
+
+def test_unsplit_trade_is_stored_by_identity() -> None:
+    candles = VolumeCandles(10.0)
+    record = trade(1000)
+    candles.process_trade(record)
+    assert candles.latest_candle.trades[0] is record

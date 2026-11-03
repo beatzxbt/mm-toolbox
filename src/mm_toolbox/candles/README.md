@@ -85,11 +85,19 @@ completed candles into a ring buffer.
 
 ## Behavior notes
 
-- Stale trades (time_ms older than the last candle close) are ignored.
-- `num_candles` caps the ring buffer; older candles are dropped.
+- Stale trades (time_ms older than the last accepted trade) are ignored.
+- `num_candles` requests history capacity, rounded up to a power of two by the
+  ring buffer; older candles are dropped once that capacity is reached.
+- Closed candles support constant-time positive and negative indexing and
+  iteration from oldest to newest, without copying the full history per access.
 - `store_trades=True` keeps the trade list in each candle; tune `num_candles` for memory.
 - `initialize(trades)` explicitly sets the baseline from a non-empty list of `Trade` objects.
 - `Trade` and `Candle` are lightweight `msgspec.Struct` instances.
+- Their constructors do not validate field types or ranges. Ingestion rejects
+  nonfinite timestamps, prices, sizes or notionals, and negative sizes before
+  advancing stream time. Equal timestamps, zero sizes and negative prices are
+  allowed. Tick, time and price candles count zero-size trades; volume and multi
+  candles advance stream time but omit those trades from candle statistics.
 
 ## Delivery and replay guarantees
 

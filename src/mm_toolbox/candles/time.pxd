@@ -11,5 +11,5 @@ cdef class TimeCandles(BaseCandles):
     #     bint store_trades=True
     # )
 
-    cdef void _reset_aggregation(self)
+    cdef void _reset_trigger_state(self)
     cpdef void process_trade(self, object trade)

@@ -1,4 +1,5 @@
 import asyncio
+from operator import index as as_index
 from typing import AsyncIterator, Iterator
 
 from libc.stdint cimport uint64_t as u64
@@ -317,6 +318,20 @@ cdef class GenericRingBuffer:
     def __len__(self):
         """Get the number of elements currently in the buffer."""
         return self._size
+
+    def __getitem__(self, index):
+        """Return an item in FIFO order without consuming or copying the buffer.
+
+        Negative indices count back from the newest item. Bounds are checked
+        before converting to the unsigned physical offset, including for
+        Python integers larger than the native index range.
+        """
+        index = as_index(index)
+        if index < 0:
+            index += self._size
+        if index < 0 or index >= self._size:
+            raise IndexError("RingBuffer index out of range")
+        return self._buffer[(self._tail + <u64>index) & self._mask]
 
     @property
     def latest_insert_time_ns(self):

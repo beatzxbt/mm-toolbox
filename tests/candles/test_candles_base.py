@@ -1,598 +1,318 @@
-"""Layer 1 — Primitives tests for base candle functionality.
-
-Covers the ``Trade`` and ``Candle`` structs (creation, immutability, edge
-values) and base-class behaviour shared by all candle aggregators (VWAP,
-stale-trade handling, async Future lifecycle, validation on ``initialize``).
-"""
+"""Shared candle contracts: state, validation, replay, storage and delivery."""
 
 from __future__ import annotations
 
 import asyncio
 import math
+from collections.abc import Callable
+from typing import cast
 
 import pytest
 
-from mm_toolbox.candles import PriceCandles, TickCandles, TimeCandles, VolumeCandles
-from mm_toolbox.candles.base import Candle, Trade
-from tests.candles.support import trade as make_trade
+from mm_toolbox.candles import (
+    MultiCandles,
+    PriceCandles,
+    TickCandles,
+    TimeCandles,
+    VolumeCandles,
+)
+from mm_toolbox.candles.base import BaseCandles, Candle, Trade
+from tests.candles.bank import assert_candle, trade
+
+CandleFactory = Callable[[int, bool], BaseCandles]
+FACTORIES: tuple[CandleFactory, ...] = (
+    lambda n, s: TickCandles(100, n, s),
+    lambda n, s: TimeCandles(3600.0, n, s),
+    lambda n, s: PriceCandles(1000.0, n, s),
+    lambda n, s: VolumeCandles(1000.0, n, s),
+    lambda n, s: MultiCandles(3600.0, 100, 1000.0, n, s),
+)
+CLOSING_FACTORIES: tuple[CandleFactory, ...] = (
+    lambda n, s: TickCandles(2, n, s),
+    lambda n, s: TimeCandles(1.0, n, s),
+    lambda n, s: PriceCandles(1.0, n, s),
+    lambda n, s: VolumeCandles(2.0, n, s),
+    lambda n, s: MultiCandles(1.0, 2, 2.0, n, s),
+)
+VARIANT_NAMES = ("tick", "time", "price", "volume", "multi")
 
 
-class TestTradeStructure:
-    """Layer 1 — ``Trade`` data-structure tests."""
-
-    def test_trade_creation(self):
-        """Given valid fields, a ``Trade`` is created with exact attributes."""
-        trade = Trade(time_ms=1640995200000, is_buy=True, price=100.50, size=1.5)
-
-        assert trade.time_ms == 1640995200000
-        assert trade.is_buy is True
-        assert trade.price == 100.50
-        assert trade.size == 1.5
-
-    def test_trade_edge_values(self):
-        """Given extreme values (zero, max int, large floats), creation succeeds.
-
-        ``msgspec.Struct`` does not validate ranges, so zero and very large
-        values are accepted without error.
-        """
-        edge_trade = Trade(time_ms=1000, is_buy=True, price=0.0, size=0.0)
-        assert edge_trade.price == 0.0
-        assert edge_trade.size == 0.0
-
-        large_trade = Trade(
-            time_ms=9223372036854775807, is_buy=False, price=999999.99, size=10000.0
-        )
-        assert large_trade.time_ms == 9223372036854775807
-        assert large_trade.price == 999999.99
-        assert large_trade.size == 10000.0
-
-    def test_trade_buy_sell_types(self):
-        """Given ``is_buy=True`` and ``is_buy=False``, the flag is stored exactly."""
-        buy_trade = Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0)
-        sell_trade = Trade(time_ms=2000, is_buy=False, price=99.0, size=2.0)
-
-        assert buy_trade.is_buy is True
-        assert sell_trade.is_buy is False
-
-    def test_trade_value_property(self):
-        """Given a ``Trade``, its ``value`` equals price multiplied by size."""
-        trade = Trade(time_ms=1000, is_buy=True, price=100.0, size=2.5)
-        assert trade.value == 250.0
-
-        zero_trade = Trade(time_ms=1000, is_buy=True, price=50.0, size=0.0)
-        assert zero_trade.value == 0.0
-
-    def test_trade_is_frozen(self):
-        """Given a ``Trade`` instance, mutating any field raises ``AttributeError``.
-
-        Immutability is critical for thread-safe sharing between candle
-        aggregators and consumers.
-        """
-        trade = Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0)
-        with pytest.raises(AttributeError):
-            trade.price = 99.0
+@pytest.fixture(params=FACTORIES, ids=VARIANT_NAMES)
+def factory(request: pytest.FixtureRequest) -> CandleFactory:
+    return cast(CandleFactory, request.param)
 
 
-class TestCandleStructure:
-    """Layer 1 — ``Candle`` data-structure tests."""
+@pytest.fixture
+def populated_candle() -> Candle:
+    return Candle(
+        open_time_ms=1000,
+        close_time_ms=2000,
+        open_price=100.0,
+        high_price=102.0,
+        low_price=99.0,
+        close_price=101.0,
+        buy_size=1.0,
+        buy_volume=100.0,
+        sell_size=2.0,
+        sell_volume=202.0,
+        vwap=302.0 / 3.0,
+        num_trades=2,
+        trades=[trade(1000), trade(2000, size=2.0, price=101.0, is_buy=False)],
+    )
 
-    def test_candle_empty_creation(self):
-        """Given ``Candle.empty()``, all fields are zero-initialised."""
-        candle = Candle.empty()
 
-        assert candle.open_time_ms == 0
-        assert candle.close_time_ms == 0
-        assert candle.open_price == 0.0
-        assert candle.high_price == 0.0
-        assert candle.low_price == 0.0
-        assert candle.close_price == 0.0
-        assert candle.buy_size == 0.0
-        assert candle.buy_volume == 0.0
-        assert candle.sell_size == 0.0
-        assert candle.sell_volume == 0.0
-        assert candle.vwap == 0.0
-        assert candle.num_trades == 0
-        assert candle.trades == []
+def test_trade_value_and_immutability() -> None:
+    record = trade(1000, size=2.5)
+    assert record.value == 250.0
+    assert trade(1000, size=0.0).value == 0.0
+    with pytest.raises(AttributeError):
+        record.price = 99.0  # ty: ignore[invalid-assignment]
 
-    def test_candle_full_creation(self):
-        """Given every field populated, the ``Candle`` stores them exactly."""
-        candle = Candle(
-            open_time_ms=1000,
-            close_time_ms=2000,
-            open_price=100.0,
-            high_price=102.0,
-            low_price=99.0,
-            close_price=101.0,
-            buy_size=1.0,
-            buy_volume=100.0,
-            sell_size=0.5,
-            sell_volume=50.0,
-            vwap=100.5,
-            num_trades=2,
-            trades=[Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0)],
-        )
 
-        assert candle.open_time_ms == 1000
-        assert candle.close_time_ms == 2000
-        assert candle.open_price == 100.0
-        assert candle.high_price == 102.0
-        assert candle.low_price == 99.0
-        assert candle.close_price == 101.0
-        assert candle.buy_size == 1.0
-        assert candle.buy_volume == 100.0
-        assert candle.sell_size == 0.5
-        assert candle.sell_volume == 50.0
-        assert candle.vwap == 100.5
-        assert candle.num_trades == 2
-        assert len(candle.trades) == 1
+def test_empty_candles_have_independent_trade_lists() -> None:
+    first, second = Candle.empty(), Candle.empty()
+    assert first == second
+    assert first.trades is not second.trades
+    first.trades.append(trade(0))
+    assert second.trades == []
 
-    def test_candle_reset(self):
-        """Given a populated ``Candle``, ``reset()`` returns it to empty state."""
-        candle = Candle(
-            open_time_ms=1000,
-            close_time_ms=2000,
-            open_price=100.0,
-            high_price=102.0,
-            low_price=99.0,
-            close_price=101.0,
-            buy_size=1.0,
-            buy_volume=100.0,
-            sell_size=0.5,
-            sell_volume=50.0,
-            vwap=100.5,
-            num_trades=2,
-            trades=[Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0)],
-        )
 
-        candle.reset()
+def test_reset_clears_every_field(populated_candle: Candle) -> None:
+    populated_candle.reset()
+    assert populated_candle == Candle.empty()
 
-        empty_candle = Candle.empty()
-        assert candle.open_time_ms == empty_candle.open_time_ms
-        assert candle.num_trades == empty_candle.num_trades
-        assert candle.vwap == empty_candle.vwap
 
-    def test_candle_copy(self):
-        """Given a ``Candle``, ``copy()`` produces an equivalent but independent object."""
-        original = Candle(
-            open_time_ms=1000,
-            close_time_ms=2000,
-            open_price=100.0,
-            high_price=102.0,
-            low_price=99.0,
-            close_price=101.0,
-            buy_size=1.0,
-            buy_volume=100.0,
-            sell_size=0.5,
-            sell_volume=50.0,
-            vwap=100.5,
-            num_trades=1,
-            trades=[],
-        )
-
-        copied = original.copy()
-
-        assert copied.open_price == original.open_price
-        assert copied.num_trades == original.num_trades
-        assert copied.vwap == original.vwap
-
-    def test_candle_copy_without_trades(self):
-        """Given a ``Candle`` with trades, ``copy(include_trades=False)`` yields an empty trades list."""
-        original = Candle(
-            open_time_ms=1000,
-            close_time_ms=2000,
-            open_price=100.0,
-            high_price=102.0,
-            low_price=99.0,
-            close_price=101.0,
-            buy_size=1.0,
-            buy_volume=100.0,
-            sell_size=0.5,
-            sell_volume=50.0,
-            vwap=100.5,
-            num_trades=1,
-            trades=[Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0)],
-        )
-
-        copied = original.copy(include_trades=False)
-
+@pytest.mark.parametrize("include_trades", [False, True])
+def test_copy_preserves_metadata_and_owns_its_trade_list(
+    populated_candle: Candle, include_trades: bool
+) -> None:
+    copied = populated_candle.copy(include_trades=include_trades)
+    assert copied is not populated_candle
+    assert copied.copy(include_trades=False) == populated_candle.copy(
+        include_trades=False
+    )
+    assert copied.trades is not populated_candle.trades
+    if include_trades:
+        assert copied.trades == populated_candle.trades
+        assert copied.trades[0] is populated_candle.trades[0]
+    else:
         assert copied.trades == []
-        assert copied.num_trades == original.num_trades
-        assert copied.open_price == original.open_price
+    populated_candle.reset()
+    assert copied.num_trades == 2
+    assert len(copied.trades) == (2 if include_trades else 0)
 
 
-class TestBaseCandlesFunctionality:
-    """Layer 2 — Base-class behaviour exercised through concrete subclasses."""
+@pytest.mark.parametrize("capacity", [0, -1])
+def test_invalid_capacity(factory: CandleFactory, capacity: int) -> None:
+    error = ValueError if capacity == 0 else OverflowError
+    with pytest.raises(error):
+        factory(capacity, True)
 
-    def setup_method(self):
-        """Create a fresh asyncio event loop for each test method."""
-        self.loop = asyncio.new_event_loop()
 
-    def test_base_candles_initialization(self):
-        """Given valid parameters, every subclass instantiates without error."""
-        tc = TickCandles(5)
-        vc = VolumeCandles(1000.0)
-        time_c = TimeCandles(60.0)
-        pc = PriceCandles(0.01)
+@pytest.mark.parametrize("store_trades", [False, True])
+def test_shared_aggregation_and_trade_storage(
+    factory: CandleFactory, store_trades: bool
+) -> None:
+    candles = factory(8, store_trades)
+    records = (
+        trade(1000, size=2.0),
+        trade(2000, price=110.0),
+        trade(3000, price=90.0, is_buy=False),
+    )
+    for record in records:
+        candles.process_trade(record)
+    assert len(candles) == 0
+    assert_candle(candles.latest_candle, records, store_trades)
 
-        assert tc is not None
-        assert vc is not None
-        assert time_c is not None
-        assert pc is not None
 
-    def test_num_candles_zero_raises(self):
-        """Given ``num_candles=0``, construction raises ValueError."""
-        with pytest.raises(ValueError, match="Invalid number of candles"):
-            TickCandles(5, num_candles=0)
+@pytest.mark.parametrize("factory", CLOSING_FACTORIES, ids=VARIANT_NAMES)
+@pytest.mark.parametrize("store_trades", [False, True])
+@pytest.mark.asyncio
+async def test_closed_history_and_delivery_respect_trade_storage(
+    factory: CandleFactory, store_trades: bool
+) -> None:
+    candles = factory(8, store_trades)
+    candles.process_trade(trade(1000))
+    candles.process_trade(trade(2000, price=102.0))
+    closed = await anext(candles)
+    assert closed is candles[0]
+    assert len(closed.trades) == (closed.num_trades if store_trades else 0)
+    snapshot = closed.copy()
+    candles.process_trade(trade(3000, price=103.0))
+    assert closed == snapshot
 
-    def test_num_candles_negative_raises(self):
-        """Given a negative ``num_candles``, the Cython ``u64`` type raises OverflowError."""
-        with pytest.raises(OverflowError):
-            TickCandles(5, num_candles=-1)
 
-    def test_vwap_calculation_through_subclasses(self):
-        """Given a known sequence of trades, VWAP equals the price-weighted mean.
+def test_vwap_starts_fresh_after_completion() -> None:
+    candles = TickCandles(2)
+    candles.process_trade(trade(1000, size=2.0))
+    candles.process_trade(trade(2000, price=200.0))
+    assert candles[0].vwap == pytest.approx(400.0 / 3.0)
+    last = trade(3000, price=50.0, size=4.0)
+    candles.process_trade(last)
+    assert_candle(candles.latest_candle, (last,))
 
-        VWAP = sum(price * size) / sum(size).  This is a core financial metric,
-        so an off-by-one in the divisor would silently corrupt trading signals.
-        """
-        tick_candles = TickCandles(10)
 
-        trades = [
-            Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0),
-            Trade(time_ms=2000, is_buy=True, price=110.0, size=2.0),
-            Trade(time_ms=3000, is_buy=False, price=90.0, size=1.0),
-        ]
-
-        for trade in trades:
-            tick_candles.process_trade(trade)
-
-        assert tick_candles.latest_candle.vwap == pytest.approx(102.5)
-
-    def test_vwap_uses_price_weighting(self):
-        """Given unequal sizes, VWAP weights by size rather than averaging prices.
-
-        A common bug is to compute mean(price) instead of sum(price*size)/sum(size).
-        """
-        tick_candles = TickCandles(3)
-
-        trades = [
-            Trade(time_ms=1000, is_buy=True, price=100.0, size=2.0),
-            Trade(time_ms=2000, is_buy=True, price=110.0, size=1.0),
-        ]
-
-        for trade in trades:
-            tick_candles.process_trade(trade)
-
-        expected_vwap = (100.0 * 2.0 + 110.0 * 1.0) / (2.0 + 1.0)
-        assert tick_candles.latest_candle.vwap == pytest.approx(expected_vwap)
-
-    def test_vwap_resets_after_candle_completion(self):
-        """Given a completed candle, the next candle starts with a fresh VWAP.
-
-        If VWAP leaked across candles, a quiet period after a volatile one would
-        report an inflated average.
-        """
-        tick_candles = TickCandles(2)
-
-        first_trades = [
-            Trade(time_ms=1000, is_buy=True, price=100.0, size=2.0),
-            Trade(time_ms=2000, is_buy=False, price=200.0, size=1.0),
-        ]
-
-        for trade in first_trades:
-            tick_candles.process_trade(trade)
-
-        next_trade = Trade(time_ms=3000, is_buy=True, price=50.0, size=4.0)
-        tick_candles.process_trade(next_trade)
-
-        assert tick_candles.latest_candle.num_trades == 1
-        assert tick_candles.latest_candle.vwap == pytest.approx(50.0)
-
-    def test_vwap_zero_size(self):
-        """Given a trade with size=0, VWAP remains 0.0."""
-        tick_candles = TickCandles(2)
-        trade = Trade(time_ms=1000, is_buy=True, price=100.0, size=0.0)
-        tick_candles.process_trade(trade)
-        assert tick_candles.latest_candle.vwap == 0.0
-
-    def test_stale_trade_handling(self):
-        """Given a trade with an earlier timestamp than the current candle, it is ignored.
-
-        Stale trades could arrive out-of-order from slow market-data feeds;
-        accepting them would corrupt open/high/low/close statistics.
-        """
-        time_candles = TimeCandles(60.0)
-
-        trade1 = Trade(time_ms=1640995200000, is_buy=True, price=100.0, size=1.0)
-        time_candles.process_trade(trade1)
-
-        stale_trade = Trade(time_ms=1640995199000, is_buy=True, price=99.0, size=1.0)
-        time_candles.process_trade(stale_trade)
-
-        assert time_candles.latest_candle.num_trades == 1
-        assert time_candles.latest_candle.close_price == 100.0
-
-    def test_stale_trade_direct(self):
-        """Given a trade with ``time_ms < close_time_ms``, it is ignored."""
-        tick_candles = TickCandles(2)
-        first_trade = Trade(time_ms=2000, is_buy=True, price=100.0, size=1.0)
-        tick_candles.process_trade(first_trade)
-
-        stale_trade = Trade(time_ms=1000, is_buy=True, price=99.0, size=1.0)
-        tick_candles.process_trade(stale_trade)
-
-        assert tick_candles.latest_candle.num_trades == 1
-        assert tick_candles.latest_candle.close_price == 100.0
-
-    def test_async_future_recreation(self):
-        """Given many rapid completions, async Futures are recreated cleanly.
-
-        The base class uses an asyncio Future to signal candle closure. Repeated
-        resets must not leak or raise InvalidStateError.
-        """
-        volume_candles = VolumeCandles(1.0)
-
-        high_volume_trades = [
-            Trade(time_ms=1000, is_buy=True, price=100.0, size=2.0),
-            Trade(time_ms=2000, is_buy=True, price=101.0, size=3.0),
-            Trade(time_ms=3000, is_buy=True, price=102.0, size=1.5),
-        ]
-
-        for trade in high_volume_trades:
-            volume_candles.process_trade(trade)
-
-        assert len(volume_candles) == 6
-
-    def test_len_empty(self):
-        """Given a fresh aggregator, ``len`` returns 0."""
-        tick_candles = TickCandles(5)
-        assert len(tick_candles) == 0
-
-    def test_len_after_inserts(self):
-        """Given closed candles, ``len`` reflects the ring buffer count."""
-        tick_candles = TickCandles(2)
-        assert len(tick_candles) == 0
-
-        trade1 = Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0)
-        tick_candles.process_trade(trade1)
-        assert len(tick_candles) == 0
-
-        trade2 = Trade(time_ms=2000, is_buy=True, price=101.0, size=1.0)
-        tick_candles.process_trade(trade2)
-        assert len(tick_candles) == 1
-
-        trade3 = Trade(time_ms=3000, is_buy=True, price=102.0, size=1.0)
-        trade4 = Trade(time_ms=4000, is_buy=True, price=103.0, size=1.0)
-        tick_candles.process_trade(trade3)
-        tick_candles.process_trade(trade4)
-        assert len(tick_candles) == 2
-
-    def test_getitem_negative_index(self):
-        """Given closed candles, negative indexing accesses from the end."""
-        tick_candles = TickCandles(1)
-        for i, price in enumerate([100.0, 101.0, 102.0]):
-            trade = Trade(time_ms=1000 + i, is_buy=True, price=price, size=1.0)
-            tick_candles.process_trade(trade)
-
-        assert tick_candles[-1].close_price == 102.0
-        assert tick_candles[-2].close_price == 101.0
-        assert tick_candles[-3].close_price == 100.0
-
-    def test_getitem_out_of_bounds_positive(self):
-        """Given closed candles, a positive out-of-bounds index raises IndexError."""
-        tick_candles = TickCandles(1)
-        trade = Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0)
-        tick_candles.process_trade(trade)
-
+@pytest.mark.parametrize("capacity", [1, 2, 4])
+def test_history_indexing_and_iteration_after_wrap(capacity: int) -> None:
+    candles = TickCandles(1, num_candles=capacity)
+    assert list(candles) == []
+    for i in range(20):
+        candles.process_trade(trade(i, price=100.0 + i))
+    expected = list(range(20 - capacity, 20))
+    assert [c.close_time_ms for c in candles] == expected
+    assert [candles[i].close_time_ms for i in range(capacity)] == expected
+    assert [candles[i - capacity].close_time_ms for i in range(capacity)] == expected
+    for index in (capacity, -capacity - 1, 10**100, -(10**100)):
         with pytest.raises(IndexError):
-            _ = tick_candles[1]
-
-    def test_getitem_out_of_bounds_negative(self):
-        """Given closed candles, a negative out-of-bounds index raises IndexError."""
-        tick_candles = TickCandles(1)
-        trade = Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0)
-        tick_candles.process_trade(trade)
-
-        with pytest.raises(IndexError):
-            _ = tick_candles[-2]
-
-    def test_initialize_processes_trades(self):
-        """Given a valid ordered list, ``initialize`` replays all trades."""
-        tick_candles = TickCandles(2)
-        trades = [
-            Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0),
-            Trade(time_ms=2000, is_buy=True, price=101.0, size=1.0),
-            Trade(time_ms=3000, is_buy=True, price=102.0, size=1.0),
-            Trade(time_ms=4000, is_buy=True, price=103.0, size=1.0),
-        ]
-        tick_candles.initialize(trades)
-
-        assert len(tick_candles) == 2
-        assert tick_candles.latest_candle.num_trades == 0
-        assert tick_candles[0].close_price == 101.0
-        assert tick_candles[1].close_price == 103.0
-
-    def test_insert_and_reset_no_event(self):
-        """Given no pending async consumers, ``insert_and_reset`` stores the closed candle."""
-        tick_candles = TickCandles(1)
-        assert len(tick_candles) == 0
-
-        trade = Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0)
-        tick_candles.process_trade(trade)
-
-        assert len(tick_candles) == 1
-
-    def test_initialize_empty_list_raises(self):
-        """Given an empty list, ``initialize`` raises ValueError."""
-        tick_candles = TickCandles(5)
-        with pytest.raises(ValueError, match="empty"):
-            tick_candles.initialize([])
-
-    def test_initialize_mixed_types_raises(self):
-        """Given a list containing a non-Trade element, ``initialize`` raises ValueError."""
-        tick_candles = TickCandles(5)
-        with pytest.raises(ValueError, match="Trade"):
-            tick_candles.initialize(
-                [Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0), "not a trade"]
-            )
+            _ = candles[index]
 
 
-class TestCandleValidation:
-    """Invalid trade input must leave candle aggregation state usable."""
-
-    @pytest.mark.parametrize("size", [-1.0, math.nan, math.inf])
-    def test_invalid_trade_preserves_state(self, size):
-        """Invalid quantities do not poison the current candle or timestamp."""
-        candles = TickCandles(2)
-        with pytest.raises(ValueError):
-            candles.process_trade(make_trade(2000, size=size))
-        candles.process_trade(make_trade(1000))
-        assert candles.latest_candle.num_trades == 1
+def test_initialize_replaces_history_and_resets_vwap(factory: CandleFactory) -> None:
+    candles = factory(8, True)
+    candles.process_trade(trade(10000, price=1000.0, size=50.0))
+    records = [trade(1000, price=50.0), trade(2000, price=60.0, is_buy=False)]
+    candles.initialize(records)
+    assert len(candles) == 0
+    assert_candle(candles.latest_candle, tuple(records))
 
 
-class TestCandleReplay:
-    """Replay behavior preserves stream ordering across candle resets."""
-
-    def test_stale_trade_after_close(self):
-        """Closing a bucket must not clear the stream's last accepted time."""
-        candles = TickCandles(1)
-        candles.process_trade(make_trade(2000))
-        candles.process_trade(make_trade(1000))
-        candles.process_trade(make_trade(2000, price=101.0))
-        assert len(candles) == 2
-        assert [candles[i].close_time_ms for i in range(2)] == [2000, 2000]
-        assert candles[1].close_price == 101.0
-
-    def test_historical_replay_and_reinitialize(self):
-        """Replay boundaries depend on first event time and reset on initialize."""
-        candles = TimeCandles(10.0)
-        history = [make_trade(1000 + i * 10000, price=100 + i) for i in range(4)]
-        candles.initialize(history)
-        assert len(candles) == 3
-        assert [candles[i].close_price for i in range(3)] == [100, 101, 102]
-        assert candles.latest_candle.close_price == 103
-        candles.initialize([make_trade(0), make_trade(10000, price=110)])
-        assert len(candles) == 1
-        assert candles[0].open_time_ms == 0
-        assert candles.latest_candle.open_time_ms == 10000
+def test_time_reinitialize_resets_trigger_anchor() -> None:
+    candles = TimeCandles(10.0)
+    candles.initialize([trade(100000), trade(110000, price=101.0)])
+    assert len(candles) == 1
+    candles.initialize([trade(0), trade(10000, price=110.0)])
+    assert len(candles) == 1
+    assert_candle(candles[0], (trade(0),))
+    assert_candle(candles.latest_candle, (trade(10000, price=110.0),))
 
 
-class TestCandleAsyncDelivery:
-    """Waiting consumers and queued completions see no duplicates."""
-
-    @pytest.mark.asyncio
-    async def test_waiting_broadcast_is_not_delivered_twice(self):
-        """Both waiting consumers get one closure; their next wait needs new data."""
-        candles = TickCandles(1)
-        first = asyncio.create_task(anext(candles))
-        peer = asyncio.create_task(anext(candles))
-        await asyncio.sleep(0)
-        candles.process_trade(make_trade(1000))
-        result = await first
-        assert await peer is result
-        following = asyncio.create_task(anext(candles))
-        await asyncio.sleep(0)
-        assert not following.done()
-        candles.process_trade(make_trade(2000))
-        assert (await following).close_time_ms == 2000
-
-    @pytest.mark.asyncio
-    async def test_queued_completions_keep_order(self):
-        """Several closures before a consumer runs remain independently pending."""
-        candles = TickCandles(1)
-        for timestamp in [1000, 2000, 3000]:
-            candles.process_trade(make_trade(timestamp))
-        assert [(await anext(candles)).close_time_ms for _ in range(3)] == [
-            1000,
-            2000,
-            3000,
-        ]
-
-    @pytest.mark.asyncio
-    async def test_cancelled_waiter_does_not_lose_completion(self):
-        """A cancelled future is removed and the next closure stays pending."""
-        candles = TickCandles(1)
-        waiter = asyncio.create_task(anext(candles))
-        await asyncio.sleep(0)
-        waiter.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await waiter
-        candles.process_trade(make_trade(1000))
-        assert (await anext(candles)).close_time_ms == 1000
-
-    @pytest.mark.asyncio
-    async def test_pending_overrun_is_observable(self):
-        """Bounded delivery storage reports loss before yielding retained data."""
-        candles = TickCandles(1, num_candles=1)
-        candles.process_trade(make_trade(1000))
-        candles.process_trade(make_trade(2000))
-        with pytest.raises(RuntimeError, match="overrun"):
-            await anext(candles)
-        assert (await anext(candles)).close_time_ms == 2000
+@pytest.mark.parametrize("factory", CLOSING_FACTORIES, ids=VARIANT_NAMES)
+@pytest.mark.parametrize("store_trades", [False, True])
+def test_reinitialize_discards_closed_history_and_trigger_state(
+    factory: CandleFactory, store_trades: bool
+) -> None:
+    candles = factory(8, store_trades)
+    candles.initialize([trade(100000), trade(101000, price=102.0)])
+    assert len(candles) > 0
+    records = [trade(0, price=50.0), trade(1000, price=52.0, is_buy=False)]
+    candles.initialize(records)
+    fresh = factory(8, store_trades)
+    fresh.initialize(records)
+    assert list(candles) == list(fresh)
+    assert candles.latest_candle == fresh.latest_candle
 
 
-class TestAsyncIteratorTransitions:
-    """Layer 3 — Async iterator state transition tests."""
-
-    def setup_method(self):
-        """Create a fresh asyncio event loop for each test method."""
-        self.loop = asyncio.new_event_loop()
-
-    def test_anext_candle_immediate(self):
-        """Given a pending ``Candle`` event, ``__anext__`` returns it immediately."""
-
-        async def _helper():
-            tick_candles = TickCandles(1)
-            trade = Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0)
-            tick_candles.process_trade(trade)
-
-            candle = await tick_candles.__anext__()
-            assert candle.close_price == 100.0
-
-        self.loop.run_until_complete(_helper())
-
-    def test_anext_none_creates_list(self):
-        """Given no pending event, ``__anext__`` awaits via a new Future."""
-
-        async def _helper():
-            tick_candles = TickCandles(2)
-
-            task = asyncio.create_task(tick_candles.__anext__())
-            await asyncio.sleep(0)
-
-            trade1 = Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0)
-            trade2 = Trade(time_ms=2000, is_buy=True, price=101.0, size=1.0)
-            tick_candles.process_trade(trade1)
-            tick_candles.process_trade(trade2)
-
-            candle = await task
-            assert isinstance(candle, Candle)
-
-        self.loop.run_until_complete(_helper())
-
-    def test_anext_list_appends(self):
-        """Given multiple concurrent consumers, ``__anext__`` resolves all on closure."""
-
-        async def _helper():
-            tick_candles = TickCandles(2)
-
-            task1 = asyncio.create_task(tick_candles.__anext__())
-            await asyncio.sleep(0)
-
-            task2 = asyncio.create_task(tick_candles.__anext__())
-            await asyncio.sleep(0)
-
-            trade1 = Trade(time_ms=1000, is_buy=True, price=100.0, size=1.0)
-            trade2 = Trade(time_ms=2000, is_buy=True, price=101.0, size=1.0)
-            tick_candles.process_trade(trade1)
-            tick_candles.process_trade(trade2)
-
-            candle1 = await task1
-            candle2 = await task2
-            assert candle1 is candle2
-
-        self.loop.run_until_complete(_helper())
+def test_invalid_history_preserves_state(factory: CandleFactory) -> None:
+    candles = factory(8, True)
+    candles.process_trade(trade(1000))
+    before = candles.latest_candle.copy()
+    with pytest.raises(ValueError, match="empty"):
+        candles.initialize([])
+    with pytest.raises(ValueError, match="Trade"):
+        candles.initialize([trade(2000), "invalid"])  # ty: ignore[invalid-argument-type]
+    assert candles.latest_candle == before
+    candles.process_trade(trade(2000))
+    assert candles.latest_candle.num_trades == 2
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+INVALID_TRADES = (
+    pytest.param(trade(3000, size=-1.0), id="negative-size"),
+    pytest.param(trade(3000, size=math.nan), id="nan-size"),
+    pytest.param(trade(3000, size=math.inf), id="infinite-size"),
+    pytest.param(trade(3000, size=-math.inf), id="negative-infinite-size"),
+    pytest.param(trade(3000, price=math.nan), id="nan-price"),
+    pytest.param(trade(3000, price=math.inf), id="infinite-price"),
+    pytest.param(trade(3000, price=-math.inf), id="negative-infinite-price"),
+    pytest.param(trade(3000, price=1e308, size=1e308), id="notional-overflow"),
+    # Struct constructors intentionally permit injecting invalid annotated fields.
+    pytest.param(trade(cast(int, math.nan)), id="nan-time"),
+    pytest.param(trade(cast(int, math.inf)), id="infinite-time"),
+    pytest.param(trade(cast(int, -math.inf)), id="negative-infinite-time"),
+    pytest.param(trade(0, size=-1.0), id="invalid-stale-trade"),
+)
+
+
+@pytest.mark.parametrize("invalid", INVALID_TRADES)
+def test_invalid_trade_does_not_change_state_or_advance_time(
+    factory: CandleFactory, invalid: Trade
+) -> None:
+    candles = factory(8, True)
+    candles.process_trade(trade(1000))
+    snapshot = candles.latest_candle.copy()
+    with pytest.raises(ValueError):
+        candles.process_trade(invalid)
+    assert candles.latest_candle == snapshot
+    assert len(candles) == 0
+    candles.process_trade(trade(2000, price=101.0))
+    assert_candle(candles.latest_candle, (trade(1000), trade(2000, price=101.0)))
+
+
+@pytest.mark.asyncio
+async def test_waiting_consumers_receive_one_broadcast() -> None:
+    candles = TickCandles(1)
+    assert aiter(candles) is candles
+    first = asyncio.create_task(anext(candles))
+    peer = asyncio.create_task(anext(candles))
+    await asyncio.sleep(0)
+    candles.process_trade(trade(1000))
+    result = await first
+    assert await peer is result
+    following = asyncio.create_task(anext(candles))
+    await asyncio.sleep(0)
+    assert not following.done()
+    candles.process_trade(trade(2000))
+    assert (await following).close_time_ms == 2000
+
+
+@pytest.mark.asyncio
+async def test_queued_completions_keep_order() -> None:
+    candles = TickCandles(1)
+    for timestamp in (1000, 2000, 3000):
+        candles.process_trade(trade(timestamp))
+    assert [(await anext(candles)).close_time_ms for _ in range(3)] == [
+        1000,
+        2000,
+        3000,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_waiter_does_not_lose_completion() -> None:
+    candles = TickCandles(1)
+    waiter = asyncio.create_task(anext(candles))
+    await asyncio.sleep(0)
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    candles.process_trade(trade(1000))
+    assert (await anext(candles)).close_time_ms == 1000
+
+
+@pytest.mark.asyncio
+async def test_pending_overrun_is_reported_once_before_retained_delivery() -> None:
+    candles = TickCandles(1, num_candles=2)
+    for timestamp in (1000, 2000, 3000, 4000):
+        candles.process_trade(trade(timestamp))
+    with pytest.raises(RuntimeError, match="2 pending candles were dropped"):
+        await anext(candles)
+    assert (await anext(candles)).close_time_ms == 3000
+    assert (await anext(candles)).close_time_ms == 4000
+    assert [c.close_time_ms for c in candles] == [3000, 4000]
+
+
+@pytest.mark.asyncio
+async def test_reinitialize_cancels_waiters_and_clears_pending_delivery() -> None:
+    candles = TickCandles(1, num_candles=1)
+    waiter = asyncio.create_task(anext(candles))
+    await asyncio.sleep(0)
+    candles.initialize([trade(1000)])
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    assert (await anext(candles)).close_time_ms == 1000
+    candles.process_trade(trade(2000))
+    candles.process_trade(trade(3000))
+    # Clear both the pending overrun notification and previous closed history.
+    candles.initialize([trade(0)])
+    assert (await anext(candles)).close_time_ms == 0
+    assert len(candles) == 1
+    assert candles[0].close_time_ms == 0

@@ -89,6 +89,8 @@ search position while the consumer round-robins across all sub-rings for fairnes
 ### GenericRingBuffer
 - Stores arbitrary Python objects with minimal overhead.
 - Same API as the bytes buffer, minus deduplication.
+- Supports constant-time integer indexing in FIFO order without consuming or
+  copying contents; negative indices count back from the newest item.
 - Best for in-process queues of Python objects.
 
 ### NumericRingBuffer
