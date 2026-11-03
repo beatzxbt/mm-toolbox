@@ -11,7 +11,7 @@ cdef class WorkerLogger:
     its constructor and methods to other Cython modules.
     """
     cdef:
-        object          _config
+        LoggerConfig    _config
         bytes           _name
         u32             _len_name
         u32             _max_batch_data_bytes
@@ -41,5 +41,5 @@ cdef class WorkerLogger:
 
     cpdef bint          is_running(self)
     cpdef str           get_name(self)
-    cpdef object        get_config(self)
+    cpdef LoggerConfig  get_config(self)
     cpdef dict          get_transport_stats(self)

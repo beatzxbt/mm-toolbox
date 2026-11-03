@@ -8,6 +8,7 @@ no-op behaviour of logging after shutdown.
 from pathlib import Path
 import threading
 import time
+from mm_toolbox.time import time_monotonic_ns
 from types import SimpleNamespace
 
 import pytest
@@ -132,9 +133,7 @@ class TestMasterLogger:
             "threading",
             SimpleNamespace(Thread=ObservedThread, Event=threading.Event),
         )
-        monkeypatch.setattr(
-            master_module, "time", SimpleNamespace(monotonic=lambda: 10.0)
-        )
+        monkeypatch.setattr(master_module, "time_monotonic_ns", lambda: 10_000_000_000)
 
         path = tmp_path / "blocked_master.shm"
         config = LoggerConfig(path=str(path), flush_interval_s=0.01)
@@ -154,8 +153,8 @@ class TestMasterLogger:
             handler.release.set()
             worker.shutdown()
 
-        cleanup_deadline = time.monotonic() + 2.0
-        while path.exists() and time.monotonic() < cleanup_deadline:
+        cleanup_deadline = (time_monotonic_ns() / 1e9) + 2.0
+        while path.exists() and (time_monotonic_ns() / 1e9) < cleanup_deadline:
             time.sleep(0.01)
         assert not path.exists()
 
@@ -196,3 +195,23 @@ class TestMasterLogger:
             f"[MasterLogger] SHM transport dropped {dropped} log batches (cumulative {dropped})"
             in capsys.readouterr().err
         )
+
+
+def test_stdout_receives_master_and_worker_logs(tmp_path, capsys):
+    config = LoggerConfig(
+        path=str(tmp_path / "stdout.shm"),
+        do_stdout=True,
+        str_format="%(name)s:%(message)s",
+    )
+    master = MasterLogger(config)
+    worker = WorkerLogger(config, name="worker")
+    try:
+        master.info(b"direct")
+        worker.info(b"via transport")
+    finally:
+        worker.shutdown()
+        master.shutdown()
+    assert capsys.readouterr().out.splitlines() == [
+        "MASTER:direct",
+        "worker:via transport",
+    ]

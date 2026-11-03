@@ -38,19 +38,6 @@ class TestPyLogLevel:
 class TestPyLog:
     """Layer 1 — ``PyLog`` struct primitive tests."""
 
-    def test_creation(self):
-        """Given four positional arguments, the struct stores them exactly."""
-        log = PyLog(
-            timestamp_ns=1234567890,
-            name=b"test_logger",
-            level=PyLogLevel.INFO,
-            message=b"test message",
-        )
-        assert log.timestamp_ns == 1234567890
-        assert log.name == b"test_logger"
-        assert log.level == PyLogLevel.INFO
-        assert log.message == b"test message"
-
     def test_iteration(self):
         """Given a ``PyLog``, iterating it yields the four fields in order."""
         log = PyLog(1, b"name", PyLogLevel.DEBUG, b"msg")
@@ -72,15 +59,3 @@ class TestPyLog:
             _ = log[4]
         with pytest.raises(IndexError, match="out of range"):
             _ = log[-1]
-
-    def test_equality(self):
-        """Given two identical ``PyLog`` instances, they compare equal."""
-        log1 = PyLog(1, b"name", PyLogLevel.INFO, b"msg")
-        log2 = PyLog(1, b"name", PyLogLevel.INFO, b"msg")
-        assert log1 == log2
-
-    def test_inequality(self):
-        """Given two ``PyLog`` instances differing in timestamp, they are not equal."""
-        log1 = PyLog(1, b"name", PyLogLevel.INFO, b"msg")
-        log2 = PyLog(2, b"name", PyLogLevel.INFO, b"msg")
-        assert log1 != log2

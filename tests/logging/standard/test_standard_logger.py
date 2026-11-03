@@ -29,10 +29,10 @@ class RecordingHandler(BaseLogHandler):
             raise RuntimeError("intentional handler failure")
         self.invocations.append(tuple(buffer))
 
-    def close(self) -> None:
+    def close(self, timeout_s: float = 2.0) -> None:
         """Mark as closed and delegate to the base implementation."""
         self.closed = True
-        super().close()
+        super().close(timeout_s=timeout_s)
 
 
 class TestLoggerLoggingBehavior:
@@ -413,7 +413,7 @@ class TestLoggerValidation:
     def test_invalid_handler_type_raises(self) -> None:
         """Given a non-``BaseLogHandler`` object, construction raises TypeError."""
         with pytest.raises(TypeError, match="BaseLogHandler"):
-            Logger(handlers=["not-a-handler"])
+            Logger(handlers=["not-a-handler"])  # ty: ignore[invalid-argument-type]
 
     def test_empty_logger_no_handlers(self) -> None:
         """Given no handlers, logging is a no-op and does not raise."""
@@ -455,13 +455,6 @@ class TestLoggerEdgeCases:
         logger.shutdown()
         logger.shutdown()
 
-    def test_auto_flush_on_exit_false(self) -> None:
-        """Given ``auto_flush_on_exit=False``, the logger can still be created and shut down cleanly."""
-        config = LoggerConfig(auto_flush_on_exit=False)
-        logger = Logger(config=config)
-        logger.info("test")
-        logger.shutdown()
-
     def test_format_string_expansion(self) -> None:
         """Given a custom format string, all placeholders (asctime, levelname, name, message) are expanded."""
         handler = RecordingHandler()
@@ -480,3 +473,105 @@ class TestLoggerEdgeCases:
         assert "INFO" in msg
         assert "test-msg" in msg
         assert "T" in msg
+
+
+@pytest.mark.parametrize("minimum", list(LogLevel))
+def test_level_filter_matrix(minimum: LogLevel) -> None:
+    handler = RecordingHandler()
+    logger = Logger(
+        config=LoggerConfig(
+            base_level=minimum,
+            do_stdout=False,
+            str_format="%(message)s",
+            flush_size_threshold=1,
+        ),
+        handlers=[handler],
+    )
+    try:
+        for level in LogLevel:
+            getattr(logger, level.name.lower())(level.name)
+        assert [entry for batch in handler.invocations for entry in batch] == [
+            level.name for level in LogLevel if level >= minimum
+        ]
+    finally:
+        logger.shutdown()
+
+
+def test_shared_config_level_changes_refresh_all_loggers() -> None:
+    config = LoggerConfig(
+        do_stdout=False, str_format="%(message)s", flush_size_threshold=1
+    )
+    first, second = RecordingHandler(), RecordingHandler()
+    left, right = (
+        Logger(config=config, handlers=[first]),
+        Logger(config=config, handlers=[second]),
+    )
+    try:
+        config.base_level = LogLevel.ERROR
+        left.info("filtered left")
+        right.info("filtered right")
+        left.set_log_level(LogLevel.DEBUG)
+        right.debug("visible through shared cache")
+        assert first.invocations == []
+        assert second.invocations == [("visible through shared cache",)]
+    finally:
+        left.shutdown()
+        right.shutdown()
+
+
+def test_interval_flush_preserves_submillisecond_precision(monkeypatch) -> None:
+    clock = [0]
+    monkeypatch.setattr(
+        "mm_toolbox.logging.standard.logger.time_monotonic_ns", lambda: clock[0]
+    )
+    handler = RecordingHandler()
+    logger = Logger(
+        config=LoggerConfig(
+            do_stdout=False,
+            flush_on_size=False,
+            flush_on_interval=True,
+            flush_interval_s=0.0005,
+        ),
+        handlers=[handler],
+    )
+    try:
+        logger.info("first")
+        clock[0] = 499_999
+        logger.info("before boundary")
+        assert not handler.invocations
+        clock[0] = 500_000
+        logger.info("on boundary")
+        assert len(handler.invocations) == 1
+        assert len(handler.invocations[0]) == 3
+    finally:
+        logger.shutdown()
+
+
+@pytest.mark.parametrize("mode", ["file", "remote"])
+def test_interpreter_exit_flushes_and_drains_handlers(tmp_path, mode) -> None:
+    import subprocess
+    import sys
+
+    path = tmp_path / "exit.txt"
+    script = """import asyncio
+import sys
+from pathlib import Path
+from mm_toolbox.logging.standard import Logger, LoggerConfig
+from mm_toolbox.logging.standard.handlers import DiscordLogHandler, FileLogHandler
+class Capture(DiscordLogHandler):
+    async def _deliver_chunk(self, chunk):
+        await asyncio.sleep(0.01)
+        Path(sys.argv[1]).write_text(str(chunk))
+handler = FileLogHandler(sys.argv[1], create=True) if sys.argv[2] == "file" else Capture("https://discord.com/api/webhooks/test")
+logger = Logger(config=LoggerConfig(do_stdout=False, flush_on_size=False, str_format="%(message)s"), handlers=[handler])
+logger.info("exit message")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(path), mode],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=True,
+    )
+    assert not result.stderr
+    assert path.read_text().strip() == "exit message"

@@ -4,14 +4,19 @@ Pushes batches of ``PyLog`` entries to a Discord channel via HTTP POST,
 with rate limiting and message chunking to stay within platform limits.
 """
 
-from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler, _RateLimiter
+from mm_toolbox.logging._remote import (
+    DISCORD_CHUNK_CHARS,
+    chunk_messages,
+    make_rate_limiter,
+)
+from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
 from mm_toolbox.logging.advanced.pylog import PyLog
 
 
 class DiscordLogHandler(BaseLogHandler):
     """A log handler that sends messages to a Discord webhook."""
 
-    def __init__(self, webhook: str):
+    def __init__(self, webhook: str) -> None:
         """Initializes the DiscordLogHandler.
 
         Args:
@@ -30,8 +35,7 @@ class DiscordLogHandler(BaseLogHandler):
 
         self.url = webhook
         self.headers = {"Content-Type": "application/json"}
-        # Discord: ~5 req/2s per webhook. Use conservative defaults.
-        self._limiter = _RateLimiter(rate_per_sec=2.5, burst=5)
+        self._limiter = make_rate_limiter(5, 2)
 
     async def _post(self, content: str) -> None:
         """Send a single log message to Discord.
@@ -48,24 +52,7 @@ class DiscordLogHandler(BaseLogHandler):
 
     @staticmethod
     def _chunk(text: str, limit: int) -> list[str]:
-        """Split a message into chunks under a character limit.
-
-        Args:
-            text (str): Full message text.
-            limit (int): Maximum characters per chunk.
-
-        Returns:
-            list[str]: Chunked message parts.
-        """
-        if len(text) <= limit:
-            return [text]
-        parts: list[str] = []
-        start = 0
-        while start < len(text):
-            end = min(len(text), start + limit)
-            parts.append(text[start:end])
-            start = end
-        return parts
+        return chunk_messages((text,), limit)
 
     def push(self, logs: list[PyLog]) -> None:
         """Send a batch of log messages to Discord.
@@ -74,9 +61,9 @@ class DiscordLogHandler(BaseLogHandler):
             logs (list[PyLog]): Batch of log entries.
         """
         try:
-            formatted_logs = "\n".join([self.format_log(log) for log in logs])
-            # Discord limit is 2000 chars; keep headroom for safety
-            chunks = self._chunk(formatted_logs, 1800)
+            chunks = chunk_messages(
+                (self.format_log(log) for log in logs), DISCORD_CHUNK_CHARS
+            )
             for index, chunk in enumerate(chunks):
                 if self._submit_coro(self._post(chunk)) is None:
                     self._handle_exception(

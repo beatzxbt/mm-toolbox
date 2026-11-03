@@ -1,7 +1,11 @@
 """Type stubs for master module."""
 
+from collections.abc import Sequence
+
 from mm_toolbox.logging.advanced.config import LoggerConfig
 from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
+from mm_toolbox.logging.advanced.pylog import PyLog
+from mm_toolbox.ringbuffer.shm.mpsc import ShmMpscConsumer as ShmMpscConsumer
 
 class MasterLogger:
     """Central aggregator for log messages sent by worker loggers.
@@ -16,7 +20,7 @@ class MasterLogger:
     def __init__(
         self,
         config: LoggerConfig | None = None,
-        log_handlers: list[BaseLogHandler] | None = None,
+        log_handlers: Sequence[BaseLogHandler] | None = None,
     ) -> None:
         """Initialize a MasterLogger.
 
@@ -68,3 +72,5 @@ class MasterLogger:
     def get_config(self) -> LoggerConfig:
         """Get the configuration of the master logger."""
         ...
+
+    def _decode_worker_message(self, serialized_message: bytes) -> list[PyLog]: ...

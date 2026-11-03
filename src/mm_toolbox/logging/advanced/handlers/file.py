@@ -1,28 +1,24 @@
 """File log handler for advanced logging."""
 
 import os
+from typing import TextIO
 
+from mm_toolbox.logging._remote import SHUTDOWN_TIMEOUT_S
 from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
 from mm_toolbox.logging.advanced.pylog import PyLog
 
 
 class FileLogHandler(BaseLogHandler):
-    """A log handler that appends log messages to a text file."""
+    """Append batches through one file handle, retained until close."""
 
-    def __init__(self, filepath: str, create: bool = False):
-        """Initialize the FileLogHandler with a target file path.
+    def __init__(self, filepath: str, create: bool = False) -> None:
+        """Prepare a .txt file, optionally creating it and its parent directories.
 
-        Args:
-            filepath (str): Path to the text file for appending logs.
-                Must end with ".txt".
-            create (bool, optional): If True, create the file if it doesn't
-                exist. Defaults to False.
-
-        Raises:
-            ValueError: If the provided filepath does not end with ".txt".
-
+        With create=True the file is opened immediately in append mode.
+        Otherwise the existing file is opened on the first nonempty push.
         """
         super().__init__()
+        self._file: TextIO | None = None
         if not filepath.endswith(".txt"):
             raise ValueError(
                 f"Invalid filepath; expected string ending with '.txt' but got "
@@ -30,44 +26,51 @@ class FileLogHandler(BaseLogHandler):
             )
         self.filepath = filepath
         self.create = create
-
         if self.create:
-            # Ensure the path is ready without destroying logs from an earlier run.
             try:
-                directory = os.path.dirname(self.filepath)
-                if directory:
-                    os.makedirs(directory, exist_ok=True)
+                with self._lifecycle_lock:
+                    self._open_file()
+            except Exception as exc:
+                self._handle_exception(exc, "init")
 
-                # Append mode creates a missing file and preserves existing data.
-                with open(self.filepath, "a"):
-                    pass
-            except Exception as e:
-                self._handle_exception(e, "init")
+    def _open_file(self) -> None:
+        """Open once while holding the lifecycle lock."""
+        if self.create:
+            directory = os.path.dirname(self.filepath)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+        elif not os.path.exists(self.filepath):
+            raise FileNotFoundError("Target file does not exist and create=False")
+        self._file = open(self.filepath, "a", encoding="utf-8")
 
     def push(self, logs: list[PyLog]) -> None:
-        """Append a batch of log messages to disk.
-
-        Args:
-            logs (list[PyLog]): Batch of log entries.
-        """
+        """Append and flush one batch, serializing writes with other pushes/close."""
+        if not logs:
+            return
         try:
-            if not os.path.exists(self.filepath):
-                if not self.create:
-                    self._handle_exception(
-                        RuntimeError("Target file does not exist and create=False"),
-                        "push",
-                    )
-                    return
-                # If create=True and file missing, create parent dirs and file
-                directory = os.path.dirname(self.filepath)
-                if directory:
-                    os.makedirs(directory, exist_ok=True)
-                with open(self.filepath, "w"):
-                    pass
-            with open(self.filepath, "a") as file:
-                msgs = "\n".join([self.format_log(log) for log in logs]) + "\n"
-                file.write(msgs)
-                file.flush()
+            payload = "\n".join(self.format_log(log) for log in logs) + "\n"
+            with self._lifecycle_lock:
+                if self._closed:
+                    raise RuntimeError("handler is closed")
+                if self._file is None:
+                    self._open_file()
+                assert self._file is not None
+                self._file.write(payload)
+                self._file.flush()
+        except Exception as exc:
+            self._handle_exception(exc, "push")
 
-        except Exception as e:
-            self._handle_exception(e, "push")
+    def close(self, timeout_s: float = SHUTDOWN_TIMEOUT_S) -> None:
+        """Flush and release the retained file handle once, then close base resources."""
+        error: Exception | None = None
+        with self._lifecycle_lock:
+            self._closed = True
+            file, self._file = self._file, None
+            if file is not None:
+                try:
+                    file.close()
+                except Exception as exc:
+                    error = exc
+        super().close(timeout_s=timeout_s)
+        if error is not None:
+            self._handle_exception(error, "close")

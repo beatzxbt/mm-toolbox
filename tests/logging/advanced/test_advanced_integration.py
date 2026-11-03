@@ -10,6 +10,7 @@ mixed severities, and aggressive flush intervals.
 import multiprocessing
 import os
 import time
+from mm_toolbox.time import time_monotonic_ns
 from queue import Empty, Queue
 from pathlib import Path
 
@@ -50,9 +51,9 @@ def _drain_logs(queue: Queue, expected: int, timeout_s: float = 5.0) -> list:
         List of dequeued items.
     """
     received = []
-    deadline = time.monotonic() + timeout_s
-    while len(received) < expected and time.monotonic() < deadline:
-        remaining = max(deadline - time.monotonic(), 0.0)
+    deadline = (time_monotonic_ns() / 1e9) + timeout_s
+    while len(received) < expected and (time_monotonic_ns() / 1e9) < deadline:
+        remaining = max(deadline - (time_monotonic_ns() / 1e9), 0.0)
         try:
             received.append(queue.get(timeout=min(0.1, remaining)))
         except Empty:
@@ -71,8 +72,8 @@ def _wait_for_file_lines(path, expected: int, timeout_s: float = 5.0) -> list[st
     Returns:
         List of lines read from the file.
     """
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
+    deadline = (time_monotonic_ns() / 1e9) + timeout_s
+    while (time_monotonic_ns() / 1e9) < deadline:
         if path.exists():
             lines = path.read_text().splitlines()
             if len(lines) >= expected:

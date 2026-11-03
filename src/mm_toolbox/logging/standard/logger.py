@@ -1,12 +1,23 @@
 """Standard single-process logger implementation."""
 
 import atexit
+from collections.abc import Sequence
 import sys
 import traceback
+from types import TracebackType
+from typing import Self
 
-from mm_toolbox.logging.standard.config import LoggerConfig, LogLevel
+from mm_toolbox.logging.standard.config import (
+    LoggerConfig,
+    LogLevel,
+    TRACE_LEVEL,
+    DEBUG_LEVEL,
+    INFO_LEVEL,
+    WARNING_LEVEL,
+    ERROR_LEVEL,
+)
 from mm_toolbox.logging.standard.handlers import BaseLogHandler
-from mm_toolbox.time.time import time_iso8601, time_ms
+from mm_toolbox.time.time import time_iso8601, time_monotonic_ns
 
 
 class Logger:
@@ -21,8 +32,8 @@ class Logger:
         self,
         name: str = "",
         config: LoggerConfig | None = None,
-        handlers: list[BaseLogHandler] | None = None,
-    ):
+        handlers: Sequence[BaseLogHandler] | None = None,
+    ) -> None:
         """Initializes a Logger with specified configuration and handlers.
 
         Args:
@@ -38,10 +49,12 @@ class Logger:
         """
         self._name = name
         self._config: LoggerConfig = config if config is not None else LoggerConfig()
-        self._handlers: list[BaseLogHandler] = handlers if handlers is not None else []
+        self._handlers: list[BaseLogHandler] = (
+            list(handlers) if handlers is not None else []
+        )
         self._is_running = True
         self._buffer: list[str] = []
-        self._buffer_start_time_ms = time_ms()
+        self._buffer_start_time_ns = time_monotonic_ns()
 
         for handler in self._handlers:
             if not isinstance(handler, BaseLogHandler):
@@ -50,8 +63,7 @@ class Logger:
                 )
             handler.open()
 
-        if self._config.auto_flush_on_exit:
-            atexit.register(self._atexit_flush)
+        atexit.register(self.shutdown)
 
     def _should_flush(self) -> bool:
         """Determine whether the internal buffer meets flush criteria.
@@ -68,25 +80,28 @@ class Logger:
         ):
             return True
         if self._config.flush_on_interval:
-            elapsed = time_ms() - self._buffer_start_time_ms
-            if elapsed >= int(self._config.flush_interval_s * 1000):
+            elapsed = time_monotonic_ns() - self._buffer_start_time_ns
+            if elapsed >= self._config.flush_interval_s * 1e9:
                 return True
         return False
 
-    def _flush(self) -> None:
+    def flush(self) -> None:
         """Flushes the log message buffer to all handlers."""
         if not self._buffer:
             return
 
         payload = self._buffer
         self._buffer = []
-        self._buffer_start_time_ms = time_ms()
+        self._buffer_start_time_ns = time_monotonic_ns()
 
         if self._config.do_stdout:
-            out = sys.stdout
-            for msg in payload:
-                out.write(msg + "\n")
-            out.flush()
+            try:
+                out = sys.stdout
+                for msg in payload:
+                    out.write(msg + "\n")
+                out.flush()
+            except Exception:
+                sys.stderr.write(traceback.format_exc())
 
         for handler in self._handlers:
             try:
@@ -94,11 +109,11 @@ class Logger:
             except Exception as exc:
                 handler._handle_exception(exc, "push")
 
-    def _process_log(self, level: LogLevel, msg: str) -> None:
+    def _process_log(self, level_name: str, msg: str) -> None:
         """Submits a log message to the buffer if it meets the minimum base level.
 
         Args:
-            level (LogLevel): The severity level of the message.
+            level_name (str): The severity label for the message.
             msg (str): The actual log message.
 
         """
@@ -106,42 +121,30 @@ class Logger:
             log_msg = self._config.str_format % {
                 "asctime": time_iso8601(),
                 "name": self._name,
-                "levelname": level.name,
+                "levelname": level_name,
                 "message": msg,
             }
             self._buffer.append(log_msg)
 
             if self._should_flush():
-                self._flush()
+                self.flush()
         except Exception:
             sys.stderr.write(traceback.format_exc())
 
-    def flush(self) -> None:
-        """Flush the current buffer to all handlers immediately."""
-        self._flush()
-
     def shutdown(self) -> None:
-        """Shut down the logger and release all resources.
-
-        Flushes any remaining buffered messages and closes attached handlers.
-
-        """
+        """Flush once and close handlers, including their bounded remote drain."""
+        if not self._is_running:
+            return
         self._is_running = False
-        self._flush()
-
-        for handler in self._handlers:
-            try:
-                handler.close()
-            except Exception:
-                pass
-
-    def _atexit_flush(self) -> None:
-        """Called by atexit to flush remaining logs on interpreter shutdown.
-
-        Does not close handlers — let the OS clean them up.
-        """
-        if self._buffer:
-            self._flush()
+        try:
+            self.flush()
+        finally:
+            for handler in self._handlers:
+                try:
+                    handler.close()
+                except Exception as exc:
+                    handler._handle_exception(exc, "close")
+            atexit.unregister(self.shutdown)
 
     def trace(self, msg: str) -> None:
         """Send a trace-level log message.
@@ -150,8 +153,8 @@ class Logger:
             msg (str): The log message text.
 
         """
-        if self._is_running and self._config.base_level.value <= LogLevel.TRACE.value:
-            self._process_log(LogLevel.TRACE, msg)
+        if self._is_running and self._config._base_level_value <= TRACE_LEVEL:
+            self._process_log("TRACE", msg)
 
     def debug(self, msg: str) -> None:
         """Send a debug-level log message.
@@ -160,8 +163,8 @@ class Logger:
             msg (str): The log message text.
 
         """
-        if self._is_running and self._config.base_level.value <= LogLevel.DEBUG.value:
-            self._process_log(LogLevel.DEBUG, msg)
+        if self._is_running and self._config._base_level_value <= DEBUG_LEVEL:
+            self._process_log("DEBUG", msg)
 
     def info(self, msg: str) -> None:
         """Send an info-level log message.
@@ -170,8 +173,8 @@ class Logger:
             msg (str): The log message text.
 
         """
-        if self._is_running and self._config.base_level.value <= LogLevel.INFO.value:
-            self._process_log(LogLevel.INFO, msg)
+        if self._is_running and self._config._base_level_value <= INFO_LEVEL:
+            self._process_log("INFO", msg)
 
     def warning(self, msg: str) -> None:
         """Send a warning-level log message.
@@ -180,8 +183,8 @@ class Logger:
             msg (str): The log message text.
 
         """
-        if self._is_running and self._config.base_level.value <= LogLevel.WARNING.value:
-            self._process_log(LogLevel.WARNING, msg)
+        if self._is_running and self._config._base_level_value <= WARNING_LEVEL:
+            self._process_log("WARNING", msg)
 
     def error(self, msg: str) -> None:
         """Send an error-level log message.
@@ -190,8 +193,8 @@ class Logger:
             msg (str): The log message text.
 
         """
-        if self._is_running and self._config.base_level.value <= LogLevel.ERROR.value:
-            self._process_log(LogLevel.ERROR, msg)
+        if self._is_running and self._config._base_level_value <= ERROR_LEVEL:
+            self._process_log("ERROR", msg)
 
     def set_log_level(self, level: LogLevel) -> None:
         """Change the minimum log level at runtime.
@@ -201,7 +204,7 @@ class Logger:
 
         """
         self.debug(f"Changing base log level from {self._config.base_level} to {level}")
-        self._config.base_level = level
+        self._config.set_base_level(level)
 
     def is_running(self) -> bool:
         """Return whether the logger is still active.
@@ -230,10 +233,15 @@ class Logger:
         """
         return self._config
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Context manager exit — ensures shutdown."""
         self.shutdown()

@@ -375,3 +375,98 @@ class TestProtocolBufferBoundaries:
         assert len(handler.logs) >= 1
         assert handler.logs[0].name == name.encode("utf-8")
         assert handler.logs[0].message == b"test"
+
+
+def _single_log_frame(level: int = 2, msg_type: int = 0) -> bytes:
+    body = struct.pack("<I", 1) + b"w" + struct.pack("<I", 1)
+    body += struct.pack("<QBI", 123, level, 5) + b"hello"
+    return struct.pack("<BQI", msg_type, 0, len(body)) + body
+
+
+@pytest.mark.parametrize("level", [5, 255])
+def test_unknown_wire_level_is_rejected(tmp_path, level):
+    master = MasterLogger(LoggerConfig(path=str(tmp_path / "levels.shm")))
+    try:
+        with pytest.raises(ValueError, match="Unknown log level"):
+            master._decode_worker_message(_single_log_frame(level=level))
+    finally:
+        master.shutdown()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["type", "name_overflow", "message_overflow", "outer_trailing", "inner_trailing"],
+)
+def test_invalid_worker_frame_is_rejected(tmp_path, mutation):
+    frame = _single_log_frame()
+    if mutation == "type":
+        frame = _single_log_frame(msg_type=1)
+    elif mutation == "name_overflow":
+        frame = frame[:13] + struct.pack("<I", 0xFFFFFFFF) + frame[17:]
+    elif mutation == "message_overflow":
+        frame = frame[:31] + struct.pack("<I", 0xFFFFFFFF) + frame[35:]
+    elif mutation == "outer_trailing":
+        frame += b"x"
+    else:
+        frame = struct.pack("<BQI", 0, 0, len(frame) - 12) + frame[13:] + b"x"
+    master = MasterLogger(LoggerConfig(path=str(tmp_path / "invalid.shm")))
+    try:
+        with pytest.raises(ValueError):
+            master._decode_worker_message(frame)
+    finally:
+        master.shutdown()
+
+
+def test_decoded_message_retains_a_readonly_view_of_its_frame(tmp_path):
+    master = MasterLogger(LoggerConfig(path=str(tmp_path / "views.shm")))
+    try:
+        frame = _single_log_frame()
+        message = master._decode_worker_message(frame)[0].message
+        assert isinstance(message, memoryview)
+        assert message.readonly
+        assert message.obj is frame
+        del frame
+        assert bytes(message) == b"hello"
+    finally:
+        master.shutdown()
+
+
+def test_malformed_frame_does_not_discard_following_valid_frames(
+    tmp_path, monkeypatch, capsys
+):
+    import threading
+    import mm_toolbox.logging.advanced.master as master_module
+
+    delivered = threading.Event()
+
+    class Consumer:
+        dropped_count = 0
+        sent = False
+
+        def consume_all(self):
+            if not self.sent:
+                self.sent = True
+                return [_single_log_frame(level=255), _single_log_frame()]
+            return []
+
+        def close(self):
+            pass
+
+    class Capture(BaseLogHandler):
+        def __init__(self):
+            super().__init__()
+            self.logs: list[PyLog] = []
+
+        def push(self, logs: list[PyLog]) -> None:
+            self.logs.extend(logs)
+            delivered.set()
+
+    monkeypatch.setattr(master_module, "ShmMpscConsumer", lambda **kwargs: Consumer())
+    handler = Capture()
+    master = MasterLogger(LoggerConfig(path=str(tmp_path / "isolation.shm")), [handler])
+    try:
+        assert delivered.wait(1)
+        assert [bytes(log.message) for log in handler.logs] == [b"hello"]
+    finally:
+        master.shutdown()
+    assert "rejected worker message: Unknown log level: 255" in capsys.readouterr().err

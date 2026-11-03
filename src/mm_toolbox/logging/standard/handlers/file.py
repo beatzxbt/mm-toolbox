@@ -6,6 +6,7 @@ creating parent directories and the file itself on first open.
 
 import os
 
+from mm_toolbox.logging._remote import SHUTDOWN_TIMEOUT_S
 from mm_toolbox.logging.standard.handlers.base import BaseLogHandler
 
 
@@ -58,18 +59,17 @@ class FileLogHandler(BaseLogHandler):
             buffer (list[str]): List of formatted log messages.
 
         """
-        if self._file is None:
+        if self._file is None or not buffer:
             return
         self._file.write("\n".join(buffer) + "\n")
         self._file.flush()
 
-    def close(self) -> None:
+    def close(self, timeout_s: float = SHUTDOWN_TIMEOUT_S) -> None:
         """Close the file handle."""
         if self._file is not None:
             try:
-                self._file.flush()
                 self._file.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                self._handle_exception(exc, "close")
             self._file = None
-        super().close()
+        super().close(timeout_s=timeout_s)

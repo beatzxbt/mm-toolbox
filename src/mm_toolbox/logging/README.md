@@ -1,56 +1,14 @@
 # Logging
 
-This package provides two logging stacks:
-- Standard logger: single-process, synchronous buffering with optional remote-delivery workers.
-- Advanced logger: multi-process logging with IPC transport and a master-worker
-  architecture.
+The standard logger buffers formatted strings in one process. The advanced
+logger batches binary records from worker threads or processes into shared
+memory and dispatches them from a master. Both provide file, Discord and
+Telegram handlers.
 
-## Standard logger (single-process)
+## Standard logger
 
-Use this when everything runs in one process and you want simple, buffered logging
-with optional stdout mirroring.
-
-Highlights:
-- Flushes synchronously when the size threshold is met or a later log call observes that the configured interval elapsed.
-- `flush()` and `shutdown()` explicitly flush pending messages, including when the logger has been quiet.
-- Discord and Telegram delivery runs on bounded handler-owned workers, so an active asyncio loop is supported and slow endpoints do not block the logging call.
-- Handler fan-out (file, Discord, Telegram).
-- Buffered writes reduce handler overhead for high-frequency logs.
-
-### Architecture overview
-
-The standard logger keeps its message buffer in the caller's thread. It pushes
-each flushed batch to local handlers synchronously. Discord and Telegram
-handlers enqueue bounded delivery work on their own background threads.
-
-```
-┌──────────────┐
-│  App Thread  │
-│ logger.info  │
-└──────┬───────┘
-       │ append
-       ▼
-┌──────────────┐
-│ Logger Buffer│
-└──────┬───────┘
-       │ flush condition or explicit flush()
-       ▼
-┌──────────────┐
-│   Handlers   │
-└──────┬───────┘
-       │ remote handlers enqueue
-       ▼
-┌──────────────────────┐
-│ Bounded delivery     │
-│ workers (Discord,    │
-│ Telegram)            │
-└──────────────────────┘
-```
-
-Quick start:
 ```python
-from mm_toolbox.logging.standard import Logger, LoggerConfig, LogLevel
-from mm_toolbox.logging.standard import FileLogHandler
+from mm_toolbox.logging.standard import FileLogHandler, Logger, LoggerConfig, LogLevel
 
 config = LoggerConfig(
     base_level=LogLevel.INFO,
@@ -58,221 +16,130 @@ config = LoggerConfig(
     flush_interval_s=0.5,
     do_stdout=True,
 )
-logger = Logger(name="app", config=config, handlers=[FileLogHandler("app.log")])
-
-logger.info("booted")
-logger.error("something went wrong")
-logger.shutdown()
+with Logger("app", config, [FileLogHandler("app.txt", create=True)]) as logger:
+    logger.info("booted")
+    logger.error("something went wrong")
 ```
 
-`flush_on_interval=True` does not start a timer. The next log call checks the
-elapsed time and flushes if due. Use `logger.flush()` when a quiet logger must
-flush at a specific time; `shutdown()` also flushes before closing handlers.
+Messages flush when the configured size threshold is reached, when a later log
+call observes an elapsed interval, or when `flush()` is called explicitly.
+Interval checks use the internal monotonic nanosecond clock; they do not start
+a background timer. A quiet logger needs an explicit flush to meet an external
+schedule.
 
-When to choose:
-- Best for single-process apps, notebooks, or services without forked workers.
-- Not designed for cross-process aggregation (use the advanced logger for that).
+The standard logger always registers an interpreter-exit shutdown hook.
+`shutdown()` and context-manager exit flush pending messages and close handlers,
+including a bounded drain of remote deliveries. Explicit shutdown unregisters
+the exit hook and repeated shutdown is harmless.
 
-## Advanced logger (multi-process)
+Severity filtering compares cached integer values. `logger.set_log_level(level)`
+and `config.set_base_level(level)` refresh that cache. Assignment to
+`config.base_level` does so too, keeping loggers sharing a configuration in sync.
+Invalid levels raise rather than silently selecting INFO.
 
-High-performance, distributed logging for multi-process applications where
-performance and reliability are critical.
+Local formatting and file writes run in the caller's thread. Remote handlers
+queue deliveries on their own background workers so logging from an active
+asyncio loop does not block it on HTTP. The logger's message buffer itself is
+not synchronized for concurrent callers.
 
-### Architecture overview
-
-The system uses a master-worker pattern with ShmMpscProducer/ShmMpscConsumer-based IPC:
-
-```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│ WorkerLogger│    │ WorkerLogger│    │ WorkerLogger│
-│  (Process A)│    │  (Process B)│    │  (Process N)│
-└──────┬──────┘    └──────┬──────┘    └──────┬──────┘
-       │                   │                   │
-       │ .insert()         │ .insert()         │ .insert()
-       │                   │                   │
-       └───────────────────┼───────────────────┘
-                           │
-               ┌───────────▼───────────┐
-               │    IPC Transport      │
-               │ (MPSC: Multi→Single)  │
-               └───────────┬───────────┘
-                           │ .consume_all()
-                           ▼
-                 ┌─────────────────┐
-                 │  MasterLogger   │
-                 │  (Single Proc)  │
-                 └─────────┬───────┘
-                           │
-                 ┌─────────▼───────┐
-                 │    Handlers     │
-                 │ File │Discord│  │
-                 │ Telegram│etc.   │
-                 └─────────────────┘
-```
-
-### Core components
-
-#### WorkerLogger
-- Purpose: lightweight logger for worker processes
-- Batching: collects logs in memory, sends in batches for efficiency
-- Heartbeats: sends periodic health checks (60s intervals)
-- Non-blocking: never blocks the main process thread
-
-#### MasterLogger
-- Purpose: central aggregator that receives all logs
-- Processing: decodes, filters, and routes logs to handlers
-- Monitoring: tracks worker health via heartbeat monitoring
-- Handlers: forwards logs to files, Discord, Telegram, etc.
-
-#### Message types
-- Log batches: binary-serialized log entries with timestamps
-- Heartbeats: worker health signals with next check-in time
-- Shutdown: special heartbeats indicating worker termination
-
-### Performance features
-
-#### Binary serialization
-```cython
-# Efficient binary format using memcpy
-cdef bytes buffer = bytes(sizeof(u64) + sizeof(u8) + sizeof(u32) + msg_len)
-memcpy(buffer, &time, sizeof(u64))        # Timestamp
-memcpy(buffer + 8, &level, sizeof(u8))    # Log level
-memcpy(buffer + 9, &msg_len, sizeof(u32)) # Message length
-```
-
-#### Batched operations
-- Workers: collect logs locally, send batches every 1s (configurable)
-- Master: processes all available messages in single `consume_all()` call
-- Memory: dynamic buffer growth prevents pre-allocation waste
-
-#### Zero-copy messaging
-- Uses the project's `ShmMpscProducer`/`ShmMpscConsumer` transport for reliability and throughput
-- MPSC pattern: multiple producers to single consumer
-- Bounded backlog with backpressure semantics
-
-### Configuration
+## Advanced logger
 
 ```python
-from mm_toolbox.logging.advanced import LoggerConfig, MasterLogger, WorkerLogger
-from mm_toolbox.logging.advanced import FileLogHandler, DiscordLogHandler
-
-config = LoggerConfig(
-    base_level=LogLevel.INFO,
-    path="/tmp/my_app_logger.shm",
-    flush_interval_s=1.0,
-    str_format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+from mm_toolbox.logging.advanced import (
+    FileLogHandler, LoggerConfig, LogLevel, MasterLogger, WorkerLogger,
 )
 
-handlers = [
-    FileLogHandler("/var/log/myapp.log", create=True),
-    DiscordLogHandler("https://discord.com/api/webhooks/..."),
-]
-master = MasterLogger(config, handlers)
-
+config = LoggerConfig(base_level=LogLevel.INFO, do_stdout=False)
+master = MasterLogger(config, [FileLogHandler("workers.txt", create=True)])
 worker = WorkerLogger(config, name="DataProcessor")
-worker.info("Processing batch 123")
-worker.error("Failed to process item", msg_bytes=error_data)
+try:
+    worker.info(b"Processing batch 123")
+    worker.error(b"Failed to process item")
+finally:
+    worker.shutdown()
+    master.shutdown()
 ```
 
-Additional config fields:
-- `emit_internal` — emit internal startup/shutdown logs (default `False`).
-- `max_batch_messages` — max messages before forced flush (default `10000`).
-- `max_batch_bytes` — max bytes before forced flush (default `1MB`).
-- `shm_capacity_bytes` — shared memory ring buffer capacity in bytes (default `64MB`).
+Pass the same configuration, or at least the same shared-memory path and
+transport settings, to each process. An omitted path is randomized; separately
+constructed default configurations do not automatically discover each other.
 
-The advanced logger derives its producer shard count from `shm_capacity_bytes`
-and `max_batch_bytes`, with a maximum of 64 active producers including the
-master. The defaults allocate 32 shards, leaving room for 31 worker loggers.
-Each worker owns one shard; extra concurrent producers fail explicitly. The
-worker clamps batches to a safe shard size and reports records that cannot fit.
+Each worker accepts UTF-8 message bytes, timestamps events with the internal
+wall clock, and flushes batches on its interval or message/byte limits. Only one
+active worker is allowed per thread. Worker batch access is protected by a lock.
+The master owns a drain thread and routes completed batches to its handlers.
+`do_stdout=True` mirrors both worker messages and direct master messages on the
+master's stdout.
 
-### Message flow
+Useful configuration limits:
 
-#### 1. Worker logging
-```python
-worker.info("User login successful")
-# Serialized to binary format
-# Added to local batch buffer
-# Sent via IPC when buffer fills or timeout hits
-```
+- `flush_interval_s`: finite positive worker flush interval, default 1 second.
+- `max_batch_messages`: message threshold, default 10,000.
+- `max_batch_bytes`: byte threshold, default 1 MiB.
+- `shm_capacity_bytes`: transport capacity, default 64 MiB.
+- `emit_internal`: optional internal lifecycle messages, default false.
 
-#### 2. Master processing
-```python
-messages = ipc_consumer.consume_all()
-for msg in messages:
-    if msg_type == LOG_BATCH:
-        for handler in handlers:
-            handler.push(decoded_logs)
-    elif msg_type == HEARTBEAT:
-        update_worker_health(worker_name)
-```
+The producer shard count follows the capacity and batch limit, up to 64 shards
+including the master. Defaults provide 32 shards and room for 31 workers.
+Records that cannot fit the shard budget are rejected and reported.
 
-#### 3. Health monitoring
-```python
-if current_time > next_checkin + 1_second:
-    master.warning(f"Worker {name} appears dead")
-```
+The transport publishes complete binary frames. The decoder validates framing,
+lengths, message type and severity. A malformed frame is reported to stderr and
+skipped without discarding subsequent valid frames in the same drain.
+Heartbeat and DATA message types are reserved; health monitoring and automatic
+reconnection are not implemented.
 
-### Error handling
+`PyLog` contains a timestamp, name, severity and message. Its byte fields accept
+`bytes` or `memoryview`. Decoded messages retain readonly views into their owned
+Python batch bytes; formatting converts those fields to text as needed. This
+avoids an extra message-field copy during decoding, rather than making the
+entire shared-memory transport zero-copy.
 
-- Connection failures: workers continue logging locally and reconnect
-- Handler failures: individual handler errors do not affect others
-- Worker crashes: master detects via missed heartbeats
-- Graceful shutdown: flushes pending logs before exit
+## Shared handler delivery policy
 
-### Thread safety
+Both logging stacks use the same HTTP implementation and policy:
 
-- Shared-memory IPC: exclusively claimed producer shards use the lock-free queue core; worker-local batch operations use a thread lock.
-- Process isolation: one worker crash does not publish a partial record. Its producer claim remains reserved until the mapping is recreated after all users stop.
-- Atomic publication: complete binary records become visible after serialization and publication.
+- Up to three attempts in a ten-second total budget, including rate waits,
+  requests and backoff. Each HTTP request has a three-second session timeout.
+- Retry HTTP 429, HTTP 5xx and transient connection/time-out failures. Other
+  client errors fail immediately. Ordinary backoff is 0.1 then 0.2 seconds.
+- Honor numeric or HTTP-date Retry-After values, including on HTTP 503. A delay
+  beyond the remaining budget fails explicitly instead of retrying early.
+- Use the internal fixed-window `RateLimiter`: five Discord requests per two
+  seconds and one Telegram request per second. These are library defaults;
+  server Retry-After responses still govern retries.
+- Pack small messages together and split oversized ones, using 1,800 characters
+  for Discord and 3,500 for Telegram. Telegram disables link previews.
+- Limit each standard queue to 256 waiting deliveries and each advanced handler
+  to 256 scheduled operations. Saturation and shutdown loss are reported through
+  the error callback or stderr.
 
-### When to use
+All elapsed-time and wall-clock reads use the internal time utilities. The
+HTTP-date parser remains `email.utils.parsedate_to_datetime`: the internal
+parser supports ISO 8601, which is a different date format.
 
-Good for:
-- Multi-process applications (trading systems, data pipelines)
-- High-frequency logging (1000+ logs/sec)
-- Remote log aggregation (Discord/Telegram notifications)
-- Systems requiring high reliability
+Both stacks reuse one HTTP session per remote handler. The session is created
+on first delivery and closed on its owning event loop during handler cleanup.
+Reopening a standard handler creates a fresh session on its new delivery loop.
+Standard handlers process their delivery queues serially; advanced handlers
+schedule concurrent operations. Both apply the same retry, pacing and payload
+policies.
 
-Overkill for:
-- Single-process applications
-- Low-frequency logging
-- Simple file-only logging
-- Development/debugging (use standard logging)
+## Shutdown and accounting
 
-### Quick start
+Handler `close(timeout_s=2.0)` uses one bounded drain deadline. Advanced master
+`shutdown(timeout_s=2.0)` shares its remaining deadline across the drain thread
+and its handlers. Pending work may be cancelled or discarded at the deadline
+and is reported. A synchronous custom handler cannot be forcibly interrupted;
+a timed-out master leaves mappings owned by its drain thread until cleanup is
+safe. Stop workers before the master to include their final batches.
 
-```python
-master = MasterLogger(config, [FileLogHandler("app.log")])
-worker = WorkerLogger(config, name=f"Worker-{os.getpid()}")
+Both file handlers retain an append handle until close and flush after each
+batch. Advanced file handlers serialize batches and close under the lifecycle
+lock so concurrent master/drain calls cannot race with file cleanup.
 
-worker.info(b"Worker started")
-worker.shutdown()
-master.shutdown()
-```
-
-### Delivery and shutdown limits
-
-Remote HTTP handlers check response status, retry transient failures at most
-three times within a ten-second delivery budget, and honor Retry-After. If the
-required delay exceeds the remaining budget, delivery fails explicitly without
-an early retry. Background delivery errors go to the configured error callback
-or stderr. Standard remote queues hold at most 256 deliveries; advanced handlers
-allow at most 256 scheduled operations. Saturation is reported as loss.
-
-Standard handler close and advanced handler/master shutdown use one bounded
-drain deadline (two seconds by default). Pending work may be cancelled or
-discarded at that deadline and is reported. A user-supplied synchronous handler
-cannot be forcibly interrupted: a timed-out master leaves its mappings owned
-by the drain thread until it can finish safely. Stop workers before the master
-to include their final batches. File handlers append existing logs on restart.
-
-`WorkerLogger.get_transport_stats()` returns cumulative `rejected_messages`,
+`worker.get_transport_stats()` returns cumulative `rejected_messages`,
 `transport_errors` and `overwritten_batches`, including the final flush and
-transport cleanup. Read it after `shutdown()` to inspect the final totals.
-Overwritten batches can contain multiple log records; that count is not a
-message count. Overwrite diagnostics are sampled while the counters retain
-exact totals. These transport statistics do not acknowledge downstream handler
-delivery. The advanced logging benchmark checks both final worker status and
-observed handler consumption, and exits nonzero on lifecycle errors or missing
-deliveries without recorded overwrites.
+cleanup. Read it after shutdown for final totals. Overwritten batches can each
+contain many records. Diagnostics are sampled while counters remain exact;
+these counters do not acknowledge downstream handler delivery.

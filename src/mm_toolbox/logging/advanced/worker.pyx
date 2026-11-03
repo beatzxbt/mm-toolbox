@@ -406,7 +406,7 @@ cdef class WorkerLogger:
         """
         return self._name.decode()
 
-    cpdef object get_config(self):
+    cpdef LoggerConfig get_config(self):
         """Return the logger configuration.
 
         Returns:

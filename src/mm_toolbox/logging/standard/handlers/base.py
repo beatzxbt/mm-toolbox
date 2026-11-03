@@ -1,17 +1,27 @@
 """Base class for standard logging handlers."""
 
 import asyncio
-import email.utils
-import json
 import queue
 import sys
 import threading
-import time
 import traceback
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Mapping
 
+import aiohttp
 import msgspec
+
+from mm_toolbox.logging._remote import (
+    HTTPSession,
+    CLEANUP_TIMEOUT_S,
+    HTTP_TIMEOUT_S,
+    MAX_PENDING_DELIVERIES,
+    SHUTDOWN_TIMEOUT_S,
+    post_json_with_retries,
+    retry_after_seconds,
+)
+from mm_toolbox.rate_limiter import RateLimiter
+from mm_toolbox.time import time_monotonic_ns
 
 
 class BaseLogHandler(ABC):
@@ -20,30 +30,30 @@ class BaseLogHandler(ABC):
     should be pushed to their respective destinations.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize shared handler resources.
 
         Sets up lazy JSON encoding, HTTP session, and error callback slots.
 
         """
-        self._json_encode = None
-        self._http_session = None
+        self._json_encode: Callable[[object], bytes] | None = None
+        self._http_session: HTTPSession | None = None
+        self._limiter: RateLimiter | None = None
         self._on_error: Callable[[BaseException, str], None] | None = None
         self._is_open = False
         self._delivery_queue: queue.Queue[
             tuple[object, Callable[[object], Awaitable[None]]]
-        ] = queue.Queue(maxsize=256)
+        ] = queue.Queue(maxsize=MAX_PENDING_DELIVERIES)
         self._delivery_thread: threading.Thread | None = None
         self._delivery_lock = threading.Lock()
         self._delivery_stop = threading.Event()
         self._delivery_closed = False
         self._delivery_shutdown_deadline: float | None = None
-        self._delivery_close_timeout_s = 2.0
         self._delivery_loop_ref: asyncio.AbstractEventLoop | None = None
         self._delivery_shutdown_event: asyncio.Event | None = None
 
     @property
-    def json_encode(self):
+    def json_encode(self) -> Callable[[object], bytes]:
         """Lazy JSON encoder.
 
         Returns:
@@ -98,12 +108,12 @@ class BaseLogHandler(ABC):
             self._delivery_shutdown_deadline = None
         self._is_open = True
 
-    def close(self) -> None:
+    def close(self, timeout_s: float = SHUTDOWN_TIMEOUT_S) -> None:
         """Stop remote delivery after a bounded drain period."""
-        now = time.monotonic()
+        now = time_monotonic_ns() / 1e9
         with self._delivery_lock:
             if not self._delivery_closed:
-                self._delivery_shutdown_deadline = now + self._delivery_close_timeout_s
+                self._delivery_shutdown_deadline = now + max(0.0, timeout_s)
                 self._delivery_closed = True
                 self._delivery_stop.set()
             thread = self._delivery_thread
@@ -120,7 +130,7 @@ class BaseLogHandler(ABC):
             and thread.is_alive()
             and thread is not threading.current_thread()
         ):
-            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+            thread.join(timeout=max(0.0, deadline - (time_monotonic_ns() / 1e9)))
             if thread.is_alive():
                 self._handle_exception(
                     TimeoutError("remote delivery did not stop before close deadline"),
@@ -174,7 +184,7 @@ class BaseLogHandler(ABC):
     ) -> None:
         """Run queued requests and stop within the one close deadline."""
         while True:
-            if self._delivery_stop.is_set() and time.monotonic() >= (
+            if self._delivery_stop.is_set() and (time_monotonic_ns() / 1e9) >= (
                 self._delivery_shutdown_deadline or 0.0
             ):
                 break
@@ -196,8 +206,10 @@ class BaseLogHandler(ABC):
                 if delivery_task in done:
                     await delivery_task
                 else:
-                    deadline = self._delivery_shutdown_deadline or time.monotonic()
-                    remaining = max(0.0, deadline - time.monotonic())
+                    deadline = self._delivery_shutdown_deadline or (
+                        time_monotonic_ns() / 1e9
+                    )
+                    remaining = max(0.0, deadline - (time_monotonic_ns() / 1e9))
                     if remaining:
                         await asyncio.wait_for(delivery_task, timeout=remaining)
                     else:
@@ -263,83 +275,53 @@ class BaseLogHandler(ABC):
                 loop.run_until_complete(
                     asyncio.gather(*pending, return_exceptions=True)
                 )
-            loop.close()
-            asyncio.set_event_loop(None)
-            with self._delivery_lock:
-                self._delivery_loop_ref = None
-                self._delivery_shutdown_event = None
-
-    @staticmethod
-    def _retry_after_seconds(value: str | None, body: bytes = b"") -> float | None:
-        """Parse a numeric or HTTP-date Retry-After value without shortening it."""
-        if value:
             try:
-                return max(0.0, float(value))
-            except ValueError:
-                try:
-                    retry_at = email.utils.parsedate_to_datetime(value).timestamp()
-                    return max(0.0, retry_at - time.time())
-                except (TypeError, ValueError, OverflowError):
-                    pass
-        try:
-            payload = json.loads(body)
-            return max(0.0, float(payload.get("retry_after")))
-        except (TypeError, ValueError, AttributeError, json.JSONDecodeError):
-            return None
+                loop.run_until_complete(
+                    asyncio.wait_for(self._close_session(), timeout=CLEANUP_TIMEOUT_S)
+                )
+            except Exception as exc:
+                self._handle_exception(exc, "session close")
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
+                with self._delivery_lock:
+                    self._delivery_loop_ref = None
+                    self._delivery_shutdown_event = None
+
+    async def _ensure_session(self) -> HTTPSession:
+        """Create and reuse a session exclusively on the delivery worker's loop."""
+        if self._http_session is None or self._http_session.closed:
+            self._http_session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=HTTP_TIMEOUT_S)
+            )
+        return self._http_session
+
+    async def _close_session(self) -> None:
+        """Release the session before its owning event loop is closed."""
+        session, self._http_session = self._http_session, None
+        if session is not None and not session.closed:
+            await session.close()
+
+    _retry_after_seconds = staticmethod(retry_after_seconds)
 
     async def _post_with_retries(
         self,
-        session,
+        session: HTTPSession,
         url: str,
         *,
         headers: dict[str, str],
         payload: Mapping[str, object],
         service: str,
     ) -> None:
-        """Send JSON with checked status and retries inside a ten-second budget."""
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 10.0
-        for attempt in range(3):
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                raise TimeoutError(f"{service} delivery exceeded its 10-second budget")
-            try:
-                async with asyncio.timeout(remaining):
-                    async with session.post(
-                        url, headers=headers, json=payload
-                    ) as response:
-                        if 200 <= response.status < 300:
-                            return
-                        body = await response.read()
-                        error = RuntimeError(f"{service} returned {response.status}")
-                        retryable = response.status == 429 or response.status >= 500
-                        retry_after = (
-                            self._retry_after_seconds(
-                                response.headers.get("Retry-After"), body
-                            )
-                            if response.status == 429
-                            else None
-                        )
-            except Exception as exc:
-                error = exc
-                retryable = True
-                retry_after = None
-
-            if not retryable or attempt == 2:
-                raise error
-            remaining = deadline - loop.time()
-            delay = (
-                retry_after if retry_after is not None else min(0.1 * (2**attempt), 0.4)
-            )
-            if delay >= remaining:
-                if retry_after is not None:
-                    raise RuntimeError(
-                        f"{service} Retry-After of {delay:.3f}s exceeds the remaining delivery budget"
-                    ) from error
-                raise TimeoutError(
-                    f"{service} delivery exceeded its 10-second budget"
-                ) from error
-            await asyncio.sleep(delay)
+        """Apply the common retry and rate policy on the delivery loop."""
+        await post_json_with_retries(
+            session,
+            url,
+            payload,
+            headers=headers,
+            limiter=self._limiter,
+            service=service,
+        )
 
     @abstractmethod
     def push(self, buffer: list[str]) -> None:
