@@ -1,6 +1,3 @@
-# cython: language_level=3
-# cython: boundscheck=False
-# cython: wraparound=False
 """
 Layer 3: CoreAdvancedOrderbook tests.
 

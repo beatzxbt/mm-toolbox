@@ -1,7 +1,3 @@
-# cython: language_level=3
-# cython: boundscheck=False
-# cython: wraparound=False
-
 import asyncio
 from typing import AsyncIterator, Iterator
 

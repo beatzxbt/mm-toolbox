@@ -8,10 +8,6 @@ Provides:
   iteration support.
 """
 
-# cython: language_level=3
-# cython: boundscheck=False
-# cython: wraparound=False
-
 import asyncio
 from collections import deque
 from abc import ABC, abstractmethod

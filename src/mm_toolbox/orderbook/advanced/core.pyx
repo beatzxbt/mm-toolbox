@@ -1,8 +1,3 @@
-# cython: language_level=3
-# cython: boundscheck=False
-# cython: wraparound=False
-# cython: cdivision=True
-
 """Core advanced orderbook engine using compact normalized entries."""
 
 from __future__ import annotations

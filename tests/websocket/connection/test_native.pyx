@@ -1,6 +1,3 @@
-# cython: language_level=3
-# cython: boundscheck=False
-# cython: wraparound=False
 """Native Cython tests for WsConnection internals.
 
 Tests cdef fields and hot-path behavior that are inaccessible from pure Python:

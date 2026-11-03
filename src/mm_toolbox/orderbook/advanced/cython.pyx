@@ -1,8 +1,3 @@
-# cython: language_level=3
-# cython: boundscheck=False
-# cython: wraparound=False
-# cython: cdivision=True
-
 from libc.stdint cimport uint64_t as u64
 from libc.stdlib cimport free, malloc, realloc
 

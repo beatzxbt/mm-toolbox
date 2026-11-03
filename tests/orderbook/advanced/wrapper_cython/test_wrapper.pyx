@@ -1,6 +1,3 @@
-# cython: language_level=3
-# cython: boundscheck=False
-# cython: wraparound=False
 """
 Minimal delegation tests for the Cython CyAdvancedOrderbook wrapper.
 
