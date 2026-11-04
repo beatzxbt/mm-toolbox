@@ -9,7 +9,7 @@ cdef class TimeExponentialMovingAverage(MovingAverage):
         double      _lam
 
     cdef inline double _alpha_at(self, i64 time_now_ns) noexcept
-    cdef double _next_at(self, double new_val, i64 time_now_ns) noexcept
+    cdef double _next_at(self, double new_val, i64 time_now_ns)
     cdef double _update_at(self, double new_val, i64 time_now_ns)
     cpdef double    initialize(self, cnp.ndarray values)
     cpdef double    next(self, double new_val)

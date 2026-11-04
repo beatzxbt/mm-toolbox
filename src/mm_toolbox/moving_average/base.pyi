@@ -3,9 +3,7 @@ from __future__ import annotations
 import numpy as np
 import numpy.typing as npt
 
-from .protocol import MovingAverageProtocol
-
-__all__ = ["MovingAverage", "MovingAverageProtocol"]
+__all__ = ["MovingAverage"]
 
 class MovingAverage:
     def __init__(self, window: int, is_fast: bool = False) -> None: ...

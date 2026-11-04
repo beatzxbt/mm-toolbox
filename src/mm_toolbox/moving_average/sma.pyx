@@ -27,7 +27,7 @@ cdef class SimpleMovingAverage(MovingAverage):
         """
         super().__init__(window, is_fast)
         
-        self._raw_values = NumericRingBuffer(window, dtype='float64') 
+        self._raw_values = NumericRingBuffer(window, dtype='float64', disable_async=True)
         self._rolling_sum = 0.0
 
     cpdef double initialize(self, cnp.ndarray values):
@@ -43,17 +43,17 @@ cdef class SimpleMovingAverage(MovingAverage):
             ValueError: If the input length does not match ``window``.
         """
         cdef:
-            int i
-            int n = values.shape[0]
+            const double[:] values_view = self.validate_values(values)
+            Py_ssize_t i, n = values_view.shape[0]
             double raw_value
-            double[:] values_view = values
     
         if n != self._window:
             raise ValueError(
                 f"Input array length must match window; expected {self._window} but got {n}"
             )
 
-        self._values.clear()
+        self.reset_history()
+        self._raw_values.clear()
         self._rolling_sum = 0.0
         
         for i in range(n):
@@ -77,6 +77,7 @@ cdef class SimpleMovingAverage(MovingAverage):
             double: The projected SMA value.
         """
         self.ensure_warm()
+        self.validate_value(new_val)
 
         cdef: 
             double new_rolling_sum
@@ -95,6 +96,7 @@ cdef class SimpleMovingAverage(MovingAverage):
             double: The updated SMA value.
         """
         self.ensure_warm()
+        self.validate_value(new_val)
         
         cdef double old_raw_value = self._raw_values.consume()
         
