@@ -116,3 +116,27 @@ Volume and multi-trigger thresholds measure trade size, not price-times-size.
 Splits preserve size and notional, including quantities below `1e-12`. Nonfinite
 limits and invalid quantities fail explicitly; a threshold too small to make
 floating-point progress for an input trade raises rather than looping forever.
+
+## Benchmark results (2026-11-04)
+
+Each p50 is over 10 measured batches after two warmups. Each batch creates a
+fresh candle and processes 100,000 seeded synthetic trades with 1,000 candles
+and trade storage enabled. Throughput is derived from the median batch time.
+
+| Candle type | p50 (ns/trade) | Throughput at p50 (trades/s) |
+| --- | ---: | ---: |
+| TimeCandles | 263.9 | 3,789,009 |
+| TickCandles | 281.4 | 3,553,687 |
+| VolumeCandles | 331.7 | 3,015,041 |
+| PriceCandles | 284.3 | 3,517,731 |
+| MultiCandles | 401.7 | 2,489,505 |
+
+Measured on CPython 3.14.4, NumPy 2.5.4, Cython 3.3.0, Apple clang 21.0.0,
+macOS 26.6.2 arm64, Apple M2 (8 CPU cores, 16 GiB), at revision `c5f9dba`.
+These are local measurements and do not establish performance on other machines.
+
+Reproduce from the repository root:
+
+```sh
+.venv/bin/python -u benchmarks/candles/benchmark_candles.py --operations 10 --warmup 2 --trade-count 100000 --num-candles 1000 --store-trades
+```

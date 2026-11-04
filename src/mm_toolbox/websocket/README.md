@@ -216,3 +216,47 @@ asyncio.run(main())
   propagate child failure to the parent, which exits nonzero. Restart the whole
   example to rebuild its state. Their bounded buffers keep overwrite-oldest
   semantics; they do not promise loss-free throughput.
+
+## Benchmark results (2026-11-04)
+
+These local-only runs used loopback WebSocket servers. Outbound send latency is
+the synchronous `send_data()` call, not network round-trip time. Throughput runs
+made 10,000 calls after 1,000 warmups; a separate 10,000-call sample measured
+send latency. Connect p50s use 100 samples. The pool had three connections.
+Latency samples follow the bulk throughput phase on the same connections.
+
+| Outbound mode | Connect p50 (ms) | Throughput (msg/s) | Send p50 (ns/call) |
+| --- | ---: | ---: | ---: |
+| Single connection | 0.369 | 17,098 | 271,291 |
+| Pool, fastest | 0.691 | 18,376 | 272,626 |
+| Pool, broadcast | — | 22,349 | 652,021 |
+
+Broadcast throughput counts three wire messages per `send_data()` call. The
+server received all 21,000 single-connection frames and 84,000 pooled frames
+across fastest and broadcast modes.
+
+Inbound cases sent 512 unique 256-byte frames each. Paced delivery used a 1 ms
+send interval; the post-idle case waited 20 ms before its burst. Each case had
+zero missing, reordered, duplicate-app or unaccounted messages. The pool
+received 1,536 wire frames per case and filtered 1,024 intentional duplicates.
+
+| Receiver / case | Unique deliveries/s | p50 (ms) | p95 (ms) | p99 (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Single, paced | 809 | 0.106 | 0.222 | 0.347 |
+| Single, startup burst | 189,548 | 0.064 | 0.110 | 0.126 |
+| Single, post-idle burst | 177,930 | 0.092 | 0.129 | 0.151 |
+| Pool, paced | 762 | 0.117 | 0.419 | 0.960 |
+| Pool, startup burst | 76,237 | 0.060 | 0.103 | 0.124 |
+| Pool, post-idle burst | 71,429 | 0.076 | 0.106 | 0.138 |
+
+Inbound rate covers the interval from first source send to last unique app
+delivery. Delay percentiles use all 512 same-host monotonic-clock observations
+per case. The run used CPython 3.14.4, NumPy 2.5.4, Cython 3.3.0, Apple clang
+21.0.0, macOS 26.6.2 arm64, Apple M2 (8 CPU cores, 16 GiB), at revision
+`c5f9dba`. These measurements do not establish performance on other machines.
+
+Reproduce from the repository root:
+
+```sh
+.venv/bin/python -u benchmarks/websocket/benchmark_local.py --mode both --operations 10000 --warmup 1000 --message-size 128 --pool-connections 3 --receive-messages 512 --receive-warmup 32 --receive-message-size 256 --receive-interval-ms 1.0 --receive-idle-ms 20 --receive-timeout 3
+```

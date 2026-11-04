@@ -138,6 +138,55 @@ Both file handlers retain an append handle until close and flush after each
 batch. Advanced file handlers serialize batches and close under the lifecycle
 lock so concurrent master/drain calls cannot race with file cleanup.
 
+## Benchmark results (2026-11-04)
+
+Measured on CPython 3.14.4, NumPy 2.5.4, Cython 3.3.0, Apple clang 21.0.0,
+macOS 26.6.2 arm64, Apple M2 (8 CPU cores, 16 GiB), at revision `c5f9dba`.
+These are local measurements and do not establish performance on other machines.
+
+Both drivers use in-memory counting handlers, so the numbers measure logger
+and transport overhead.
+
+### Standard logger
+
+`emit_info_ns_per_msg` times the caller-side `Logger.info()` path in batches of
+1,000 calls; it is enqueue/emit latency, not delivery completion. The measured
+p50 was 924.5 ns/message (100,000 measured messages, after 1,000 warmups).
+After shutdown, all 101,000 attempted messages were delivered in one flush with
+zero loss. The separate shutdown p50s were 792 ns with an empty buffer and
+1,958 ns while flushing 128 buffered messages (25 samples each).
+
+```sh
+.venv/bin/python -u benchmarks/logging/benchmark_standard_logging.py --operations 100000 --warmup 1000 --size 256 --emit-batch-size 1000 --buffer-size 0 --shutdown-batch-size 128 --shutdown-iterations 25 --flush-interval-s 3600
+```
+
+### Advanced logger
+
+Five measured repeats and two warmup repeats were run per row. Each duration is
+0.5 seconds of worker-active time; startup and drain are excluded from the
+reported per-message times and rates. The transport capacity was 64 MiB. The
+workloads saturated it, so the table separates attempted and consumed counts
+and reports their per-message p50s. Rejections, transport errors, worker errors,
+forced exits and drain timeouts were all zero; overwritten batches were counted.
+
+| Sweep / setting | p50 attempted (ns/msg) | p50 consumed (ns/msg) | Attempted | Consumed | Lost |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Message size: 32 B, 4 workers | 100 | 195 | 25,107,232 | 12,801,363 | 12,305,869 (49.01%) |
+| Message size: 256 B, 4 workers | 90 | 352 | 27,797,752 | 7,049,342 | 20,748,410 (74.64%) |
+| Message size: 2,048 B, 4 workers | 185 | 700 | 13,248,817 | 3,710,848 | 9,537,969 (71.99%) |
+| Worker count: 1, 256 B | 323 | 581 | 7,648,377 | 4,253,426 | 3,394,951 (44.39%) |
+| Worker count: 2, 256 B | 164 | 344 | 15,094,795 | 7,279,094 | 7,815,701 (51.78%) |
+| Worker count: 4, 256 B | 94 | 348 | 25,094,197 | 7,027,868 | 18,066,329 (71.99%) |
+| Worker count: 8, 256 B | 71 | 337 | 32,030,441 | 7,018,226 | 25,012,215 (78.09%) |
+
+Per-message p50s are medians over five repeat samples; counts and loss are
+aggregated over the five measured runs. This is an overload workload, not a
+loss-free delivery result.
+
+```sh
+.venv/bin/python -u benchmarks/logging/benchmark_advanced_logging.py --axis both --workers 4 --message-size 256 --message-sizes 32,256,2048 --worker-counts 1,2,4,8 --operations 5 --warmup 2 --duration 0.5 --flush-interval 0.05 --startup-timeout 15 --drain-timeout 5 --ipc-dir /tmp/mm-toolbox-advanced-logging-ipc
+```
+
 `worker.get_transport_stats()` returns cumulative `rejected_messages`,
 `transport_errors` and `overwritten_batches`, including the final flush and
 cleanup. Read it after shutdown for final totals. Overwritten batches can each

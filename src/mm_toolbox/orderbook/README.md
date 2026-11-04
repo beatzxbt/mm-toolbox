@@ -175,3 +175,26 @@ best_bid, best_ask = ob.get_bbo()
 - Advanced: linear merges are fast but require stricter input ordering.
 - Advanced `UNKNOWN` sortedness lazily infers stable input ordering and rejects
   unsorted inputs instead of sorting them on every ingest.
+
+## Benchmark results (2026-11-04)
+
+Both drivers replayed the checked-in 100,000-row fixture. The snapshot initializes
+the book, then 1,000 updates warm up the runner; 98,999 updates were measured
+(90,019 BBO and 8,980 delta operations). The table reports p50 nanoseconds per
+input level. Advanced used 2,048 levels with sortedness hints disabled (`UNKNOWN`).
+
+| Implementation | BBO p50 (ns/level) | Delta p50 (ns/level) | Measured updates/s |
+| --- | ---: | ---: | ---: |
+| Standard | 708.5 | 1,019.2 | 84,991 |
+| Advanced | 62.5 | 307.5 | 336,305 |
+
+Measured on CPython 3.14.4, NumPy 2.5.4, Cython 3.3.0, Apple clang 21.0.0,
+macOS 26.6.2 arm64, Apple M2 (8 CPU cores, 16 GiB), at revision `c5f9dba`.
+These are local measurements and do not establish performance on other machines.
+
+Reproduce from the repository root:
+
+```sh
+.venv/bin/python -u benchmarks/orderbook/benchmark_standard_orderbook.py --input benchmarks/orderbook/data/btcusdt_100k.jsonl --operations 100000 --warmup 1000
+.venv/bin/python -u benchmarks/orderbook/benchmark_advanced_orderbook.py --input benchmarks/orderbook/data/btcusdt_100k.jsonl --operations 100000 --warmup 1000 --levels 2048
+```

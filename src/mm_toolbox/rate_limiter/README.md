@@ -223,3 +223,30 @@ config = RateLimiterConfig.default(capacity=2, window_s=2)
 config.burst_config = burst
 limiter = RateLimiter(config)
 ```
+
+## Benchmark results (2026-11-04)
+
+The p50 values below are nanoseconds per call from 100,000 measured samples
+per operation after 1,000 warmups. The configured bucket had capacity 1,000,
+a 60-second window, per-second sub-buckets, state tracking and burst handling
+enabled (10 burst tokens, five attempts).
+The timed burst call is asserted to be admitted; setup uses a forced charge to
+reach the over-capacity case without spending a burst attempt.
+
+| Operation | p50 (ns/call) |
+| --- | ---: |
+| tokens_remaining | 125 |
+| try_consume_allowed | 208 |
+| try_consume_burst | 167 |
+| try_consume_denied | 208 |
+| try_consume_multiple | 208 |
+
+Measured on CPython 3.14.4, NumPy 2.5.4, Cython 3.3.0, Apple clang 21.0.0,
+macOS 26.6.2 arm64, Apple M2 (8 CPU cores, 16 GiB), at revision `19bbaf9`.
+These are local measurements and do not establish performance on other machines.
+
+Reproduce from the repository root:
+
+```sh
+PYTHONPATH=src .venv/bin/python -u benchmarks/rate_limiter/benchmark_rate_limiter.py --operations 100000 --warmup 1000 --capacity 1000 --window-s 60 --sub-bucket per_second --state --burst --max-burst-tokens 10 --max-burst-attempts 5 --consume-tokens 1
+```
