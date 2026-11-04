@@ -69,6 +69,7 @@ def pytest_configure(config: pytest.Config) -> None:
             "cython_test_websocket_connection",
             "cython_test_memory",
             "cython_test_tema_clock",
+            "cython_test_rate_limiter_clock",
         ):
             try:
                 importlib.import_module(module)

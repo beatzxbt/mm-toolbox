@@ -203,20 +203,20 @@ class RateLimiterBenchmark(BenchmarkRunner[RateLimiterBenchmarkConfig]):
 
         for _ in range(warmup):
             limiter.refill()
-            for _ in range(self.config.capacity):
-                if not limiter.try_consume().allowed:
-                    break
-            limiter.try_consume()
+            # Saturate normal capacity without spending the burst budget.
+            limiter.try_consume_multiple(self.config.capacity, force=True)
+            if not limiter.try_consume().allowed:
+                raise RuntimeError("Burst benchmark warmup did not admit a burst")
 
         metrics = self.stats.add_operation("try_consume_burst")
         for _ in range(measure):
             limiter.refill()
-            for _ in range(self.config.capacity):
-                if not limiter.try_consume().allowed:
-                    break
+            limiter.try_consume_multiple(self.config.capacity, force=True)
             start = time.perf_counter_ns()
-            limiter.try_consume()
+            result = limiter.try_consume()
             elapsed = time.perf_counter_ns() - start
+            if not result.allowed:
+                raise RuntimeError("Burst benchmark did not admit a burst")
             metrics.add_latency(elapsed)
 
 

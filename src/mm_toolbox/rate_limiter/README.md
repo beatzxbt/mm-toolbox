@@ -6,7 +6,7 @@ Token bucket rate limiter with optional per-second sub-buckets.
 
 - `RateLimiterConfig`: capacity, window size, sub-bucket strategy, and policies.
 - `RateLimitStateConfig`: warning/block thresholds for utilization states.
-- `RateLimitBurstConfig`: limited overage policy within the active second.
+- `RateLimitBurstConfig`: limited overage policy within the full window.
 - `RateLimiter`: token bucket implementation with consumption helpers.
 
 ## Basic usage
@@ -39,7 +39,14 @@ per_window = RateLimiter.per_window(20, 3)
 
 - `SubBucketStrategy.PER_SECOND` caps per-second usage within a larger window.
 - `RateLimiterConfig.default()` enables state thresholds, disables burst, and defaults to `SubBucketStrategy.PER_SECOND`.
-- `force=True` bypasses checks and yields `RateLimitState.OVERRIDE`.
+- `force=True` bypasses policy checks and yields `RateLimitState.OVERRIDE`.
+  Forced usage is charged in full, so remaining tokens can be negative and usage
+  can exceed `1.0`. Counter overflow is rejected without changing accounting.
+- Factory methods use the default 95% block threshold. Disable
+  `config.state_config.is_enabled` before construction when the entire capacity
+  should be available to normal requests.
+- Zero or negative token counts are accounting queries: they consume nothing
+  and return `allowed=True`, `state=NORMAL`, and the current remaining/usage.
 
 ## How it behaves
 
@@ -49,6 +56,8 @@ per_window = RateLimiter.per_window(20, 3)
 - Tokens are deducted on each consume call, and refilled only when the window elapses.
 - Refill and sub-buckets use monotonic time relative to the current window
   start. They do not align to wall-clock second boundaries.
+- Refill is lazy: the first operation after expiry starts a new window at that
+  operation's timestamp. Idle time does not accumulate extra capacity.
 
 ### Sub-bucket strategy
 
@@ -60,16 +69,26 @@ per_window = RateLimiter.per_window(20, 3)
 
 ### State thresholds
 
-- `RateLimitState.NORMAL`: below `warning_threshold`.
+- `RateLimitState.NORMAL`: at or below `warning_threshold`.
 - `RateLimitState.WARNING`: above `warning_threshold` but not past `block_threshold`.
-- `RateLimitState.BLOCKED`: over `block_threshold`; consumption is denied.
+- `RateLimitState.BLOCKED`: projected normal usage exceeds `block_threshold`;
+  consumption is denied unless the request qualifies for a burst.
 
 ### Burst policy
 
-- When enabled, a limited number of over-capacity attempts can be allowed within
-  the active second.
-- This is a controlled escape hatch for spiky traffic; it does not increase
-  the long-term capacity.
+- A burst budget lasts for the entire `window_s` window, including when
+  per-second sub-buckets are enabled. Crossing a second boundary does not renew
+  it; automatic or explicit window refill does.
+- Burst handling applies when normal consumption would exceed overall capacity,
+  the current sub-bucket allocation, or the block threshold.
+- `max_tokens` limits the size of the entire burst request, and
+  `max_burst_attempts` limits admitted burst requests per window. Normal requests
+  and rejected requests do not spend an attempt.
+- Accepted bursts return `NORMAL`. New charges stop at the bucket allocation;
+  bursts preserve any higher usage already charged by `force=True`. The extra
+  admitted work can exceed the configured normal capacity.
+- A request larger than the burst request limit returns `BLOCKED`. An eligible
+  request with no attempts left returns `WARNING` with `allowed=False`.
 
 ## Internal diagrams
 
@@ -111,60 +130,16 @@ overall window: refills at t0+W
 sub-buckets: each one-second boundary is relative to the window start
 ```
 
-### Consumption decision flow
+### Consumption decision order
 
-```text
-+-----------------------+
-| try_consume_multiple  |
-+-----------------------+
-            |
-            v
-+-----------------------+
-| window expired?       |
-+-----------------------+
-   | yes            | no
-   v                v
-+-------------+  +----------------------+
-| reset_state |  | num_tokens <= 0?     |
-+-------------+  +----------------------+
-                     | yes        | no
-                     v            v
-              +--------------+  +-----------+
-              | allow, NORMAL|  | force?    |
-              +--------------+  +-----------+
-                                   | yes  | no
-                                   v      v
-                        +-------------------+  +---------------------------+
-                        | apply usage,      |  | compute overall + sub usage|
-                        | OVERRIDE          |  +---------------------------+
-                        +-------------------+              |
-                                                           v
-                                              +------------------------+
-                                              | overall_ok & sub_ok?   |
-                                              +------------------------+
-                                                | yes           | no
-                                                v              v
-                                       +------------------+   +-------------------------------+
-                                       | usage > block?   |   | burst enabled & sub_enabled? |
-                                       +------------------+   +-------------------------------+
-                                        | yes       | no        | no           | yes
-                                        v          v           v              v
-                                +--------------+  +--------------------+  +-----------------+
-                                | deny, BLOCKED|  | apply usage        |  | num_tokens >    |
-                                +--------------+  +--------------------+  | max_tokens?     |
-                                                     |                    +-----------------+
-                                                     v                     | yes      | no
-                                             +----------------------+      v          v
-                                             | usage > warning?     | +--------------+ +--------------------------------+
-                                             +----------------------+ | deny, BLOCKED| | burst_attempts_used < max?      |
-                                              | yes        | no      +--------------+ +--------------------------------+
-                                              v           v                              | yes               | no
-                                       +--------------+ +--------------+                  v                  v
-                                       | allow, WARNING| | allow, NORMAL|          +------------------+  +---------------+
-                                       +--------------+ +--------------+          | allow, NORMAL     |  | deny, WARNING |
-                                                                                | (cap usage)      |  +---------------+
-                                                                                +------------------+
-```
+1. Read monotonic time and refill if the full window has expired.
+2. Return an unchanged accounting snapshot for a nonpositive token count.
+3. For `force=True`, charge usage and return `OVERRIDE`, unless a counter would
+   overflow.
+4. If capacity, sub-bucket and block-threshold checks all pass, charge usage and
+   return `NORMAL` or `WARNING` according to the warning threshold.
+5. Otherwise, apply the shared burst request-size and per-window attempt limits.
+   An accepted burst returns `NORMAL`; a rejection preserves accounting.
 
 ### Threshold bands
 
@@ -175,16 +150,20 @@ usage (used / capacity)
 NORMAL               WARNING                    BLOCKED
 ```
 
-### Burst allowance within the active second
+### Burst allowance within the full window
 
 ```text
-per-second bucket capacity = 5, burst max_tokens = 2, max_burst_attempts = 1
+overall capacity = 10, window = 2 seconds, sub-buckets = [5, 5]
+burst max_tokens = 2, max_burst_attempts = 1, state thresholds disabled
 
-second boundary
-|--------------------------------------------------------------->
-consume 5 tokens (normal) -> at capacity
-1 burst attempt of up to 2 tokens -> allowed once
-further attempts in same second -> denied
+window start                       second 1                 window end
+|----------------------------------|------------------------|
+consume 5 normal + 1 burst token    consume up to 4 normal    all budgets reset
+one burst attempt is spent         no new burst attempt
+
+The burst token counts toward the overall window budget. Its sub-bucket
+charge stops at 5. Once normal capacity is exhausted, an unused burst attempt
+can admit extra work while keeping normal counters capped.
 ```
 
 ## Scenario examples
@@ -192,9 +171,11 @@ further attempts in same second -> denied
 ### Simple per-second limiter
 
 ```python
-from mm_toolbox.rate_limiter import RateLimiter
+from mm_toolbox.rate_limiter import RateLimiter, RateLimiterConfig
 
-limiter = RateLimiter.per_second(5)
+config = RateLimiterConfig.default(capacity=5, window_s=1)
+config.state_config.is_enabled = False
+limiter = RateLimiter(config)
 for _ in range(5):
     assert limiter.try_consume().allowed is True
 assert limiter.try_consume().allowed is False
@@ -203,13 +184,9 @@ assert limiter.try_consume().allowed is False
 ### Per-second sub-buckets within a 2-second window
 
 ```python
-from mm_toolbox.rate_limiter import RateLimiterConfig, RateLimiter, SubBucketStrategy
+from mm_toolbox.rate_limiter import RateLimiterConfig, RateLimiter
 
-config = RateLimiterConfig.default(
-    capacity=4,
-    window_s=2,
-    sub_bucket_strategy=SubBucketStrategy.PER_SECOND,
-)
+config = RateLimiterConfig.default(capacity=4, window_s=2)
 limiter = RateLimiter(config)
 
 # In a single second, only 2 tokens are available (4 total / 2 seconds).
@@ -223,10 +200,13 @@ assert limiter.try_consume().allowed is False
 from mm_toolbox.rate_limiter import RateLimiterConfig, RateLimiter
 
 config = RateLimiterConfig.default(capacity=4, window_s=1)
+config.state_config.warning_threshold = 0.5
+config.state_config.block_threshold = 0.75
 limiter = RateLimiter(config)
 
-limiter.try_consume_multiple(2)  # usage 50%
-state = limiter.try_consume().state  # usage 75%
+limiter.try_consume_multiple(2)  # 50%: allowed, NORMAL
+limiter.try_consume()  # 75%: allowed, WARNING
+limiter.try_consume()  # projected 100%: denied, BLOCKED; usage remains 75%
 ```
 
 ### Burst allowance for spike handling
@@ -239,6 +219,7 @@ from mm_toolbox.rate_limiter import (
 )
 
 burst = RateLimitBurstConfig(is_enabled=True, max_tokens=2, max_burst_attempts=1)
-config = RateLimiterConfig.default(capacity=2, window_s=2).replace(burst_config=burst)
+config = RateLimiterConfig.default(capacity=2, window_s=2)
+config.burst_config = burst
 limiter = RateLimiter(config)
 ```

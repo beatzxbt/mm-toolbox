@@ -21,6 +21,7 @@ cdef class RateLimiter:
         i64*   _sub_allocations
         i64*   _sub_used
 
+    cdef i64 _now_ms(self) noexcept
     cdef inline void _maybe_refill(self, i64 now)
     cdef inline i64 _sub_index(self, i64 now)
     cpdef void refill(self)
