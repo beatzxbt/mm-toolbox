@@ -9,6 +9,7 @@ import os
 import secrets
 
 from mm_toolbox.logging.advanced.pylog import PyLogLevel
+from libc.math cimport isfinite
 from mm_toolbox.logging.advanced.log cimport CLogLevel
 
 
@@ -77,7 +78,7 @@ cdef class LoggerConfig:
         self.path = path
 
         self.flush_interval_s = flush_interval_s
-        if self.flush_interval_s <= 0.0:
+        if not isfinite(self.flush_interval_s) or self.flush_interval_s <= 0.0:
             raise ValueError(f"Invalid flush interval; expected a positive number but got '{self.flush_interval_s}'")
 
         self.emit_internal = emit_internal
@@ -106,5 +107,4 @@ cdef class LoggerConfig:
             return CLogLevel.WARNING
         elif level == PyLogLevel.ERROR:
             return CLogLevel.ERROR
-        # Fallback to INFO for any unrecognized input
-        return CLogLevel.INFO
+        raise ValueError(f"Unknown base log level: {level}")

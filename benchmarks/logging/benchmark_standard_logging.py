@@ -13,7 +13,6 @@ Measures:
 from __future__ import annotations
 
 import argparse
-import asyncio
 import gc
 import threading
 import time
@@ -52,7 +51,7 @@ class CountingLogHandler(BaseLogHandler):
         self._messages_seen = 0
         self._lock = threading.Lock()
 
-    async def push(self, buffer: list[str]) -> None:
+    def push(self, buffer: list[str]) -> None:
         """Record flush/message counts without performing I/O."""
         with self._lock:
             self._flush_calls += 1
@@ -121,8 +120,10 @@ class StandardLoggingBenchmark(BenchmarkRunner[StandardLoggingBenchmarkConfig]):
         config = LoggerConfig(
             base_level=LogLevel.INFO,
             do_stdout=False,
+            flush_on_size=True,
+            flush_size_threshold=self.config.buffer_size,
+            flush_on_interval=True,
             flush_interval_s=self.config.flush_interval_s,
-            buffer_size=self.config.buffer_size,
         )
         logger = Logger(
             name="standard-logging-benchmark",
@@ -133,9 +134,9 @@ class StandardLoggingBenchmark(BenchmarkRunner[StandardLoggingBenchmarkConfig]):
 
     @staticmethod
     def _shutdown_logger(logger: Logger) -> None:
-        """Shut down logger and background thread via asyncio.run."""
+        """Shut down the synchronous logger and its handlers."""
         if logger.is_running():
-            asyncio.run(logger.shutdown())
+            logger.shutdown()
 
     def _run_benchmark_suite(self, _subject: None) -> None:
         """Run all benchmark operations."""

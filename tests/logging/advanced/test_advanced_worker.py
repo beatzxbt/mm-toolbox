@@ -99,6 +99,7 @@ class TestWorkerLogger:
     def test_small_transport_reserves_a_worker_shard(self, tmp_path):
         """The master and one worker can coexist even with a small mapping."""
         import time
+        from mm_toolbox.time import time_monotonic_ns
         from mm_toolbox.logging.advanced.master import MasterLogger
         from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
 
@@ -117,8 +118,8 @@ class TestWorkerLogger:
         worker = WorkerLogger(config=config)
         worker.info(b"small transport")
         worker.shutdown()
-        deadline = time.monotonic() + 1
-        while not received and time.monotonic() < deadline:
+        deadline = (time_monotonic_ns() / 1e9) + 1
+        while not received and (time_monotonic_ns() / 1e9) < deadline:
             time.sleep(0.01)
         master.shutdown()
         assert received == [b"small transport"]

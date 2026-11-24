@@ -2,7 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
-## 1.0.0b10 (2026-10-25)
+## Unreleased
+
+## 1.0.0b11 (2026-11-24, unpublished candidate)
+
+- Share candle trade validation and stale-input acceptance across candle types, preserve equal timestamps, reset trigger state during replay, and provide consistent retained-history indexing and iteration.
+- Validate moving-average inputs before mutation, reset aggregation/history/clock state consistently, and avoid allocating output history in fast mode. Cover streaming, projection, reinitialization and exact clock boundaries with independent expectations.
+- Share remote logging delivery, retry and rate-limit policies across both logging stacks. Reuse HTTP sessions and file handles, bound pending delivery and shutdown, use monotonic flush deadlines, and retain explicit loss/error accounting.
+- Apply one rate-limiter burst policy across capacity, sub-bucket and threshold limits. Keep the burst budget for the whole window, preserve forced-use accounting, and test exact refill boundaries with a controlled native clock.
+- Compare the standard orderbook and both advanced APIs with one independent dictionary reference after every operation. Add named snapshot, delta, BBO, capacity, calculation, numeric and stream scenarios, deterministic generated traces, a recorded-feed replay and a dedicated extended CI workload. Consolidate duplicated behavior tests while retaining focused ingestion, ownership and native memory tests.
+- Apply completed delta batches and crossing cleanup before capacity truncation, recover depleted sides, and reject ambiguous zero-size BBOs atomically. Preserve valid retained tails across the small/bulk batch boundary. Align crossing helpers on strict crossing; touching equality is not crossed.
+- Keep exact large normalized units unchanged, reject unsafe unsigned conversions, avoid midpoint/quantity overflow, and correct fractional execution-impact and tick-boundary calculations. Compute floored weighted midpoints with exact bounded integer arithmetic, including skewed quantities near the unsigned limit. Standard books retain owned copies of mutable ingestion values.
+- Publish collector events through one depth-aware sequence gate. Hold future BBOs within explicit bounds, let covering depth win equal IDs, discard stale quotes, and propagate stream failures even at the capture limit. Include a compact recorded fixture in source distributions.
+- Apply advanced-orderbook BBO prices across all obsolete top levels, including multi-level jumps and quotes outside retained depth. Refresh the quoted quantity and order count when its price already exists, and preserve valid deeper levels without allocation or locks.
+- Fix the advanced logging benchmark's shared transport capacity at an explicit 64 MiB for both the master and workers, and include that setting in its report.
+- Start both orderbook collector feeds before fetching a snapshot, buffer updates with bounded backpressure, validate the snapshot bridge and subsequent depth sequence, and publish only complete captures. Use routed public endpoints and propagate startup, stream and timeout failures. Orderbook benchmark drivers now fail clearly when their input capture is missing.
+- Bound WebSocket wrapper receive queues by message count and retained payload bytes, with shared pool backpressure that accounts for frames already read by the parser. Default limits are 4,096 messages and 16 MiB; consumed slots release their payload references.
+- Wake WebSocket readers directly on data or close, preserving queued single-client data and isolating readers across pool restarts.
+- Explicitly select verified standard asyncio transports; avoid the optional aiofastnet TLS fallback defect when paused reads resume. Certificate and hostname verification remain enabled.
+- Correlate internal PING/PONG probes, preserve their readable-time deadline across short pauses, and service ready I/O before confirming expiry. Keep observed latency samples fresh under backpressure and include heartbeat state in timeout diagnostics.
+- Subscribe the Binance examples only after every transport opens, validate subscription acknowledgements before publishing readiness, and handle late pool acknowledgements. Preserve raw trade event semantics.
+- Add an inbound WebSocket benchmark with an independent source process, exact receive/deduplication accounting, and strict no-loss paced/startup/post-idle scenarios.
+- Retain exact WebSocket receive-overwrite totals across startup, reconnects, retired connections and close; sample overload diagnostics at powers of two. The concrete single/pool getters are additive and the public client protocol is unchanged.
+- Stop market-data examples on lost continuity, disconnects or rejected SHM writes; propagate processing and child failures, and follow Binance futures snapshot/`pu` sequencing. Rebuild the whole example after a failure.
+- Expose cumulative worker-logger transport counters after shutdown, report startup loss at the master, and reject benchmark runs with worker/shutdown errors or unexplained missing deliveries. Intentional overwrite stress remains explicitly counted.
+- Repair example and benchmark API calls, accounting, workload labels, bounded cleanup and input filtering; record the measured workloads in the relevant module README files.
+- Move release-named test collections into ordinary component suites, share replay helpers, make shutdown checks deterministic and extend extreme power-of-ten rounding boundaries. Preserve native and cross-backend contracts in source and installed-wheel tests.
+- Rebuild the library and any dependent Cython extensions together when upgrading this candidate; native layouts have changed.
+- Include native test typing stubs in source distributions so the typed component suites remain complete outside the Git checkout.
+
+## 1.0.0b10 (2026-10-25, unpublished candidate)
 
 - Validate live orderbook replay against an exact decimal reference so floating-point representation does not turn valid prices or one-lot quantities into incorrect reference ticks.
 - Check logging shutdown's shared deadline deterministically instead of relying on a tight elapsed-time threshold on shared CI runners.

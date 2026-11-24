@@ -618,3 +618,27 @@ def live_test_config() -> dict[str, Any]:
         "freshness_budget_ms": 15_000,
         "clock_future_drift_ms": 2_000,
     }
+
+
+async def _until(predicate, timeout=3.0):
+    async with asyncio.timeout(timeout):
+        while not predicate():
+            await asyncio.sleep(0.01)
+
+
+class _Connection:
+    def __init__(self, config):
+        self.config = config
+        self.live = True
+
+    def is_connected(self):
+        return self.live
+
+    def close(self):
+        self.live = False
+
+    def get_config(self):
+        return self.config
+
+    def get_latency_ms(self):
+        return 1.0

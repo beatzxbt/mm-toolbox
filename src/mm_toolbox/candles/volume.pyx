@@ -52,8 +52,7 @@ cdef class VolumeCandles(BaseCandles):
             double volume
             double next_remaining
 
-        self.validate_trade(price, remaining_size)
-        if self.is_stale_trade(time_ms):
+        if not self.accept_trade(time_ms, price, remaining_size):
             return
 
         while remaining_size > 0.0:

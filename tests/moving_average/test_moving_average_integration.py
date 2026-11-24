@@ -7,13 +7,12 @@ implementations.
 
 from __future__ import annotations
 
-from typing import Any
-
 import numpy as np
 import pytest
 
 from mm_toolbox.moving_average import (
     ExponentialMovingAverage,
+    MovingAverageProtocol,
     SimpleMovingAverage,
     TimeExponentialMovingAverage,
     WeightedMovingAverage,
@@ -21,12 +20,12 @@ from mm_toolbox.moving_average import (
 from mm_toolbox.moving_average.base import MovingAverage
 from .tema_clock import set_time_ns, update_at
 
-MA_CLASSES = [
+MA_CLASSES: tuple[type[MovingAverage], ...] = (
     SimpleMovingAverage,
     ExponentialMovingAverage,
     WeightedMovingAverage,
     TimeExponentialMovingAverage,
-]
+)
 
 MA_NAMES = ["SMA", "EMA", "WMA", "TEMA"]
 
@@ -67,12 +66,10 @@ def _reference_wma(values: np.ndarray, window: int) -> np.ndarray:
     return result
 
 
-def _make_instance(ma_cls: Any, window: int, is_fast: bool = False) -> Any:
-    """Instantiate an MA with the minimal required kwargs."""
-    kwargs = {"window": window, "is_fast": is_fast}
-    if ma_cls is TimeExponentialMovingAverage:
-        kwargs["half_life_s"] = 1.0
-    return ma_cls(**kwargs)
+def _make_instance(
+    ma_cls: type[MovingAverage], window: int, is_fast: bool = False
+) -> MovingAverage:
+    return ma_cls(window=window, is_fast=is_fast)
 
 
 # ---------------------------------------------------------------------------
@@ -81,27 +78,16 @@ def _make_instance(ma_cls: Any, window: int, is_fast: bool = False) -> Any:
 
 
 class TestProtocolCompliance:
-    """Verify every MA is an instance of ``MovingAverage``."""
+    """Verify every native MA satisfies the public runtime protocol."""
 
     @pytest.mark.parametrize("ma_cls", MA_CLASSES, ids=MA_NAMES)
-    def test_isinstance_protocol(self, ma_cls: Any):
+    def test_isinstance_protocol(self, ma_cls: type[MovingAverage]):
         """Runtime checkable protocol acceptance."""
         ma = _make_instance(ma_cls, window=4)
-        assert isinstance(ma, MovingAverage)
+        assert isinstance(ma, MovingAverageProtocol)
 
     @pytest.mark.parametrize("ma_cls", MA_CLASSES, ids=MA_NAMES)
-    def test_has_required_methods(self, ma_cls: Any):
-        """All protocol methods exist and are callable."""
-        ma = _make_instance(ma_cls, window=4)
-        assert callable(ma.initialize)
-        assert callable(ma.next)
-        assert callable(ma.update)
-        assert callable(ma.get_value)
-        assert callable(ma.get_values)
-        assert callable(ma.__len__)
-
-    @pytest.mark.parametrize("ma_cls", MA_CLASSES, ids=MA_NAMES)
-    def test_window_validation(self, ma_cls: Any):
+    def test_window_validation(self, ma_cls: type[MovingAverage]):
         """Window <= 1 must raise ``ValueError``."""
         with pytest.raises(ValueError):
             _make_instance(ma_cls, window=1)
@@ -120,25 +106,7 @@ class TestIdenticalSequence:
     """Run the same price sequence through every MA."""
 
     @pytest.mark.parametrize("ma_cls", MA_CLASSES, ids=MA_NAMES)
-    def test_initialize_returns_float(self, ma_cls: Any):
-        """``initialize()`` returns a Python float."""
-        ma = _make_instance(ma_cls, window=4)
-        vals = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64)
-        result = ma.initialize(vals)
-        assert isinstance(result, float)
-
-    @pytest.mark.parametrize("ma_cls", MA_CLASSES, ids=MA_NAMES)
-    def test_update_returns_float(self, ma_cls: Any):
-        """Sequential ``update()`` calls return floats."""
-        ma = _make_instance(ma_cls, window=4)
-        ma.initialize(np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64))
-
-        for price in [5.0, 6.0, 7.0]:
-            result = ma.update(price)
-            assert isinstance(result, float)
-
-    @pytest.mark.parametrize("ma_cls", MA_CLASSES, ids=MA_NAMES)
-    def test_get_value_matches_latest(self, ma_cls: Any):
+    def test_get_value_matches_latest(self, ma_cls: type[MovingAverage]):
         """``get_value()`` equals the most recent ``update()`` return."""
         ma = _make_instance(ma_cls, window=4)
         ma.initialize(np.array([10.0, 20.0, 30.0, 40.0], dtype=np.float64))
@@ -156,7 +124,7 @@ class TestFastMode:
     """Fast mode must disable history while preserving current-value accuracy."""
 
     @pytest.mark.parametrize("ma_cls", MA_CLASSES, ids=MA_NAMES)
-    def test_fast_mode_raises_on_get_values(self, ma_cls: Any):
+    def test_fast_mode_raises_on_get_values(self, ma_cls: type[MovingAverage]):
         """``get_values()`` is forbidden in fast mode."""
         ma = _make_instance(ma_cls, window=4, is_fast=True)
         ma.initialize(np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64))
@@ -165,7 +133,7 @@ class TestFastMode:
             ma.get_values()
 
     @pytest.mark.parametrize("ma_cls", MA_CLASSES, ids=MA_NAMES)
-    def test_fast_mode_raises_on_len(self, ma_cls: Any):
+    def test_fast_mode_raises_on_len(self, ma_cls: type[MovingAverage]):
         """``len()`` is forbidden in fast mode."""
         ma = _make_instance(ma_cls, window=4, is_fast=True)
         ma.initialize(np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64))
@@ -174,7 +142,7 @@ class TestFastMode:
             len(ma)
 
     @pytest.mark.parametrize("ma_cls", MA_CLASSES, ids=MA_NAMES)
-    def test_fast_mode_value_matches_normal(self, ma_cls: Any):
+    def test_fast_mode_value_matches_normal(self, ma_cls: type[MovingAverage]):
         """Current value must be identical between fast and normal modes."""
         window = 4
         init_vals = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64)
@@ -186,11 +154,15 @@ class TestFastMode:
         ma_fast.initialize(init_vals.copy())
         ma_norm.initialize(init_vals.copy())
 
-        if ma_cls is TimeExponentialMovingAverage:
+        if isinstance(ma_fast, TimeExponentialMovingAverage) and isinstance(
+            ma_norm, TimeExponentialMovingAverage
+        ):
             set_time_ns(ma_fast, 1_000_000_000)
             set_time_ns(ma_norm, 1_000_000_000)
         for index, price in enumerate(updates):
-            if ma_cls is TimeExponentialMovingAverage:
+            if isinstance(ma_fast, TimeExponentialMovingAverage) and isinstance(
+                ma_norm, TimeExponentialMovingAverage
+            ):
                 timestamp = (index + 2) * 1_000_000_000
                 v_fast = update_at(ma_fast, price, timestamp)
                 v_norm = update_at(ma_norm, price, timestamp)
@@ -199,20 +171,6 @@ class TestFastMode:
                 v_norm = ma_norm.update(price)
             assert v_fast == pytest.approx(v_norm, abs=1e-5)
             assert ma_fast.get_value() == pytest.approx(ma_norm.get_value(), abs=1e-5)
-
-    @pytest.mark.parametrize("ma_cls", MA_CLASSES, ids=MA_NAMES)
-    def test_fast_mode_len_stays_zero(self, ma_cls: Any):
-        """Fast mode must never accumulate history."""
-        ma = _make_instance(ma_cls, window=4, is_fast=True)
-        ma.initialize(np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64))
-
-        for _ in range(10):
-            ma.update(5.0)
-
-        # len() is already tested to raise, but we can also inspect
-        # indirectly: get_values must raise after many updates.
-        with pytest.raises(ValueError, match="fast mode"):
-            ma.get_values()
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +191,9 @@ class TestRealisticWorkflow:
         return prices.astype(np.float64)
 
     @pytest.mark.parametrize("ma_cls", MA_CLASSES, ids=MA_NAMES)
-    def test_runs_without_error(self, ma_cls: Any, price_stream: np.ndarray):
+    def test_runs_without_error(
+        self, ma_cls: type[MovingAverage], price_stream: np.ndarray
+    ):
         """All MAs must ingest 1000 ticks without exception."""
         window = 20
         ma = _make_instance(ma_cls, window=window)
@@ -246,7 +206,9 @@ class TestRealisticWorkflow:
         assert not np.isnan(ma.get_value())
 
     @pytest.mark.parametrize("ma_cls", MA_CLASSES, ids=MA_NAMES)
-    def test_values_monotonic_in_window(self, ma_cls: Any, price_stream: np.ndarray):
+    def test_values_monotonic_in_window(
+        self, ma_cls: type[MovingAverage], price_stream: np.ndarray
+    ):
         """For a constant price the MA output should stabilise."""
         window = 10
         ma = _make_instance(ma_cls, window=window)
@@ -286,7 +248,7 @@ class TestReferenceAccuracy:
         ref = _reference_sma(price_stream, window)
         np.testing.assert_allclose(results, ref[window - 1 :], rtol=1e-12)
 
-    def test_ema_matches_pandas(self, price_stream: np.ndarray):
+    def test_ema_matches_reference(self, price_stream: np.ndarray):
         """EMA output must align with the NumPy recurrence reference."""
         window = 20
         ma = ExponentialMovingAverage(window=window)

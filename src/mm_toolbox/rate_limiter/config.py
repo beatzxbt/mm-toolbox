@@ -46,7 +46,7 @@ class RateLimitStateConfig(Struct):
 
 
 class RateLimitBurstConfig(Struct):
-    """Optional burst allowance control."""
+    """Optional per-window burst budget, limiting request size and attempt count."""
 
     is_enabled: bool
     max_tokens: int
@@ -75,7 +75,7 @@ class RateLimitBurstConfig(Struct):
 
 
 class RateLimiterConfig(Struct):
-    """Top-level configuration for a token-bucket limiter with optional sub-second buckets."""
+    """Top-level limiter configuration with optional per-second buckets."""
 
     capacity: int
     window_s: int

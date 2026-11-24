@@ -12,6 +12,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/** Exact floored weighted tick for bid_ticks <= ask_ticks; zero total size gives 0. */
+uint64_t orderbook_weighted_mid_tick(
+    uint64_t bid_ticks,
+    uint64_t ask_ticks,
+    uint64_t bid_lots,
+    uint64_t ask_lots
+);
+
 void reverse_entries(uint64_t num_entries, OrderbookEntry* entries);
 
 /**
@@ -22,11 +30,18 @@ void reverse_entries(uint64_t num_entries, OrderbookEntry* entries);
 uint64_t compact_entries(uint64_t num_entries, OrderbookEntry* entries, bool drop_zero);
 
 static inline uint64_t orderbook_floor_with_epsilon(double value) {
-    if (!isfinite(value) || value < 0.0) {
+    if (!isfinite(value) || value < 0.0 || value >= 18446744073709551616.0) {
         return 0;
     }
-    double eps = fabs(value) * DBL_EPSILON * 4.0;
-    return (uint64_t)floor(value + eps);
+    double integer = floor(value);
+    if (value == integer) {
+        return (uint64_t)integer;
+    }
+    double eps = fmin(fabs(value) * DBL_EPSILON * 4.0, 0.5);
+    if (1.0 - (value - integer) <= eps) {
+        integer += 1.0;
+    }
+    return (uint64_t)integer;
 }
 
 static inline uint64_t price_to_tick(double price, double tick_size_recip) {

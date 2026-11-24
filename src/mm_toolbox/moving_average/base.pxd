@@ -22,6 +22,9 @@ cdef class MovingAverage:
     # def __iter__(self)
     # def __getitem__(self, int idx)
     cdef inline void        ensure_warm(self)
+    cdef const double[:]    validate_values(self, cnp.ndarray values)
+    cdef inline int         validate_value(self, double value) except -1
+    cdef inline void        reset_history(self)
     cdef inline void        push_to_ringbuffer(self)
     cdef inline void        __enforce_moving_average_initialized(self)
     cdef inline void        __enforce_not_fast(self)

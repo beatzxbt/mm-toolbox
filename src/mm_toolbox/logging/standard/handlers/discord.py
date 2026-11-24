@@ -1,7 +1,10 @@
 """Discord webhook handler for the standard logger."""
 
-import aiohttp
-
+from mm_toolbox.logging._remote import (
+    DISCORD_CHUNK_CHARS,
+    chunk_messages,
+    make_rate_limiter,
+)
 from mm_toolbox.logging.standard.handlers.base import BaseLogHandler
 
 
@@ -28,10 +31,11 @@ class DiscordLogHandler(BaseLogHandler):
 
         self.url = webhook
         self.headers = {"Content-Type": "application/json"}
+        self._limiter = make_rate_limiter(5, 2)
 
     def push(self, buffer: list[str]) -> None:
         """Queue bounded message chunks for background delivery."""
-        chunks = self._chunk_messages(buffer, max_chars=2000)
+        chunks = self._chunk_messages(buffer, max_chars=DISCORD_CHUNK_CHARS)
         for index, chunk in enumerate(chunks):
             if not self._enqueue_delivery(chunk, self._deliver_chunk):
                 remaining = len(chunks) - index - 1
@@ -44,50 +48,17 @@ class DiscordLogHandler(BaseLogHandler):
                     )
                 break
 
-    def _chunk_messages(self, messages: list[str], max_chars: int) -> list[str]:
-        """Group messages into chunks that stay under max_chars.
-
-        Args:
-            messages (list[str]): Individual log messages.
-            max_chars (int): Maximum characters per chunk.
-
-        Returns:
-            list[str]: List of chunk strings.
-
-        """
-        chunks: list[str] = []
-        current: list[str] = []
-        current_len = 0
-
-        for msg in messages:
-            # Split an oversized individual message so the service never
-            # receives a payload above its documented limit.
-            pieces = [msg[i : i + max_chars] for i in range(0, len(msg), max_chars)]
-            if not pieces:
-                pieces = [""]
-            for piece in pieces:
-                piece_len = len(piece)
-                if current and current_len + 1 + piece_len > max_chars:
-                    chunks.append("\n".join(current))
-                    current = [piece]
-                    current_len = piece_len
-                else:
-                    current_len += (1 if current else 0) + piece_len
-                    current.append(piece)
-
-        if current:
-            chunks.append("\n".join(current))
-
-        return chunks
+    @staticmethod
+    def _chunk_messages(messages: list[str], max_chars: int) -> list[str]:
+        return chunk_messages(messages, max_chars)
 
     async def _deliver_chunk(self, chunk: object) -> None:
         """Send one chunk with bounded timeout and transient retries."""
-        timeout = aiohttp.ClientTimeout(total=3.0)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            await self._post_with_retries(
-                session,
-                self.url,
-                headers=self.headers,
-                payload={"content": str(chunk)},
-                service="Discord webhook",
-            )
+        session = await self._ensure_session()
+        await self._post_with_retries(
+            session,
+            self.url,
+            headers=self.headers,
+            payload={"content": str(chunk)},
+            service="Discord webhook",
+        )

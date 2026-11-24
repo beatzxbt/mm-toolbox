@@ -1,6 +1,6 @@
 """Layer 2 — Component tests for Exponential Moving Average (EMA).
 
-Validates initialisation (warm-up), cold-start behaviour (zero initial EMA),
+Validates initialisation (warm-up), cold-start behaviour (first input seeds the EMA),
 custom alpha overrides, the standard recurrence formula, numerical accuracy
 against a naive reference, and historical value tracking.
 """
@@ -47,9 +47,9 @@ class TestEmaColdStart:
     """Layer 2 — EMA cold-start behaviour without ``initialize()``."""
 
     def test_can_operate_without_initialize(self):
-        """Given no warm-up, ``next()`` returns 0.0 and ``update()`` sets the first value."""
+        """Given no warm-up, ``next()`` predicts the first value without warming state."""
         ma = ExponentialMovingAverage(window=5)
-        assert ma.next(10.0) == pytest.approx(0.0, abs=1e-12)
+        assert ma.next(10.0) == pytest.approx(10.0, abs=1e-12)
         result = ma.update(10.0)
         assert result == pytest.approx(10.0, abs=1e-12)
         assert ma.next(20.0) != pytest.approx(0.0, abs=1e-12)
@@ -61,11 +61,12 @@ class TestEmaColdStart:
         assert result == pytest.approx(5.0, abs=1e-12)
         assert ma.get_value() == pytest.approx(5.0, abs=1e-12)
 
-    def test_next_before_warm_returns_zero(self):
-        """Given a cold EMA, ``next()`` returns 0.0."""
+    def test_next_before_warm_returns_input(self):
+        """Given a cold EMA, ``next()`` returns its input without changing state."""
         ma = ExponentialMovingAverage(window=5)
         result = ma.next(10.0)
-        assert result == pytest.approx(0.0, abs=1e-12)
+        assert result == pytest.approx(10.0, abs=1e-12)
+        assert ma.get_value() == 0.0
 
     def test_cold_start_sequence(self):
         """Given a cold start, the first update sets the value and subsequent updates use the EMA formula."""
@@ -202,14 +203,10 @@ class TestEmaHistoricalValues:
         assert values[-1] == pytest.approx(ma.get_value(), abs=1e-12)
 
     def test_len_tracks_stored_values(self):
-        """Given a cold start, the first update does not push to the ringbuffer."""
+        """History includes the cold seed and every subsequent update."""
         ma = ExponentialMovingAverage(window=3)
         assert len(ma) == 0
-        ma.update(1.0)
-        assert len(ma) == 0
-        ma.update(2.0)
-        assert len(ma) == 1
-        ma.update(3.0)
-        assert len(ma) == 2
-        ma.update(4.0)
-        assert len(ma) == 3
+        for index, value in enumerate((1.0, 2.0, 3.0, 4.0), start=1):
+            result = ma.update(value)
+            assert len(ma) == index
+            assert ma.get_values()[-1] == result

@@ -60,6 +60,25 @@ static MunitResult test_price_to_tick_rounding(const MunitParameter params[] MUN
     return MUNIT_OK;
 }
 
+/** @test Exact large integers stay exact; only near-integer noise is corrected. */
+static MunitResult test_scaled_conversion_boundaries(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
+    munit_assert_uint64(price_to_tick(1e19, 1.0), ==, UINT64_C(10000000000000000000));
+    munit_assert_uint64(size_to_lot(1.2e19, 1.0), ==, UINT64_C(12000000000000000000));
+    munit_assert_uint64(price_to_tick(nextafter(9.0, 0.0), 1.0), ==, 9);
+    munit_assert_uint64(size_to_lot(8.5, 1.0), ==, 8);
+    return MUNIT_OK;
+}
+
+/** @test The noexcept C conversion sentinel prevents out-of-range integer casts. */
+static MunitResult test_scaled_conversion_invalid_sentinel(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
+    const double invalid[] = {-1.0, NAN, INFINITY, 18446744073709551616.0};
+    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
+        munit_assert_uint64(price_to_tick(invalid[i], 1.0), ==, 0);
+        munit_assert_uint64(size_to_lot(invalid[i], 1.0), ==, 0);
+    }
+    return MUNIT_OK;
+}
+
 /**
  * @test Tick to price conversion: 10001 ticks with 0.01 tick size yields 100.01.
  */
@@ -148,15 +167,79 @@ static MunitResult test_compact_entries_snapshot(const MunitParameter params[] M
     return MUNIT_OK;
 }
 
+/** @test Fractional weighted ticks floor, including highly skewed ordinary prices. */
+static MunitResult test_weighted_mid_floor(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
+    munit_assert_uint64(orderbook_weighted_mid_tick(100, 105, 1, 1), ==, 102);
+    munit_assert_uint64(orderbook_weighted_mid_tick(100, 105, 1, 2), ==, 103);
+    munit_assert_uint64(orderbook_weighted_mid_tick(100, 105, 18, 2), ==, 100);
+    munit_assert_uint64(orderbook_weighted_mid_tick(100, 105, 1, UINT64_C(10000000000000000)), ==, 104);
+    munit_assert_uint64(orderbook_weighted_mid_tick(100, 105, UINT64_C(10000000000000000), 1), ==, 100);
+    return MUNIT_OK;
+}
+
+/** @test Exact large-price skew mirrors cannot round beyond either touch. */
+static MunitResult test_weighted_mid_large_skew(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
+    const uint64_t dominant = UINT64_C(10000000000000000);
+    munit_assert_uint64(orderbook_weighted_mid_tick(
+        UINT64_C(10000000000000000000), UINT64_C(12000000000000000000), 1, dominant
+    ), ==, UINT64_C(11999999999999999800));
+    munit_assert_uint64(orderbook_weighted_mid_tick(
+        UINT64_C(10000000000000000000), UINT64_C(12000000000000000000), dominant, 1
+    ), ==, UINT64_C(10000000000000000199));
+    munit_assert_uint64(orderbook_weighted_mid_tick(
+        UINT64_C(16000000000000000000), UINT64_C(18000000000000000000), 1, dominant
+    ), ==, UINT64_C(17999999999999999800));
+    munit_assert_uint64(orderbook_weighted_mid_tick(
+        UINT64_C(16000000000000000000), UINT64_C(18000000000000000000), dominant, 1
+    ), ==, UINT64_C(16000000000000000199));
+    return MUNIT_OK;
+}
+
+/** @test Near the integer limit, no floating conversion can overflow or escape the BBO. */
+static MunitResult test_weighted_mid_near_u64(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
+    munit_assert_uint64(orderbook_weighted_mid_tick(
+        UINT64_MAX - 1000, UINT64_MAX, 1, UINT64_MAX
+    ), ==, UINT64_MAX - 1);
+    munit_assert_uint64(orderbook_weighted_mid_tick(
+        UINT64_MAX - 1000, UINT64_MAX, UINT64_MAX, 1
+    ), ==, UINT64_MAX - 1000);
+    return MUNIT_OK;
+}
+
+/** @test A 65-bit size denominator and 128-bit product retain exact floor semantics. */
+static MunitResult test_weighted_mid_large_denominator(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
+    munit_assert_uint64(orderbook_weighted_mid_tick(100, 111, UINT64_MAX, UINT64_MAX), ==, 105);
+    munit_assert_uint64(orderbook_weighted_mid_tick(0, UINT64_MAX, UINT64_MAX, UINT64_MAX), ==, UINT64_MAX / 2);
+    munit_assert_uint64(orderbook_weighted_mid_tick(0, UINT64_MAX, UINT64_MAX, 1), ==, 0);
+    munit_assert_uint64(orderbook_weighted_mid_tick(0, UINT64_MAX, 1, UINT64_MAX), ==, UINT64_MAX - 1);
+    return MUNIT_OK;
+}
+
+/** @test Zero quantities return the supported endpoint, or zero for no size. */
+static MunitResult test_weighted_mid_zero_sizes(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
+    munit_assert_uint64(orderbook_weighted_mid_tick(100, 105, 0, 0), ==, 0);
+    munit_assert_uint64(orderbook_weighted_mid_tick(100, 105, 0, 1), ==, 105);
+    munit_assert_uint64(orderbook_weighted_mid_tick(100, 105, 1, 0), ==, 100);
+    munit_assert_uint64(orderbook_weighted_mid_tick(UINT64_MAX, UINT64_MAX, UINT64_MAX, UINT64_MAX), ==, UINT64_MAX);
+    return MUNIT_OK;
+}
+
 /* ============================================================================
  * Test suite definition
  * ============================================================================ */
 
 static MunitTest helper_tests[] = {
+    { "/weighted_mid/floor", test_weighted_mid_floor, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+    { "/weighted_mid/large_skew", test_weighted_mid_large_skew, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+    { "/weighted_mid/near_u64", test_weighted_mid_near_u64, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+    { "/weighted_mid/large_denominator", test_weighted_mid_large_denominator, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+    { "/weighted_mid/zero_sizes", test_weighted_mid_zero_sizes, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/compact_entries/snapshot_last_wins", test_compact_entries_snapshot, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/price_to_tick/basic", test_price_to_tick_basic, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/price_to_tick/zero", test_price_to_tick_zero, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/price_to_tick/rounding", test_price_to_tick_rounding, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+    { "/conversion/scaled_boundaries", test_scaled_conversion_boundaries, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+    { "/conversion/invalid_sentinel", test_scaled_conversion_invalid_sentinel, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/tick_to_price/basic", test_tick_to_price_basic, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/tick_to_price/zero", test_tick_to_price_zero, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/tick_conversion/roundtrip", test_tick_conversion_roundtrip, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },

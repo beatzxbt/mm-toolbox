@@ -10,10 +10,12 @@ cdef class MasterLogger:
         object          _timed_operations_thread
         object          _stop_event
         object          _last_reported_drops
-        object          _shutdown_deadline
+        double          _shutdown_deadline
 
     cpdef list          _decode_worker_message(self, bytes internal_message)
     cpdef void          _timed_operations(self)
+    cdef void           _dispatch_messages(self, list messages)
+    cdef void           _push_logs(self, list logs)
     cdef void           _log_direct(self, CLogLevel level, bytes msg_bytes)
     cdef void           _report_transport_drops(self)
 

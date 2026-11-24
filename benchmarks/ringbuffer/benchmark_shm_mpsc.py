@@ -14,6 +14,7 @@ from __future__ import annotations
 import atexit
 import multiprocessing
 import os
+import queue
 import time
 from dataclasses import dataclass, field
 from multiprocessing import Queue
@@ -164,24 +165,37 @@ def _producer_process(
         path, capacity_bytes, num_rings=num_rings, create=False, unlink_on_close=False
     )
     payload = bytes([producer_id & 0xFF]) + b"x" * (payload_size - 1)
+    try:
+        barrier.wait()
 
-    barrier.wait()
+        start_ns = time.perf_counter_ns()
+        end_time_ns = start_ns + int(duration_sec * 1e9)
+        successful_inserts = 0
+        dropped_messages = 0
+        while time.perf_counter_ns() < end_time_ns:
+            if producer.insert(payload):
+                successful_inserts += 1
+                dropped_messages += producer.last_insert_dropped
 
-    start_ns = time.perf_counter_ns()
-    end_time_ns = start_ns + int(duration_sec * 1e9)
-    count = 0
+        # Tail inserts to unblock a consumer that is waiting at the deadline.
+        for _ in range(10):
+            if producer.insert(payload):
+                successful_inserts += 1
+                dropped_messages += producer.last_insert_dropped
 
-    while time.perf_counter_ns() < end_time_ns:
-        producer.insert(payload)
-        count += 1
-
-    # Tail inserts to unblock consumer if it was waiting
-    for _ in range(10):
-        producer.insert(payload)
-        count += 1
-
-    actual_end_ns = time.perf_counter_ns()
-    result_queue.put(("producer", producer_id, actual_end_ns - start_ns, count))
+        actual_end_ns = time.perf_counter_ns()
+        result_queue.put(
+            (
+                "producer",
+                producer_id,
+                actual_end_ns - start_ns,
+                successful_inserts,
+                producer.failed_inserts,
+                dropped_messages,
+            )
+        )
+    finally:
+        producer.close()
 
 
 def _consumer_process(
@@ -206,8 +220,8 @@ def _consumer_process(
     count = 0
     per_producer_counts: dict[int, int] = {}
 
-    while time.perf_counter_ns() < end_time_ns:
-        try:
+    try:
+        while time.perf_counter_ns() < end_time_ns:
             copied = consumer.consume_all_into(buffer_pool)
             count += copied
             if track_fairness:
@@ -216,11 +230,40 @@ def _consumer_process(
                     if msg:
                         pid = msg[0]
                         per_producer_counts[pid] = per_producer_counts.get(pid, 0) + 1
-        except Exception:
-            break
+        actual_end_ns = time.perf_counter_ns()
+        result_queue.put(
+            ("consumer", actual_end_ns - start_ns, count, per_producer_counts)
+        )
+    finally:
+        consumer.close()
 
-    actual_end_ns = time.perf_counter_ns()
-    result_queue.put(("consumer", actual_end_ns - start_ns, count, per_producer_counts))
+
+def _join_worker_processes(
+    processes: list[multiprocessing.Process], timeout_sec: float, benchmark_name: str
+) -> None:
+    """Wait for all workers and fail before result collection if one stopped badly."""
+    deadline = time.monotonic() + timeout_sec
+    for process in processes:
+        process.join(timeout=max(0.0, deadline - time.monotonic()))
+
+    for process in processes:
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=1.0)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=1.0)
+
+    if any(process.is_alive() for process in processes):
+        raise RuntimeError(f"{benchmark_name} worker did not stop after termination")
+
+    failed_processes = [
+        (process.name, process.exitcode)
+        for process in processes
+        if process.exitcode != 0
+    ]
+    if failed_processes:
+        raise RuntimeError(f"{benchmark_name} worker failed: {failed_processes}")
 
 
 def throughput_benchmark(
@@ -230,11 +273,14 @@ def throughput_benchmark(
     duration_sec: float,
     num_producers: int,
     path: str,
-) -> tuple[int, int, list[tuple[int, int, int]]]:
+) -> tuple[int, int, int, int, list[tuple[int, int, int, int, int]]]:
     """Benchmark multi-producer throughput across processes.
 
     Returns:
-        Tuple of (consumer_ns, consumer_count, list of (producer_id, producer_ns, producer_count)).
+        Tuple of (consumer_ns, consumer_count, overwritten, remaining,
+        producer results).
+        Each producer result contains its ID, elapsed time, successful inserts,
+        failed inserts, and overwritten records.
     """
     # Create the ring in the main process so child processes can attach
     creator = ShmMpscProducer(
@@ -267,33 +313,55 @@ def throughput_benchmark(
         args=(path, payload_size, duration_sec, result_queue, barrier),
     )
 
-    cons_proc.start()
-    for proc in producer_procs:
-        proc.start()
+    processes = [cons_proc, *producer_procs]
+    try:
+        for process in processes:
+            process.start()
 
-    # Give extra time for barrier sync + process startup
-    timeout_sec = duration_sec + 10.0
-    cons_proc.join(timeout=timeout_sec)
-    for proc in producer_procs:
-        proc.join(timeout=timeout_sec)
+        # Give extra time for barrier synchronization and process startup.
+        _join_worker_processes(processes, duration_sec + 10.0, "MPSC throughput")
 
-    # Terminate any hung processes
-    for proc in [cons_proc] + producer_procs:
-        if proc.is_alive():
-            proc.terminate()
-            proc.join(timeout=1.0)
+        consumer_result = None
+        producer_results = []
+        for _ in processes:
+            result = result_queue.get(timeout=5)
+            if result[0] == "consumer":
+                consumer_result = result
+            else:
+                producer_results.append(result[1:])
 
-    consumer_result = None
-    producer_results = []
-    for _ in range(num_producers + 1):
-        result = result_queue.get()
-        if result[0] == "consumer":
-            consumer_result = result
-        else:
-            producer_results.append(result[1:])  # Strip "producer" tag
+        if consumer_result is None or len(producer_results) != num_producers:
+            raise RuntimeError("MPSC throughput workers returned incomplete results")
 
-    _, cons_ns, cons_count, _ = consumer_result
-    return cons_ns, cons_count, producer_results
+        _, cons_ns, cons_count, _ = consumer_result
+        dropped_count = sum(dropped for _, _, _, _, dropped in producer_results)
+        successful_count = sum(count for _, _, count, _, _ in producer_results)
+        consumer = ShmMpscConsumer(path)
+        try:
+            remaining_count = len(consumer)
+        finally:
+            consumer.close()
+        accounted_count = cons_count + dropped_count + remaining_count
+        if successful_count != accounted_count:
+            raise RuntimeError(
+                "MPSC message accounting mismatch: "
+                f"published={successful_count}, consumed={cons_count}, "
+                f"dropped={dropped_count}, remaining={remaining_count}"
+            )
+        return cons_ns, cons_count, dropped_count, remaining_count, producer_results
+    except queue.Empty as exc:
+        raise RuntimeError(
+            "MPSC throughput workers did not return every result"
+        ) from exc
+    finally:
+        for process in processes:
+            if process.pid is not None and process.is_alive():
+                process.terminate()
+                process.join(timeout=1.0)
+            if process.pid is not None and not process.is_alive():
+                process.close()
+        result_queue.close()
+        result_queue.join_thread()
 
 
 def fairness_benchmark(
@@ -302,12 +370,22 @@ def fairness_benchmark(
     payload_size: int,
     duration_sec: float,
     path: str,
-) -> tuple[int, int, dict[int, int], list[tuple[int, int, int]]]:
+) -> tuple[
+    int,
+    int,
+    dict[int, int],
+    int,
+    int,
+    list[tuple[int, int, int, int, int]],
+]:
     """Fairness benchmark with 4 producers and per-producer tracking.
 
     Returns:
         Tuple of (consumer_ns, consumer_count, per_producer_consume_counts,
-                  list of (producer_id, producer_ns, producer_count)).
+                  overwritten, remaining, producer results).
+        Each producer result contains its ID,
+                  elapsed time, successful inserts, failed inserts, and
+                  overwritten records.
     """
     # Create the ring in the main process so child processes can attach
     creator = ShmMpscProducer(
@@ -341,31 +419,59 @@ def fairness_benchmark(
         args=(path, payload_size, duration_sec, result_queue, barrier, True),
     )
 
-    cons_proc.start()
-    for proc in producer_procs:
-        proc.start()
+    processes = [cons_proc, *producer_procs]
+    try:
+        for process in processes:
+            process.start()
 
-    timeout_sec = duration_sec + 10.0
-    cons_proc.join(timeout=timeout_sec)
-    for proc in producer_procs:
-        proc.join(timeout=timeout_sec)
+        _join_worker_processes(processes, duration_sec + 10.0, "MPSC fairness")
 
-    for proc in [cons_proc] + producer_procs:
-        if proc.is_alive():
-            proc.terminate()
-            proc.join(timeout=1.0)
+        consumer_result = None
+        producer_results = []
+        for _ in processes:
+            result = result_queue.get(timeout=5)
+            if result[0] == "consumer":
+                consumer_result = result
+            else:
+                producer_results.append(result[1:])
 
-    consumer_result = None
-    producer_results = []
-    for _ in range(num_producers + 1):
-        result = result_queue.get()
-        if result[0] == "consumer":
-            consumer_result = result
-        else:
-            producer_results.append(result[1:])  # Strip "producer" tag
+        if consumer_result is None or len(producer_results) != num_producers:
+            raise RuntimeError("MPSC fairness workers returned incomplete results")
 
-    _, cons_ns, cons_count, per_producer_counts = consumer_result
-    return cons_ns, cons_count, per_producer_counts, producer_results
+        _, cons_ns, cons_count, per_producer_counts = consumer_result
+        dropped_count = sum(dropped for _, _, _, _, dropped in producer_results)
+        successful_count = sum(count for _, _, count, _, _ in producer_results)
+        consumer = ShmMpscConsumer(path)
+        try:
+            remaining_count = len(consumer)
+        finally:
+            consumer.close()
+        accounted_count = cons_count + dropped_count + remaining_count
+        if successful_count != accounted_count:
+            raise RuntimeError(
+                "MPSC fairness message accounting mismatch: "
+                f"published={successful_count}, consumed={cons_count}, "
+                f"dropped={dropped_count}, remaining={remaining_count}"
+            )
+        return (
+            cons_ns,
+            cons_count,
+            per_producer_counts,
+            dropped_count,
+            remaining_count,
+            producer_results,
+        )
+    except queue.Empty as exc:
+        raise RuntimeError("MPSC fairness workers did not return every result") from exc
+    finally:
+        for process in processes:
+            if process.pid is not None and process.is_alive():
+                process.terminate()
+                process.join(timeout=1.0)
+            if process.pid is not None and not process.is_alive():
+                process.close()
+        result_queue.close()
+        result_queue.join_thread()
 
 
 class ShmMpscRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
@@ -463,7 +569,13 @@ class ShmMpscRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
                     self._cleanup_path(tp_path)
 
                     try:
-                        cons_ns, cons_count, prod_results = throughput_benchmark(
+                        (
+                            cons_ns,
+                            cons_count,
+                            dropped_count,
+                            remaining_count,
+                            prod_results,
+                        ) = throughput_benchmark(
                             config.capacity_bytes,
                             config.num_rings,
                             payload_size,
@@ -471,11 +583,19 @@ class ShmMpscRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
                             num_producers,
                             tp_path,
                         )
-                        total_prod_count = sum(c for _, _, c in prod_results)
+                        total_prod_count = sum(
+                            count for _, _, count, _, _ in prod_results
+                        )
+                        failed_insert_count = sum(
+                            failed for _, _, _, failed, _ in prod_results
+                        )
+                        producer_duration_ns = max(
+                            duration for _, duration, _, _, _ in prod_results
+                        )
                         self._record_throughput_sample(
-                            f"throughput_aggregate(payload={payload_size},producers={num_producers})",
+                            f"throughput_producer_aggregate(payload={payload_size},producers={num_producers})",
                             payload_size,
-                            cons_ns,
+                            producer_duration_ns,
                             total_prod_count,
                         )
                         self._record_throughput_sample(
@@ -484,13 +604,22 @@ class ShmMpscRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
                             cons_ns,
                             cons_count,
                         )
-                        for pid, prod_ns, prod_count in prod_results:
+                        for pid, prod_ns, prod_count, _, _ in prod_results:
                             self._record_throughput_sample(
                                 f"throughput_producer{pid}(payload={payload_size},producers={num_producers})",
                                 payload_size,
                                 prod_ns,
                                 prod_count,
                             )
+                        print(
+                            f"MPSC payload={payload_size} producers={num_producers}: "
+                            f"successful inserts={total_prod_count:,}, "
+                            f"failed inserts={failed_insert_count:,}, "
+                            f"overwritten={dropped_count:,}, "
+                            f"consumer received={cons_count:,}, "
+                            f"remaining={remaining_count:,}",
+                            flush=True,
+                        )
                     finally:
                         self._cleanup_path(tp_path)
 
@@ -501,7 +630,13 @@ class ShmMpscRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
                 _register_shm_cleanup(scal_path)
                 self._cleanup_path(scal_path)
                 try:
-                    cons_ns, cons_count, prod_results = throughput_benchmark(
+                    (
+                        cons_ns,
+                        cons_count,
+                        dropped_count,
+                        remaining_count,
+                        prod_results,
+                    ) = throughput_benchmark(
                         config.capacity_bytes,
                         config.num_rings,
                         payload_size,
@@ -509,11 +644,17 @@ class ShmMpscRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
                         num_producers,
                         scal_path,
                     )
-                    total_prod_count = sum(c for _, _, c in prod_results)
+                    total_prod_count = sum(count for _, _, count, _, _ in prod_results)
+                    failed_insert_count = sum(
+                        failed for _, _, _, failed, _ in prod_results
+                    )
+                    producer_duration_ns = max(
+                        duration for _, duration, _, _, _ in prod_results
+                    )
                     self._record_throughput_sample(
-                        f"scalability_aggregate(producers={num_producers})",
+                        f"scalability_producer_aggregate(producers={num_producers})",
                         payload_size,
-                        cons_ns,
+                        producer_duration_ns,
                         total_prod_count,
                     )
                     self._record_throughput_sample(
@@ -521,6 +662,15 @@ class ShmMpscRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
                         payload_size,
                         cons_ns,
                         cons_count,
+                    )
+                    print(
+                        f"MPSC scalability producers={num_producers}: "
+                        f"successful inserts={total_prod_count:,}, "
+                        f"failed inserts={failed_insert_count:,}, "
+                        f"overwritten={dropped_count:,}, "
+                        f"consumer received={cons_count:,}, "
+                        f"remaining={remaining_count:,}",
+                        flush=True,
                     )
                 finally:
                     self._cleanup_path(scal_path)
@@ -531,20 +681,29 @@ class ShmMpscRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
             self._cleanup_path(fair_path)
             payload_size = 128
             try:
-                cons_ns, cons_count, per_producer_counts, prod_results = (
-                    fairness_benchmark(
-                        config.capacity_bytes,
-                        config.num_rings,
-                        payload_size,
-                        config.throughput_duration_sec,
-                        fair_path,
-                    )
-                )
-                total_prod_count = sum(c for _, _, c in prod_results)
-                self._record_throughput_sample(
-                    "fairness_aggregate",
-                    payload_size,
+                (
                     cons_ns,
+                    cons_count,
+                    per_producer_counts,
+                    dropped_count,
+                    remaining_count,
+                    prod_results,
+                ) = fairness_benchmark(
+                    config.capacity_bytes,
+                    config.num_rings,
+                    payload_size,
+                    config.throughput_duration_sec,
+                    fair_path,
+                )
+                total_prod_count = sum(count for _, _, count, _, _ in prod_results)
+                failed_insert_count = sum(failed for _, _, _, failed, _ in prod_results)
+                producer_duration_ns = max(
+                    duration for _, duration, _, _, _ in prod_results
+                )
+                self._record_throughput_sample(
+                    "fairness_producer_aggregate",
+                    payload_size,
+                    producer_duration_ns,
                     total_prod_count,
                 )
                 self._record_throughput_sample(
@@ -553,7 +712,7 @@ class ShmMpscRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
                     cons_ns,
                     cons_count,
                 )
-                for pid, prod_ns, prod_count in prod_results:
+                for pid, prod_ns, prod_count, _, _ in prod_results:
                     self._record_throughput_sample(
                         f"fairness_producer{pid}",
                         payload_size,
@@ -567,6 +726,14 @@ class ShmMpscRingBufferBenchmark(BenchmarkRunner[MPSCSHMBenchmarkConfig]):
                         cons_ns,
                         consumed,
                     )
+                print(
+                    f"MPSC fairness: successful inserts={total_prod_count:,}, "
+                    f"failed inserts={failed_insert_count:,}, "
+                    f"overwritten={dropped_count:,}, "
+                    f"consumer received={cons_count:,}, "
+                    f"remaining={remaining_count:,}",
+                    flush=True,
+                )
             finally:
                 self._cleanup_path(fair_path)
 

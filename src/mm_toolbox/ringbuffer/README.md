@@ -89,6 +89,8 @@ search position while the consumer round-robins across all sub-rings for fairnes
 ### GenericRingBuffer
 - Stores arbitrary Python objects with minimal overhead.
 - Same API as the bytes buffer, minus deduplication.
+- Supports constant-time integer indexing in FIFO order without consuming or
+  copying contents; negative indices count back from the newest item.
 - Best for in-process queues of Python objects.
 
 ### NumericRingBuffer
@@ -178,3 +180,55 @@ insertion failures. Callers requiring stream continuity must handle losses.
 `consume_into` reuses private scratch after its maximum payload capacity has been
 established; a failed retirement does not modify the destination. `len` and
 snapshot inspection validate their copied record view and can retry under load.
+
+## Benchmark results (2026-11-04)
+
+The p50 values are nanoseconds per call. Numeric used a 1,024-slot `float32`
+buffer; bytes used a 1,024-slot buffer with async and unique filtering disabled.
+Each operation had 100,000 measured samples after 1,000 warmups, except batch
+operations, whose sample counts scale with the batch size.
+
+### Numeric ring buffer
+
+| Operation | p50 (ns/call) |
+| --- | ---: |
+| insert | 291 |
+| consume | 1,334 |
+| contains | 500 |
+| peekleft | 83 |
+| peekright | 83 |
+| unwrapped | 250 |
+| fill+consume_all | 28,333 |
+| insert_batch, n=1 | 334 |
+| insert_batch, n=10 | 625 |
+| insert_batch, n=100 | 3,084 |
+| insert_batch, n=1,000 | 28,000 |
+
+```sh
+.venv/bin/python -u benchmarks/ringbuffer/benchmark_numeric.py --operations 100000 --warmup 1000 --size 1024
+```
+
+### Bytes ring buffer
+
+| Payload (bytes) | Insert | Contains | Consume | Fill + consume all |
+| --- | ---: | ---: | ---: | ---: |
+| 32 | 208 | 292 | 291 | 6,334 |
+| 128 | 167 | 292 | 291 | 7,250 |
+| 512 | 209 | 292 | 375 | 7,791 |
+| 2,048 | 250 | 458 | 375 | 15,417 |
+
+Values are p50 ns/call. `peekleft` and `peekright` were 42 ns/call at p50 for
+all four payload sizes. Batch insert p50s (ns/call), for batch sizes 1, 10, 100
+and 1,000 respectively, were 32 B: 291/375/834/6,000; 128 B:
+291/417/1,167/8,979.5; 512 B: 375/500/1,583/11,917; and 2,048 B:
+375/500/1,750/15,750.
+
+```sh
+.venv/bin/python -u benchmarks/ringbuffer/benchmark_bytes.py --operations 100000 --warmup 1000 --size 1024
+```
+
+Measured on CPython 3.14.4, NumPy 2.5.4, Cython 3.3.0, Apple clang 21.0.0,
+macOS 26.6.2 arm64, Apple M2 (8 CPU cores, 16 GiB), at revision `c5f9dba`.
+These are local measurements and do not establish performance on other machines. See the
+[shared-memory benchmark results](shm/README.md#benchmark-results-2026-11-04)
+for SPSC, MPSC and native-core measurements.

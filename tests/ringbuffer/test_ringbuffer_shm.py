@@ -853,3 +853,11 @@ class TestSpscConsumerPeekEdgeCases:
         finally:
             if os.path.exists(shm_path):
                 os.unlink(shm_path)
+
+
+def test_legacy_spsc_layout_fails_attachment(tmp_path):
+    path = tmp_path / "legacy-spsc.bin"
+    path.write_bytes(struct.pack("8Q", 0x53484252, 64, 63, 0, 0, 0, 0, 0) + b"\0" * 128)
+    path.chmod(0o600)
+    with pytest.raises(RuntimeError, match="header mismatch"):
+        ShmSpscConsumer(str(path))

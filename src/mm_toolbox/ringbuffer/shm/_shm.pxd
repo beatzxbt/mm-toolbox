@@ -1,5 +1,3 @@
-# cython: language_level=3
-
 from libc.stdint cimport uint64_t as u64
 from libc.stddef cimport size_t
 

@@ -1,9 +1,12 @@
 """Python-accessible types for the advanced logging system."""
 
+from collections.abc import Iterator
 from enum import IntEnum
 from typing import Self
 
 from msgspec import Struct
+
+from mm_toolbox.time import time_iso8601
 
 
 class PyLogLevel(IntEnum):
@@ -28,18 +31,18 @@ class PyLog(Struct):
     """Python-accessible log message structure."""
 
     timestamp_ns: int
-    name: bytes
+    name: bytes | memoryview
     level: PyLogLevel
-    message: bytes
+    message: bytes | memoryview
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int | bytes | memoryview]:
         """Yield fields in fixed order: timestamp, name, level, message."""
         yield self.timestamp_ns
         yield self.name
         yield self.level
         yield self.message
 
-    def __getitem__(self, index: int):
+    def __getitem__(self, index: int) -> int | bytes | memoryview:
         """Provide tuple-like indexing for log fields.
 
         Args:
@@ -61,3 +64,13 @@ class PyLog(Struct):
         if index == 3:
             return self.message
         raise IndexError("PyLog index out of range")
+
+
+def format_log(log: PyLog, str_format: str) -> str:
+    """Format owned bytes or zero-copy decoded fields with the event timestamp."""
+    return str_format % {
+        "asctime": time_iso8601(log.timestamp_ns / 1e9),
+        "levelname": log.level.name,
+        "name": bytes(log.name).decode(),
+        "message": bytes(log.message).decode(),
+    }

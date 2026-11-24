@@ -76,7 +76,7 @@ cdef class RateLimiter:
         self._max_burst_attempts = config.burst_config.max_burst_attempts
 
         self._used_tokens = 0
-        self._window_start_ms = time_monotonic_ms()
+        self._window_start_ms = self._now_ms()
         self._burst_used = 0
 
         self._sub_allocations = NULL
@@ -103,6 +103,10 @@ cdef class RateLimiter:
         if self._sub_used != NULL:
             free(self._sub_used)
             self._sub_used = NULL
+
+    cdef i64 _now_ms(self) noexcept:
+        """Read the internal clock; native tests override it with controlled time."""
+        return time_monotonic_ms()
 
     cdef inline void _maybe_refill(self, i64 now):
         """Trigger a refill if the overall window has expired.
@@ -140,7 +144,7 @@ cdef class RateLimiter:
         """Force a refill cycle immediately."""
         cdef i64 now
         cdef i64 i
-        now = time_monotonic_ms()
+        now = self._now_ms()
         self._window_start_ms = now
         self._used_tokens = 0
         self._burst_used = 0
@@ -180,11 +184,10 @@ cdef class RateLimiter:
         cdef bint sub_ok
         cdef i64 sub_idx
         cdef i64 sub_new_used
-        cdef double new_usage
         cdef double post_usage
         cdef object state
 
-        now = time_monotonic_ms()
+        now = self._now_ms()
         self._maybe_refill(now)
 
         remaining = self._capacity - self._used_tokens
@@ -259,15 +262,10 @@ cdef class RateLimiter:
             if sub_ok:
                 sub_new_used = self._sub_used[sub_idx] + num_tokens
 
-        if overall_ok and sub_ok:
-            new_usage = <double>new_used / <double>self._capacity
-            if self._state_enabled and new_usage > self._block_threshold:
-                return ConsumeResult(
-                    allowed=False,
-                    state=RateLimitState.BLOCKED,
-                    remaining=remaining,
-                    usage=usage,
-                )
+        if overall_ok and sub_ok and (
+            not self._state_enabled
+            or <double>new_used / <double>self._capacity <= self._block_threshold
+        ):
             self._used_tokens = new_used
             if self._sub_enabled:
                 self._sub_used[sub_idx] = sub_new_used
@@ -294,15 +292,15 @@ cdef class RateLimiter:
                 )
             if self._burst_used < self._max_burst_attempts:
                 self._burst_used += 1
-                self._used_tokens = (
-                    new_used if overall_ok else self._capacity
-                )
+                if overall_ok:
+                    self._used_tokens = new_used
+                elif self._used_tokens < self._capacity:
+                    self._used_tokens = self._capacity
                 if self._sub_enabled:
-                    self._sub_used[sub_idx] = (
-                        sub_new_used
-                        if sub_ok
-                        else self._sub_allocations[sub_idx]
-                    )
+                    if sub_ok:
+                        self._sub_used[sub_idx] = sub_new_used
+                    elif self._sub_used[sub_idx] < self._sub_allocations[sub_idx]:
+                        self._sub_used[sub_idx] = self._sub_allocations[sub_idx]
                 return ConsumeResult(
                     allowed=True,
                     state=RateLimitState.NORMAL,
@@ -333,14 +331,14 @@ cdef class RateLimiter:
     cpdef i64 tokens_remaining(self):
         """Return remaining tokens in the overall bucket."""
         cdef i64 now
-        now = time_monotonic_ms()
+        now = self._now_ms()
         self._maybe_refill(now)
         return self._capacity - self._used_tokens
 
     cpdef double usage(self):
         """Return the fraction of tokens used in the overall bucket."""
         cdef i64 now
-        now = time_monotonic_ms()
+        now = self._now_ms()
         self._maybe_refill(now)
         if self._capacity <= 0:
             return 1.0

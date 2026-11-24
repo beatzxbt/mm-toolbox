@@ -1,8 +1,3 @@
-# cython: language_level=3
-# cython: boundscheck=False
-# cython: wraparound=False
-# cython: cdivision=True
-
 """Raw public orderbook level wrappers and internal entry factories."""
 
 from __future__ import annotations

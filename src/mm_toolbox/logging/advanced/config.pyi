@@ -20,7 +20,7 @@ class LoggerConfig:
         base_level: PyLogLevel | None = None,
         do_stdout: bool = False,
         str_format: str = "%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-        path: str = "/tmp/hft_logger.shm",
+        path: str | None = None,
         flush_interval_s: float = 1.0,
         emit_internal: bool = False,
         shm_capacity_bytes: int = 67108864,
@@ -37,7 +37,7 @@ class LoggerConfig:
                 %(asctime)s, %(name)s, %(levelname)s, and %(message)s.
                 Defaults to '%(asctime)s [%(levelname)s] %(name)s - %(message)s'.
                 Must contain at least %(message)s to be valid.
-            path: The connection path for the transport protocol. Defaults to '/tmp/hft_logger.shm'.
+            path: The connection path for the transport protocol. Defaults to a randomized per-process path.
             flush_interval_s: Timeout in seconds for log messages. Defaults to 1.0.
             emit_internal: If True, emit internal startup/shutdown logs. Defaults to False.
             shm_capacity_bytes: Shared memory ring buffer capacity in bytes. Defaults to 64MB.

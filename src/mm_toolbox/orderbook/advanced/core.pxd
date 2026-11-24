@@ -55,6 +55,24 @@ cdef class CoreAdvancedOrderbook:
         u64 bid_count,
         int bid_order,
     ) noexcept
+    cdef OrderbookEntry* _completed_side_top(
+        self,
+        OrderbookLadder ladder,
+        OrderbookLadderData* data,
+        OrderbookEntry* entries,
+        u64 count,
+        int source_order,
+        int target_order,
+    ) noexcept
+    cdef void _prune_completed_crossing(
+        self,
+        OrderbookEntry* asks,
+        u64 ask_count,
+        int ask_order,
+        OrderbookEntry* bids,
+        u64 bid_count,
+        int bid_order,
+    ) noexcept
     cdef bint _can_apply_replacement_side(
         self,
         OrderbookLadder ladder,

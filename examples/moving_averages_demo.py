@@ -11,9 +11,9 @@ This example shows:
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import signal
-import sys
 
 import msgspec
 import numpy as np
@@ -26,6 +26,21 @@ from mm_toolbox.moving_average import (
 )
 from mm_toolbox.time.time import time_ms
 from mm_toolbox.websocket import WsConnectionConfig, WsPool, WsPoolConfig
+
+if __package__:
+    from ._stream_guard import (
+        FeedSubscription,
+        assert_no_receive_loss,
+        feed_messages,
+        run_feeds,
+    )
+else:
+    from _stream_guard import (
+        FeedSubscription,
+        assert_no_receive_loss,
+        feed_messages,
+        run_feeds,
+    )
 
 
 class MovingAverageSuite:
@@ -143,21 +158,22 @@ async def _consume_bbo(
         pool: The WsPool connected to the Binance bookTicker stream.
         shutdown_event: Event to signal shutdown.
     """
-    async for msg in pool:
+    async for msg in feed_messages(pool, "BBO", connections=2):
         if shutdown_event.is_set():
             break
-        try:
-            data = msgspec.json.decode(msg, type=dict)
-            bid = float(data["b"])
-            ask = float(data["a"])
-            suite.process_bbo(bid, ask)
-        except (KeyError, ValueError) as e:
-            print(f"Error processing message: {e}", file=sys.stderr)
+        _process_bbo_message(msg, suite)
+
+
+def _process_bbo_message(message: bytes, suite: MovingAverageSuite) -> None:
+    """Decode and apply one best-bid-offer update."""
+    data = msgspec.json.decode(message, type=dict)
+    suite.process_bbo(float(data["b"]), float(data["a"]))
 
 
 async def _print_loop(
     suite: MovingAverageSuite,
     shutdown_event: asyncio.Event,
+    ready_event: asyncio.Event,
 ) -> None:
     """Print formatted MA values every second.
 
@@ -165,6 +181,7 @@ async def _print_loop(
         suite: The MovingAverageSuite to read values from.
         shutdown_event: Event to signal shutdown.
     """
+    await ready_event.wait()
     preview_counter = 0
     while not shutdown_event.is_set():
         try:
@@ -208,7 +225,7 @@ async def _print_loop(
             print(preview_row, flush=True)
 
 
-async def main() -> None:
+async def main(duration_s: float | None = None) -> None:
     """Set up WsPool and run the event loop."""
     symbol = "BTCUSDT"
     suite = MovingAverageSuite(window=20, half_life_s=1.0)
@@ -217,28 +234,82 @@ async def main() -> None:
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, shutdown_event.set)
+    duration_handle = (
+        loop.call_later(duration_s, shutdown_event.set)
+        if duration_s is not None
+        else None
+    )
 
     config = WsConnectionConfig.default(
-        wss_url=f"wss://fstream.binance.com/ws/{symbol.lower()}@bookTicker"
+        wss_url="wss://fstream.binance.com/public/ws",
+        auto_reconnect=False,
+    )
+    pool_config = WsPoolConfig(
+        num_connections=2,
+        evict_interval_s=60,
+        hash_capacity=16_384,
     )
     pool = await WsPool.new(
         config=config,
-        pool_config=WsPoolConfig.default(),
+        pool_config=pool_config,
     )
+
+    tasks: tuple[asyncio.Task, ...] = ()
+    ready_event = asyncio.Event()
+
+    def process_bbo(message: bytes) -> None:
+        _process_bbo_message(message, suite)
+
+    def publish_ready() -> None:
+        print(f"Connected to Binance futures {symbol} @bookTicker")
+        print("Press Ctrl+C to stop...")
 
     try:
         async with pool:
-            print(f"Connected to Binance futures {symbol} @bookTicker")
-            print("Press Ctrl+C to stop...")
-
-            bbo_task = asyncio.create_task(_consume_bbo(suite, pool, shutdown_event))
-            print_task = asyncio.create_task(_print_loop(suite, shutdown_event))
-            await asyncio.gather(bbo_task, print_task)
+            bbo_task = asyncio.create_task(
+                run_feeds(
+                    [(pool, "BBO", process_bbo)],
+                    connection_counts=[2],
+                    subscriptions=[
+                        FeedSubscription((f"{symbol.lower()}@bookTicker",), 1)
+                    ],
+                    on_ready=publish_ready,
+                    ready_event=ready_event,
+                )
+            )
+            print_task = asyncio.create_task(
+                _print_loop(suite, shutdown_event, ready_event)
+            )
+            shutdown_task = asyncio.create_task(shutdown_event.wait())
+            tasks = (bbo_task, print_task, shutdown_task)
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                if task is not shutdown_task:
+                    task.result()
     finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        if duration_handle is not None:
+            duration_handle.cancel()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.remove_signal_handler(sig)
         pool.close()
+        assert_no_receive_loss(pool, "BBO")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(
+        description="Compute moving averages from public Binance futures BBO data"
+    )
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="Stop after this many seconds (default: run until interrupted)",
+    )
+    args = parser.parse_args()
+    if args.duration is not None and args.duration <= 0:
+        parser.error("--duration must be > 0")
+    asyncio.run(main(args.duration))

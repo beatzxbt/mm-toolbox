@@ -1,8 +1,3 @@
-# cython: language_level=3
-# cython: boundscheck=False
-# cython: wraparound=False
-# cython: cdivision=True
-
 """MPSC queues composed of exclusively leased lock-free SPSC shards."""
 
 import ctypes

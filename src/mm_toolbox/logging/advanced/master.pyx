@@ -8,7 +8,6 @@ thread that drains a shared-memory MPSC ring.
 import contextlib
 import sys
 import threading
-import time
 
 from libc.string cimport memcpy
 from libc.stdint cimport (
@@ -24,8 +23,9 @@ from mm_toolbox.logging.advanced.config cimport LoggerConfig
 from mm_toolbox.logging.advanced.config import _producer_ring_count
 from mm_toolbox.logging.advanced.log cimport CLogLevel
 from mm_toolbox.logging.advanced.protocol cimport BinaryReader
-from mm_toolbox.logging.advanced.pylog import PyLog, PyLogLevel
+from mm_toolbox.logging.advanced.pylog import PyLog, PyLogLevel, format_log
 from mm_toolbox.time.time cimport time_ns
+from mm_toolbox.time.time import time_monotonic_ns
 
 cdef class MasterLogger:
     """Central log aggregator that receives binary messages from workers.
@@ -44,15 +44,13 @@ cdef class MasterLogger:
     def __cinit__(
         self, 
         LoggerConfig config=None, 
-        list log_handlers=None,  
+        log_handlers=None,
     ):
         self._config = config
         if self._config is None:
             self._config = LoggerConfig()
 
-        self._log_handlers = log_handlers
-        if self._log_handlers is None:
-            self._log_handlers: list[BaseLogHandler] = []
+        self._log_handlers = list(log_handlers) if log_handlers is not None else []
 
         # Verify that all handlers are valid
         for handler in self._log_handlers:
@@ -73,7 +71,7 @@ cdef class MasterLogger:
         )
         self._transport = None
         self._last_reported_drops = 0
-        self._shutdown_deadline = time.monotonic() + 2.0
+        self._shutdown_deadline = (time_monotonic_ns() / 1e9) + 2.0
 
         self._stop_event = threading.Event()
 
@@ -123,6 +121,9 @@ cdef class MasterLogger:
 
             u32 i
 
+        if msg_type != 0:
+            raise ValueError(f"Unknown worker message type: {msg_type}")
+
         # Integer overflow check
         if data_start > reader._len or data_len > reader._len - data_start:
             raise ValueError("Message data_len exceeds available buffer")
@@ -138,9 +139,9 @@ cdef class MasterLogger:
         cursor += 4
 
         worker_name_start = cursor
-        worker_name_end = worker_name_start + worker_name_len
-        if worker_name_end > data_end:
+        if worker_name_len > data_end - worker_name_start:
             raise ValueError("Buffer underrun reading worker name")
+        worker_name_end = worker_name_start + worker_name_len
         worker_name = bytes(serialized_view[worker_name_start:worker_name_end])
         cursor = worker_name_end
 
@@ -171,9 +172,9 @@ cdef class MasterLogger:
             cursor += 4
 
             message_start = cursor
-            message_end = message_start + message_len
-            if message_end > data_end:
+            if message_len > data_end - message_start:
                 raise ValueError("Buffer underrun reading log message")
+            message_end = message_start + message_len
             message_view = serialized_view[message_start:message_end]
             cursor = message_end
 
@@ -189,7 +190,7 @@ cdef class MasterLogger:
             elif level_int == 4:  # ERROR
                 pylevel = PyLogLevel.ERROR
             else:
-                pylevel = PyLogLevel.INFO  # Default fallback, should never happen though
+                raise ValueError(f"Unknown log level: {level_int}")
             
             decoded_logs.append(PyLog(
                 timestamp_ns=timestamp_ns,
@@ -198,51 +199,46 @@ cdef class MasterLogger:
                 message=message_view
             ))
 
+        if cursor != data_end or data_end != reader._len:
+            raise ValueError("Unexpected trailing bytes in worker message")
         return decoded_logs
 
-    cpdef void _timed_operations(self):
-        """Background thread target that drains and dispatches log messages.
+    cdef void _dispatch_messages(self, list messages):
+        """Isolate malformed frames and failing handlers within a drained batch."""
+        for message in messages:
+            try:
+                decoded_logs = self._decode_worker_message(message)
+            except ValueError as exc:
+                sys.stderr.write(f"[MasterLogger] rejected worker message: {exc}\n")
+                continue
+            self._push_logs(decoded_logs)
 
-        Runs until ``_stop_event`` is set, then performs a final best-effort
-        drain before exiting.
-        """
+    cdef void _push_logs(self, list logs):
+        if self._config.do_stdout:
+            try:
+                for log in logs:
+                    sys.stdout.write(format_log(log, self._config.str_format) + "\n")
+                sys.stdout.flush()
+            except Exception as exc:
+                sys.stderr.write(f"[MasterLogger] stdout error: {exc}\n")
+        for handler in self._log_handlers:
+            try:
+                handler.push(logs)
+            except Exception as exc:
+                handler._handle_exception(exc, "push")
+
+    cpdef void _timed_operations(self):
+        """Drain worker frames until shutdown, then perform one final drain."""
         try:
-            # Create IPC transport in this thread and own its lifetime here.
             self._transport = ShmMpscConsumer(path=self._config.path)
-            self._last_reported_drops = self._transport.dropped_count
             while not self._stop_event.is_set():
                 try:
-                    # Non-blocking drain
-                    messages = self._transport.consume_all()
-                    for message in messages:
-                        decoded_logs = self._decode_worker_message(message)
-                        for handler in self._log_handlers:
-                            try:
-                                handler.push(decoded_logs)
-                            except Exception as e:
-                                # One bad handler must not kill the master
-                                if self._config.emit_internal:
-                                    self.error(msg_bytes=f"Handler error: {e}".encode('utf-8'))
-                except Exception as e:
-                    if not self._stop_event.is_set():
-                        if self._config.emit_internal:
-                            self.error(msg_bytes=f"Error consuming messages: {e}".encode('utf-8'))
-
+                    self._dispatch_messages(self._transport.consume_all())
+                except Exception as exc:
+                    sys.stderr.write(f"[MasterLogger] error consuming messages: {exc}\n")
                 self._report_transport_drops()
-
-                # Pace the loop cooperatively so shutdown can wake it promptly.
                 self._stop_event.wait(0.001)
-
-            # Final best-effort drain after stop signal
-            messages = self._transport.consume_all()
-            for message in messages:
-                decoded_logs = self._decode_worker_message(message)
-                for handler in self._log_handlers:
-                    try:
-                        handler.push(decoded_logs)
-                    except Exception as e:
-                        if self._config.emit_internal:
-                            self.error(msg_bytes=f"Handler error during final drain: {e}".encode('utf-8'))
+            self._dispatch_messages(self._transport.consume_all())
             self._report_transport_drops()
         finally:
             if self._transport is not None:
@@ -258,7 +254,7 @@ cdef class MasterLogger:
                 self._shm_producer = None
 
             for handler in self._log_handlers:
-                remaining = max(0.0, self._shutdown_deadline - time.monotonic())
+                remaining = max(0.0, self._shutdown_deadline - (time_monotonic_ns() / 1e9))
                 try:
                     handler.close(timeout_s=remaining)
                 except Exception as e:
@@ -299,7 +295,7 @@ cdef class MasterLogger:
         elif level == CLogLevel.ERROR:
             py_level = PyLogLevel.ERROR
         else:
-            py_level = PyLogLevel.INFO
+            raise ValueError(f"Unknown internal log level: {level}")
 
         cdef list log = [PyLog(
             timestamp_ns=time_ns(),
@@ -307,11 +303,7 @@ cdef class MasterLogger:
             level=py_level,
             message=msg_bytes,
         )]
-        for handler in self._log_handlers:
-            try:
-                handler.push(log)
-            except Exception:
-                pass
+        self._push_logs(log)
 
     cpdef void trace(self, bytes msg_bytes=b""):
         """Send a trace-level log message directly to handlers.
@@ -387,13 +379,13 @@ cdef class MasterLogger:
             return
         
         # Prevents any more logs from being added to the batch
-        self._shutdown_deadline = time.monotonic() + max(0.0, timeout_s)
+        self._shutdown_deadline = (time_monotonic_ns() / 1e9) + max(0.0, timeout_s)
         self._stop_event.set()
 
         # One monotonic deadline covers drain-thread exit and its cooperative
         # cleanup of the consumer, creator mapping, and handlers.
         self._timed_operations_thread.join(
-            timeout=max(0.0, self._shutdown_deadline - time.monotonic())
+            timeout=max(0.0, self._shutdown_deadline - (time_monotonic_ns() / 1e9))
         )
         if self._timed_operations_thread.is_alive():
             sys.stderr.write(

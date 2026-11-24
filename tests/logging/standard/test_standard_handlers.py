@@ -9,11 +9,13 @@ error handling).
 """
 
 import asyncio
+import json
+from typing import cast
 import os
 import queue
 import threading
 import tempfile
-import time
+from mm_toolbox.time import time_monotonic_ns
 from unittest.mock import patch
 
 import pytest
@@ -49,6 +51,10 @@ class _FakeRequestContext:
 class _FakeClientSession:
     def __init__(self, responses):
         self.responses = iter(responses)
+        self.closed = False
+        self.close_calls = 0
+        self.request_loops: list[asyncio.AbstractEventLoop] = []
+        self.close_loop: asyncio.AbstractEventLoop | None = None
         self.calls: list[tuple[str, dict[str, object]]] = []
 
     async def __aenter__(self):
@@ -58,11 +64,17 @@ class _FakeClientSession:
         return False
 
     def post(self, url: str, **kwargs):
+        self.request_loops.append(asyncio.get_running_loop())
         self.calls.append((url, kwargs))
         response = next(self.responses)
         if isinstance(response, BaseException):
             raise response
         return _FakeRequestContext(response)
+
+    async def close(self) -> None:
+        self.close_calls += 1
+        self.close_loop = asyncio.get_running_loop()
+        self.closed = True
 
 
 class DummyPayloadHandler(BaseLogHandler):
@@ -77,10 +89,10 @@ class DummyPayloadHandler(BaseLogHandler):
         """Store the buffer so tests can inspect it later."""
         self.received.append(tuple(buffer))
 
-    def close(self) -> None:
+    def close(self, timeout_s: float = 2.0) -> None:
         """Mark as closed and delegate to the base implementation."""
         self.closed = True
-        super().close()
+        super().close(timeout_s=timeout_s)
 
 
 class TestBaseLogHandler:
@@ -307,7 +319,7 @@ class TestDiscordPush:
     def test_push_success(self, capsys):
         session = _FakeClientSession([_FakeResponse()])
         with patch(
-            "mm_toolbox.logging.standard.handlers.discord.aiohttp.ClientSession",
+            "mm_toolbox.logging.standard.handlers.base.aiohttp.ClientSession",
             return_value=session,
         ):
             handler = DiscordLogHandler("https://discord.com/api/webhooks/123/abc")
@@ -316,7 +328,9 @@ class TestDiscordPush:
             handler.close()
 
         assert len(session.calls) == 1
-        assert session.calls[0][1]["json"] == {"content": "test message"}
+        assert json.loads(cast(bytes, session.calls[0][1]["data"])) == {
+            "content": "test message"
+        }
         assert "Discord webhook returned" not in capsys.readouterr().err
 
     def test_push_retries_429_then_delivers(self):
@@ -327,7 +341,7 @@ class TestDiscordPush:
             ]
         )
         with patch(
-            "mm_toolbox.logging.standard.handlers.discord.aiohttp.ClientSession",
+            "mm_toolbox.logging.standard.handlers.base.aiohttp.ClientSession",
             return_value=session,
         ):
             handler = DiscordLogHandler("https://discord.com/api/webhooks/123/abc")
@@ -339,7 +353,7 @@ class TestDiscordPush:
         session = _FakeClientSession([_FakeResponse(500) for _ in range(3)])
         errors = []
         with patch(
-            "mm_toolbox.logging.standard.handlers.discord.aiohttp.ClientSession",
+            "mm_toolbox.logging.standard.handlers.base.aiohttp.ClientSession",
             return_value=session,
         ):
             handler = DiscordLogHandler("https://discord.com/api/webhooks/123/abc")
@@ -356,20 +370,20 @@ class TestDiscordPush:
     async def test_push_from_running_event_loop_is_nonblocking(self):
         session = _FakeClientSession([_FakeResponse()])
         with patch(
-            "mm_toolbox.logging.standard.handlers.discord.aiohttp.ClientSession",
+            "mm_toolbox.logging.standard.handlers.base.aiohttp.ClientSession",
             return_value=session,
         ):
             handler = DiscordLogHandler("https://discord.com/api/webhooks/123/abc")
             handler.open()
-            started = time.monotonic()
+            started = time_monotonic_ns() / 1e9
             handler.push(["async-loop message"])
-            elapsed = time.monotonic() - started
+            elapsed = (time_monotonic_ns() / 1e9) - started
             assert elapsed < 0.1
             handler.close()
         assert len(session.calls) == 1
 
     @pytest.mark.asyncio
-    async def test_delivery_queue_is_bounded(self):
+    async def test_delivery_queue_is_bounded(self, monkeypatch):
         handler = DiscordLogHandler("https://discord.com/api/webhooks/123/abc")
         handler._delivery_queue = queue.Queue(maxsize=1)
         started = threading.Event()
@@ -380,8 +394,12 @@ class TestDiscordPush:
             started.set()
             await asyncio.to_thread(release.wait)
 
-        handler._deliver_chunk = blocked_delivery
-        handler._chunk_messages = lambda messages, max_chars: ["one", "two", "three"]
+        monkeypatch.setattr(handler, "_deliver_chunk", blocked_delivery)
+        monkeypatch.setattr(
+            handler,
+            "_chunk_messages",
+            lambda messages, max_chars: ["one", "two", "three"],
+        )
         handler.set_error_handler(lambda exc, ctx: errors.append((exc, ctx)))
         handler.push(["batch"])
         assert started.wait(1.0)
@@ -464,7 +482,7 @@ class TestTelegramPush:
     def test_push_success_and_multiple_logs(self):
         session = _FakeClientSession([_FakeResponse(), _FakeResponse()])
         with patch(
-            "mm_toolbox.logging.standard.handlers.telegram.aiohttp.ClientSession",
+            "mm_toolbox.logging.standard.handlers.base.aiohttp.ClientSession",
             return_value=session,
         ):
             handler = TelegramLogHandler("my-token", "my-chat-id")
@@ -472,21 +490,205 @@ class TestTelegramPush:
             handler.push(["msg1", "msg2"])
             handler.close()
 
-        assert [call[1]["json"]["text"] for call in session.calls] == ["msg1\nmsg2"]
-        assert all(call[1]["json"]["chat_id"] == "my-chat-id" for call in session.calls)
+        assert [
+            json.loads(cast(bytes, call[1]["data"]))["text"] for call in session.calls
+        ] == ["msg1\nmsg2"]
+        assert all(
+            json.loads(cast(bytes, call[1]["data"]))["chat_id"] == "my-chat-id"
+            for call in session.calls
+        )
 
     def test_push_http_error_retries_are_bounded_and_observable(self):
         session = _FakeClientSession([_FakeResponse(500) for _ in range(3)])
         errors = []
         with patch(
-            "mm_toolbox.logging.standard.handlers.telegram.aiohttp.ClientSession",
+            "mm_toolbox.logging.standard.handlers.base.aiohttp.ClientSession",
             return_value=session,
         ):
             handler = TelegramLogHandler("my-token", "my-chat-id")
             handler.set_error_handler(lambda exc, ctx: errors.append((exc, ctx)))
             handler.push(["test message"])
-            handler.close()
+            handler.close(timeout_s=4.0)
 
         assert len(session.calls) == 3
         assert "returned 500" in str(errors[0][0])
         assert errors[0][1] == "remote delivery"
+
+
+class _Standard(BaseLogHandler):
+    def push(self, buffer):
+        pass
+
+
+def test_standard_immediate_close_drains_every_queued_delivery():
+    handler = _Standard()
+    delivered = []
+
+    async def deliver(item):
+        delivered.append(item)
+
+    for item in range(20):
+        assert handler._enqueue_delivery(item, deliver)
+    handler.close()
+    assert delivered == list(range(20))
+    assert handler._delivery_thread is not None
+    assert not handler._delivery_thread.is_alive()
+
+
+def test_standard_close_has_one_deadline_and_reports_queued_loss():
+    handler = _Standard()
+    errors = []
+    entered = threading.Event()
+    cancelled = threading.Event()
+    discarded = threading.Event()
+    release_discard_callback = threading.Event()
+
+    def on_error(error, context):
+        errors.append(error)
+        if "discarded" in str(error):
+            discarded.set()
+            release_discard_callback.wait(timeout=2.0)
+
+    handler.set_error_handler(on_error)
+
+    async def never(item):
+        entered.set()
+        try:
+            await asyncio.Future()
+        finally:
+            cancelled.set()
+
+    for item in range(20):
+        handler._enqueue_delivery(item, never)
+    assert entered.wait(timeout=1)
+    thread = handler._delivery_thread
+    assert thread is not None
+    original_join = thread.join
+    clock_reads = 0
+
+    def monotonic_at_deadline():
+        nonlocal clock_reads
+        clock_reads += 1
+        return 10.0 if clock_reads == 1 else 10.1
+
+    with (
+        patch(
+            "mm_toolbox.logging.standard.handlers.base.time_monotonic_ns",
+            new=lambda: int(monotonic_at_deadline() * 1e9),
+        ),
+        patch.object(thread, "join", wraps=original_join) as thread_join,
+    ):
+        try:
+            handler.close(timeout_s=0.1)
+            assert thread_join.call_args.kwargs["timeout"] == pytest.approx(0.0)
+            assert cancelled.wait(timeout=2.0)
+            assert discarded.wait(timeout=2.0)
+        finally:
+            release_discard_callback.set()
+            original_join(timeout=2.0)
+
+    assert handler._delivery_thread is not None
+    assert not handler._delivery_thread.is_alive()
+    assert errors
+    assert any("discarded" in str(error) for error in errors)
+    assert handler._delivery_queue.empty()
+    assert cancelled.is_set()
+
+
+@pytest.mark.parametrize("service", ["discord", "telegram"])
+def test_remote_session_reused_until_close_and_recreated_on_reopen(service):
+    sessions: list[_FakeClientSession] = []
+    owner_loops: list[asyncio.AbstractEventLoop] = []
+
+    def create_session(**kwargs):
+        owner_loops.append(asyncio.get_running_loop())
+        session = _FakeClientSession([_FakeResponse(), _FakeResponse()])
+        sessions.append(session)
+        return session
+
+    handler = (
+        DiscordLogHandler("https://discord.com/api/webhooks/test")
+        if service == "discord"
+        else TelegramLogHandler("token", "chat")
+    )
+    with patch(
+        "mm_toolbox.logging.standard.handlers.base.aiohttp.ClientSession",
+        side_effect=create_session,
+    ) as factory:
+        for cycle in range(2):
+            handler.open()
+            handler.push([f"{cycle}:first"])
+            handler.push([f"{cycle}:second"])
+            handler.close(timeout_s=3.0)
+            handler.close()
+            assert factory.call_count == cycle + 1
+            session = sessions[cycle]
+            assert len(session.calls) == 2
+            assert session.request_loops == [owner_loops[cycle]] * 2
+            assert session.close_loop is owner_loops[cycle]
+            assert session.closed
+            assert session.close_calls == 1
+            assert handler._http_session is None
+            assert owner_loops[cycle].is_closed()
+    assert owner_loops[0] is not owner_loops[1]
+
+
+def test_remote_session_closed_after_delivery_deadline():
+    entered = threading.Event()
+
+    class StalledResponse(_FakeResponse):
+        async def read(self) -> bytes:
+            entered.set()
+            await asyncio.Future()
+            return b""
+
+    session = _FakeClientSession([StalledResponse(status=500)])
+    handler = DiscordLogHandler("https://discord.com/api/webhooks/test")
+    errors: list[BaseException] = []
+    handler.set_error_handler(lambda exc, context: errors.append(exc))
+    with patch(
+        "mm_toolbox.logging.standard.handlers.base.aiohttp.ClientSession",
+        return_value=session,
+    ):
+        handler.push(["blocked"])
+        assert entered.wait(1.0)
+        thread = handler._delivery_thread
+        assert thread is not None
+        try:
+            handler.close(timeout_s=0.05)
+        finally:
+            thread.join(timeout=1.0)
+    assert not thread.is_alive()
+    assert session.closed
+    assert session.close_calls == 1
+    assert session.close_loop is session.request_loops[0]
+    assert session.close_loop.is_closed()
+    assert handler._http_session is None
+    assert any(isinstance(exc, TimeoutError) for exc in errors)
+
+
+def test_remote_session_close_error_does_not_leave_loop_open():
+    class BrokenCloseSession(_FakeClientSession):
+        async def close(self) -> None:
+            await super().close()
+            raise OSError("injected session close failure")
+
+    session = BrokenCloseSession([_FakeResponse()])
+    handler = DiscordLogHandler("https://discord.com/api/webhooks/test")
+    errors: list[tuple[BaseException, str]] = []
+    handler.set_error_handler(lambda exc, context: errors.append((exc, context)))
+    with patch(
+        "mm_toolbox.logging.standard.handlers.base.aiohttp.ClientSession",
+        return_value=session,
+    ):
+        handler.push(["message"])
+        handler.close()
+        handler.close()
+    assert len(session.calls) == 1
+    assert session.close_calls == 1
+    assert session.close_loop is not None
+    assert session.close_loop.is_closed()
+    assert handler._http_session is None
+    assert len(errors) == 1
+    assert str(errors[0][0]) == "injected session close failure"
+    assert errors[0][1] == "session close"

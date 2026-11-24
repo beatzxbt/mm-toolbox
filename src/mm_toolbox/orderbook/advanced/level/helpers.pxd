@@ -1,6 +1,6 @@
 from libc.stdint cimport uint64_t as u64
 from libc.float cimport DBL_EPSILON
-from libc.math cimport fabs, floor
+from libc.math cimport fabs, floor, fmin, isfinite
 
 from .level cimport OrderbookEntry
 
@@ -14,11 +14,24 @@ cdef void validate_price(double price)
 cdef void validate_size(double size)
 
 
-cdef inline u64 convert_price_to_tick_trusted(double price, double tick_size_recip) noexcept nogil:
-    cdef double value = price * tick_size_recip
-    return <u64>floor(value + fabs(value) * DBL_EPSILON * 4.0)
+cdef inline u64 _checked_scaled_units(double value) except? -1 nogil:
+    cdef double integer
+    cdef double epsilon
+    if not isfinite(value) or value < 0.0 or value >= 18446744073709551616.0:
+        with gil:
+            raise ValueError("Normalized price/size must fit in unsigned 64-bit units")
+    integer = floor(value)
+    if value == integer:
+        return <u64>integer
+    epsilon = fmin(fabs(value) * DBL_EPSILON * 4.0, 0.5)
+    if 1.0 - (value - integer) <= epsilon:
+        integer += 1.0
+    return <u64>integer
 
 
-cdef inline u64 convert_size_to_lot_trusted(double size, double lot_size_recip) noexcept nogil:
-    cdef double value = size * lot_size_recip
-    return <u64>floor(value + fabs(value) * DBL_EPSILON * 4.0)
+cdef inline u64 convert_price_to_tick_trusted(double price, double tick_size_recip) except? -1 nogil:
+    return _checked_scaled_units(price * tick_size_recip)
+
+
+cdef inline u64 convert_size_to_lot_trusted(double size, double lot_size_recip) except? -1 nogil:
+    return _checked_scaled_units(size * lot_size_recip)

@@ -51,3 +51,28 @@ within `2**52 - 1` ticks of zero; values outside that precision range, and
 nonfinite output, raise `ValueError`. Validation and decimal scale selection
 happen once; the rounding path uses cached scales and native floor/ceiling
 with an adjacent-grid correction.
+
+## Benchmark results (2026-11-04)
+
+Each p50 is nanoseconds per call from 100,000 measured samples after 1,000
+warmups. Vector calls process arrays of 64 values. Configuration: tick size
+0.01, lot size 0.001, and the default directional rounding settings.
+
+| Operation | p50 (ns/call) |
+| --- | ---: |
+| bid_scalar | 208 |
+| ask_scalar | 208 |
+| size_scalar | 208 |
+| bids_vector | 625 |
+| asks_vector | 584 |
+| sizes_vector | 625 |
+
+Measured on CPython 3.14.4, NumPy 2.5.4, Cython 3.3.0, Apple clang 21.0.0,
+macOS 26.6.2 arm64, Apple M2 (8 CPU cores, 16 GiB), at revision `c5f9dba`.
+These are local measurements and do not establish performance on other machines.
+
+Reproduce from the repository root:
+
+```sh
+.venv/bin/python -u benchmarks/rounding/benchmark_rounding.py --operations 100000 --warmup 1000 --tick-size 0.01 --lot-size 0.001 --array-size 64 --round-bids-down --round-asks-up --round-size-up
+```

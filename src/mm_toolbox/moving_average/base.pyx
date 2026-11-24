@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 cimport numpy as cnp
+from libc.math cimport isfinite
 
 from mm_toolbox.ringbuffer.numeric cimport NumericRingBuffer
 
@@ -42,11 +43,11 @@ cdef class MovingAverage:
         self._is_fast = is_fast
         self._is_warm = False
         self._value = 0.0
-        self._values = NumericRingBuffer(
-            window,
-            dtype=np.dtype(np.float64),
-            disable_async=is_fast,
-        )
+        self._values = None
+        if not is_fast:
+            self._values = NumericRingBuffer(
+                window, dtype=np.dtype(np.float64), disable_async=True,
+            )
 
     cpdef double initialize(self, cnp.ndarray values):
         """Initialize the moving average with the given values.
@@ -133,6 +134,31 @@ cdef class MovingAverage:
         if self._is_fast:
             return
         self._values.insert(self._value)
+
+    cdef const double[:] validate_values(self, cnp.ndarray values):
+        """Validate a complete warm-up before mutating any aggregation state."""
+        cdef const double[:] view
+        cdef Py_ssize_t i
+        if values is None or values.ndim != 1:
+            raise ValueError("Initial values must be a one-dimensional float64 array")
+        if values.shape[0] == 0:
+            raise ValueError("Cannot initialize with an empty value array")
+        view = values
+        for i in range(view.shape[0]):
+            if not isfinite(view[i]):
+                raise ValueError("Moving average values must be finite")
+        return view
+
+    cdef inline int validate_value(self, double value) except -1:
+        """Reject invalid samples before changing a value, history or clock."""
+        if not isfinite(value):
+            raise ValueError("Moving average values must be finite")
+        return 0
+
+    cdef inline void reset_history(self):
+        """Clear output history when enabled; fast mode has no history buffer."""
+        if not self._is_fast:
+            self._values.clear()
     
     cdef inline void __enforce_moving_average_initialized(self):
         if not self._is_warm:

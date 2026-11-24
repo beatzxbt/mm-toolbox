@@ -4,14 +4,19 @@ Pushes batches of ``PyLog`` entries to a Telegram chat via the Bot API,
 with rate limiting and per-message chunking for size compliance.
 """
 
-from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler, _RateLimiter
+from mm_toolbox.logging._remote import (
+    TELEGRAM_CHUNK_CHARS,
+    chunk_messages,
+    make_rate_limiter,
+)
+from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
 from mm_toolbox.logging.advanced.pylog import PyLog
 
 
 class TelegramLogHandler(BaseLogHandler):
     """A log handler that sends messages to a Telegram chat via bot API."""
 
-    def __init__(self, bot_token: str, chat_id: str):
+    def __init__(self, bot_token: str, chat_id: str) -> None:
         """Initialize the TelegramLogHandler with bot token and chat ID.
 
         Args:
@@ -28,8 +33,7 @@ class TelegramLogHandler(BaseLogHandler):
             "text": "",
             "disable_web_page_preview": True,
         }
-        # Telegram: stronger limits and anti-flood; keep conservative
-        self._limiter = _RateLimiter(rate_per_sec=1.0, burst=20)
+        self._limiter = make_rate_limiter(1, 1)
 
     async def _post(self, text: str) -> None:
         """Send a single log message to Telegram.
@@ -48,24 +52,7 @@ class TelegramLogHandler(BaseLogHandler):
 
     @staticmethod
     def _chunk(text: str, limit: int) -> list[str]:
-        """Split a message into chunks under a character limit.
-
-        Args:
-            text (str): Full message text.
-            limit (int): Maximum characters per chunk.
-
-        Returns:
-            list[str]: Chunked message parts.
-        """
-        if len(text) <= limit:
-            return [text]
-        parts: list[str] = []
-        start = 0
-        while start < len(text):
-            end = min(len(text), start + limit)
-            parts.append(text[start:end])
-            start = end
-        return parts
+        return chunk_messages((text,), limit)
 
     def push(self, logs: list[PyLog]) -> None:
         """Send a batch of log messages to Telegram.
@@ -74,12 +61,9 @@ class TelegramLogHandler(BaseLogHandler):
             logs (list[PyLog]): Batch of log entries.
         """
         try:
-            if not logs:
-                return
-            # Telegram message limit ~4096 chars
-            chunks = []
-            for log in logs:
-                chunks.extend(self._chunk(self.format_log(log), 3500))
+            chunks = chunk_messages(
+                (self.format_log(log) for log in logs), TELEGRAM_CHUNK_CHARS
+            )
             for index, chunk in enumerate(chunks):
                 if self._submit_coro(self._post(chunk)) is None:
                     self._handle_exception(

@@ -4,39 +4,30 @@ This directory contains comprehensive tests for the mm-toolbox WebSocket impleme
 
 ## Test Structure
 
-### 1. Configuration Tests (`test_websocket_config.py`)
-- **WsConnectionConfig validation**: URL validation, connection ID uniqueness, on_connect messages
-- **LatencyTrackerState functionality**: Default creation, custom configuration, latency updates  
-- **WsConnectionState properties**: State transitions, latency tracking, message access
-- **ConnectionState enum**: Value validation, comparisons, edge cases
-- **Edge case handling**: Long URLs, large messages, unicode content
+### Connection tests (`connection/`)
 
-### 2. Connection Tests (`test_websocket_connection.py`)  
-- **Basic operations**: Initialization, configuration access, state management
-- **Data operations**: Send data/ping/pong with different connection states
-- **Frame handling**: Message processing, memory safety, buffer limits
-- **Latency tracking**: Ping/pong cycles, timing calculations, thread safety
-- **Callback handling**: Connection/disconnection events, error handling
-- **Error handling**: Transport failures, callback exceptions, cleanup
+- Configuration and state: `test_config.py`, `test_state_machine.py`
+- Callbacks, sends and reconnects: `test_callbacks.py`, `test_send_operations.py`, `test_reconnection.py`
+- Compiled Cython behavior: `test_native.py` and its `test_native.pyx` support module
 
-### 3. Single Connection Tests (`test_websocket_single.py`)
-- **Basic operations**: Initialization, callback validation, state management
-- **Connection management**: Configuration updates, data sending, cleanup
-- **Async context manager**: Entry/exit handling, connection lifecycle
-- **Async iteration**: Message consumption, error handling
-- **Start method**: Reconnection logic, message processing loops
-- **Error handling**: Invalid callbacks, concurrent operations, edge cases
+### Single-client tests (`single/`)
 
-### 4. Pool Tests (`test_websocket_pool.py`)
-- **Pool configuration**: Validation, default creation, edge cases
-- **Basic operations**: Initialization, callback handling, state management
-- **Connection management**: Fast connection selection, eviction logic
-- **Timed operations**: Background thread management, eviction cycles
-- **Async context manager**: Pool lifecycle, concurrent connection creation
-- **Async iteration**: Message consumption from pool ringbuffer
-- **Error handling**: Connection failures, concurrent operations
+- Configuration and lifecycle: `test_config.py`, `test_context_manager.py`
+- Message callbacks and iteration: `test_message_callback.py`, `test_async_iteration.py`
+- Connection failure and recovery: `test_error_scenarios.py`
 
-### 5. Live Binance Tests (`integration/test_live_binance.py`)
+### Pool tests (`pool/`)
+
+- Configuration and lifecycle: `test_config.py`, `test_context_manager.py`
+- Connection management, sends and eviction: `test_connection_mgmt.py`, `test_send_operations.py`, `test_eviction.py`
+- Errors, iteration and hash history: `test_error_scenarios.py`, `test_async_iteration.py`, `test_hash_history.py`
+
+### Integration tests (`integration/`)
+
+- End-to-end and realistic workflows: `test_end_to_end.py`, `test_realistic_workflows.py`
+
+### Live Binance tests (`integration/test_live_binance.py`)
+
 - **Smoke coverage**: BTC futures `@bookTicker` for both `WsSingle` and `WsPool`
 - **Strict decoding**: Typed `msgspec` decoders with strict parsing (no permissive fallback)
 - **Deterministic validation**: Schema and event freshness checks
@@ -44,22 +35,6 @@ This directory contains comprehensive tests for the mm-toolbox WebSocket impleme
 - **Benchmark handoff**: Live load/latency benchmarks moved to `benchmarks/websocket/benchmark_live_binance.py`
 
 **⚠️ Note**: Live tests require `--run-live` flag and internet connection
-
-### 6. Error Handling Tests (`test_websocket_errors.py`)
-- **Connection errors**: Disconnected operations, transport failures
-- **Callback isolation**: Exception handling, error propagation
-- **Resource management**: Memory leaks, thread cleanup, buffer overflow
-- **Edge cases**: Extreme values, concurrent operations, configuration corruption
-- **Network simulation**: Timeout errors, connection resets, unreachable networks
-- **Real-world scenarios**: Rapid connect/disconnect, message flooding
-
-### 7. Integration Tests (`test_websocket_integration.py`)
-- **Full lifecycle testing**: Complete connection workflows
-- **Component interaction**: Single to pool migration, concurrent operations
-- **State consistency**: Cross-component state synchronization
-- **Performance characteristics**: Scalability, throughput testing
-- **Resource cleanup**: Comprehensive cleanup validation
-- **Data integrity**: End-to-end message validation
 
 ## Running Tests
 
@@ -77,12 +52,10 @@ uv run python setup.py build_ext --inplace
 uv run pytest tests/websocket/ -v
 
 # Run specific test categories
-uv run pytest tests/websocket/test_websocket_config.py -v
-uv run pytest tests/websocket/test_websocket_connection.py -v
-uv run pytest tests/websocket/test_websocket_single.py -v
-uv run pytest tests/websocket/test_websocket_pool.py -v
-uv run pytest tests/websocket/test_websocket_errors.py -v
-uv run pytest tests/websocket/test_websocket_integration.py -v
+uv run pytest tests/websocket/connection/ -v
+uv run pytest tests/websocket/single/ -v
+uv run pytest tests/websocket/pool/ -v
+uv run pytest tests/websocket/integration/ -v
 ```
 
 ### Live Tests (Require Internet)

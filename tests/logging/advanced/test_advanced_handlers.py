@@ -5,8 +5,7 @@ encoder, HTTP session, event loop), future lifecycle and trimming, error
 handling, thread-safe event-loop access, and concrete subclasses:
 ``FileLogHandler`` (creation, append, permission errors, disk-full handling),
 ``DiscordLogHandler`` (chunking, rate limiting, POST payload), and
-``TelegramLogHandler`` (chunking, per-message POST). Also covers the internal
-``_RateLimiter`` token-bucket behaviour.
+``TelegramLogHandler`` (chunking, per-message POST). The shared remote-delivery contract covers pacing and retries.
 """
 
 import asyncio
@@ -16,14 +15,13 @@ import shutil
 import tempfile
 import threading
 from concurrent.futures import Future
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
 
 from mm_toolbox.logging.advanced.config import LoggerConfig
-from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler, _RateLimiter
+from mm_toolbox.logging.advanced.handlers.base import BaseLogHandler
 from mm_toolbox.logging.advanced.handlers.discord import DiscordLogHandler
 from mm_toolbox.logging.advanced.handlers.file import FileLogHandler
 from mm_toolbox.logging.advanced.handlers.telegram import TelegramLogHandler
@@ -54,7 +52,7 @@ class TestBaseLogHandler:
     def test_abstract_push(self):
         """Given direct instantiation of the abstract base, ``TypeError`` is raised."""
         with pytest.raises(TypeError):
-            BaseLogHandler()  # type: ignore
+            BaseLogHandler()
 
     def test_format_log_requires_config(self):
         """Given a handler without a primary config, ``format_log`` raises ``RuntimeError``."""
@@ -146,8 +144,8 @@ class TestBaseLogHandler:
                     side_effect=wait_until_deadline,
                 ),
                 patch(
-                    "mm_toolbox.logging.advanced.handlers.base.time",
-                    new=SimpleNamespace(monotonic=lambda: clock[0]),
+                    "mm_toolbox.logging.advanced.handlers.base.time_monotonic_ns",
+                    new=lambda: int(clock[0] * 1e9),
                 ),
                 patch.object(thread, "join", wraps=original_join) as thread_join,
             ):
@@ -168,18 +166,17 @@ class TestBaseLogHandler:
         assert not thread.is_alive()
         assert cancelled.is_set()
 
-    def test_future_trim_at_4096(self):
-        """Given more than 4096 tracked futures, the list is trimmed to 2048 to bound memory."""
+    def test_completed_futures_are_removed_without_forgetting_pending_work(self):
         handler = FileLogHandler("test.txt")
-        for _ in range(4097):
-            mock_fut = Future()
-            handler._track_future(mock_fut)
-        assert len(handler._futures) == 2048
-        for _ in range(1000):
-            mock_fut = Future()
-            handler._track_future(mock_fut)
-        assert len(handler._futures) <= 4096
-        handler._futures.clear()
+        pending = Future()
+        handler._track_future(pending)
+        for _ in range(5000):
+            done = Future()
+            handler._track_future(done)
+            done.set_result(None)
+        assert handler._futures == {pending}
+        pending.set_result(None)
+        assert not handler._futures
 
     def test_on_future_done_captures_exception(self):
         """Given a future that raises, the error handler receives the exception and context."""
@@ -221,17 +218,6 @@ class TestBaseLogHandler:
         assert "stderr test" in captured.err
         assert "fallback" in captured.err
         assert "FileLogHandler" in captured.err
-
-    def test_normalize_log_bytes_bytearray(self):
-        """Given a ``bytearray``, it is normalised to ``bytes``."""
-        result = BaseLogHandler._normalize_log_bytes(bytearray(b"hello"))
-        assert result == b"hello"
-        assert isinstance(result, bytes)
-
-    def test_normalize_log_bytes_invalid_type(self):
-        """Given an ``int``, normalisation raises ``TypeError``."""
-        with pytest.raises(TypeError):
-            BaseLogHandler._normalize_log_bytes(123)
 
     def test_ev_loop_thread_safe(self):
         """Given concurrent threads accessing ``ev_loop``, both receive the same loop instance."""
@@ -464,12 +450,6 @@ class TestDiscordLogHandler:
         assert len(chunks[0]) == 1800
         assert len(chunks[1]) == 700
 
-    def test_discord_rate_limiter(self):
-        """Given construction, the internal rate limiter is configured for Discord (2.5/s, burst 5)."""
-        handler = DiscordLogHandler("https://discord.com/api/webhooks/123/abc")
-        assert handler._limiter._rate == 2.5
-        assert handler._limiter._capacity == 5
-
 
 class TestTelegramLogHandler:
     """Layer 2 — ``TelegramLogHandler`` concrete behaviour tests."""
@@ -483,7 +463,7 @@ class TestTelegramLogHandler:
     @pytest.mark.asyncio
     @patch("aiohttp.ClientSession.post", new_callable=MagicMock)
     async def test_push(self, mock_post):
-        """A Telegram batch sends one encoded POST per log message."""
+        """A Telegram batch packs small messages into one POST."""
         handler = TelegramLogHandler("token", "chat")
         config = LoggerConfig(str_format="%(message)s")
         handler.add_primary_config(config)
@@ -496,13 +476,12 @@ class TestTelegramLogHandler:
         handler.push(logs)
         try:
             await _wait_for_handler(handler)
-            assert mock_post.call_count == 2
-            calls = mock_post.call_args_list
-            for i, call in enumerate(calls, 1):
-                assert call[0][0] == handler.url
-                data = json.loads(call[1]["data"])
-                assert data["chat_id"] == "chat"
-                assert data["text"] == f"msg{i}"
+            mock_post.assert_called_once()
+            call = mock_post.call_args
+            assert call[0][0] == handler.url
+            data = json.loads(call[1]["data"])
+            assert data["chat_id"] == "chat"
+            assert data["text"] == "msg1\nmsg2"
         finally:
             handler.close()
 
@@ -533,41 +512,233 @@ class TestTelegramLogHandler:
         assert len(chunks[0]) == 3500
         assert len(chunks[1]) == 500
 
-    def test_telegram_rate_limiter(self):
-        """Given construction, the internal rate limiter is configured for Telegram (1.0/s, burst 20)."""
-        handler = TelegramLogHandler("token", "chat")
-        assert handler._limiter._rate == 1.0
-        assert handler._limiter._capacity == 20
+
+class _Advanced(BaseLogHandler):
+    def push(self, logs):
+        pass
 
 
-class TestRateLimiter:
-    """Layer 1 — ``_RateLimiter`` token-bucket primitive tests."""
+def test_advanced_close_bounds_total_wait_across_many_futures():
+    handler = _Advanced()
+    total_futures = 20
+    started = threading.Event()
+    cancelled = threading.Event()
+    started_count = 0
+    cancelled_count = 0
+    count_lock = threading.Lock()
 
-    @pytest.mark.asyncio
-    async def test_rate_limiter_basic(self):
-        """Given a bucket of 5 tokens at 10/s, the 6th acquire waits because the bucket is empty."""
-        limiter = _RateLimiter(10.0, 5)
-        for _ in range(5):
-            await limiter.acquire(1)
-        start = asyncio.get_running_loop().time()
-        await limiter.acquire(1)
-        elapsed = asyncio.get_running_loop().time() - start
-        assert elapsed > 0
+    async def never():
+        nonlocal started_count, cancelled_count
+        with count_lock:
+            started_count += 1
+            if started_count == total_futures:
+                started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            with count_lock:
+                cancelled_count += 1
+                if cancelled_count == total_futures:
+                    cancelled.set()
 
-    @pytest.mark.asyncio
-    async def test_rate_limiter_burst(self):
-        """Given a bucket of 10 tokens at 1/s, all 10 are acquired instantly (burst)."""
-        limiter = _RateLimiter(1.0, 10)
-        start = asyncio.get_running_loop().time()
-        for _ in range(10):
-            await limiter.acquire(1)
-        elapsed = asyncio.get_running_loop().time() - start
-        assert elapsed < 0.1
+    futures = [handler._submit_coro(never()) for _ in range(total_futures)]
+    assert started.wait(timeout=1.0)
+    thread = handler._loop_thread
+    assert thread is not None
 
-    @pytest.mark.asyncio
-    async def test_concurrent_waiters_reserve_tokens_atomically(self):
-        limiter = _RateLimiter(20.0, 1)
-        start = asyncio.get_running_loop().time()
-        await asyncio.gather(*(limiter.acquire(1) for _ in range(3)))
-        elapsed = asyncio.get_running_loop().time() - start
-        assert elapsed >= 0.07
+    timeout_s = 0.1
+    wait_elapsed_s = 0.03
+    clock = [10.0]
+    wait_timeouts = []
+
+    def wait_until_deadline(futures, timeout):
+        wait_timeouts.append(timeout)
+        clock[0] += wait_elapsed_s
+        return set(), set(futures)
+
+    original_join = thread.join
+    try:
+        with (
+            patch(
+                "mm_toolbox.logging.advanced.handlers.base.wait",
+                side_effect=wait_until_deadline,
+            ),
+            patch(
+                "mm_toolbox.logging.advanced.handlers.base.time_monotonic_ns",
+                new=lambda: int(clock[0] * 1e9),
+            ),
+            patch.object(thread, "join", wraps=original_join) as thread_join,
+        ):
+            handler.close(timeout_s=timeout_s)
+
+        assert wait_timeouts == [pytest.approx(timeout_s)]
+        assert thread_join.call_count == 1
+        assert thread_join.call_args.kwargs["timeout"] == pytest.approx(
+            timeout_s - wait_elapsed_s
+        )
+        assert thread_join.call_args.kwargs["timeout"] < timeout_s
+    finally:
+        if thread.is_alive():
+            handler.close(timeout_s=1.0)
+            original_join(timeout=1.0)
+
+    assert not thread.is_alive()
+    assert cancelled.is_set()
+    assert all(
+        future is not None and future.done() and future.cancelled()
+        for future in futures
+    )
+    assert handler._submit_coro(never()) is None
+
+
+@pytest.mark.parametrize("create", [False, True])
+def test_file_batches_share_one_handle_until_close(tmp_path, create):
+    path = tmp_path / "persistent.txt"
+    path.write_text("previous run\n")
+    errors: list[tuple[BaseException, str]] = []
+    original_open = open
+    with patch("builtins.open", wraps=original_open) as file_open:
+        handler = FileLogHandler(str(path), create=create)
+        handler.set_error_handler(lambda exc, context: errors.append((exc, context)))
+        handler.add_primary_config(LoggerConfig(str_format="%(message)s"))
+        try:
+            handler.push([PyLog(1, b"name", PyLogLevel.INFO, b"first")])
+            handle = handler._file
+            assert handle is not None
+            assert not handle.closed
+            handler.push([])
+            handler.push([PyLog(2, b"name", PyLogLevel.INFO, b"second")])
+            assert handler._file is handle
+            assert not handle.closed
+            assert file_open.call_count == 1
+        finally:
+            handler.close()
+        assert handle.closed
+        assert handler._file is None
+        handler.close()
+        handler.push([PyLog(3, b"name", PyLogLevel.INFO, b"after close")])
+        assert file_open.call_count == 1
+    assert path.read_text().splitlines() == ["previous run", "first", "second"]
+    assert len(errors) == 1
+    assert str(errors[0][0]) == "handler is closed"
+
+
+def test_retained_file_serializes_concurrent_batches(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    path = tmp_path / "concurrent.txt"
+    handler = FileLogHandler(str(path), create=True)
+    handler.add_primary_config(LoggerConfig(str_format="%(message)s"))
+    errors: list[BaseException] = []
+    handler.set_error_handler(lambda exc, context: errors.append(exc))
+    handle = handler._file
+    assert handle is not None
+
+    def push_batch(index: int) -> None:
+        handler.push(
+            [
+                PyLog(index, b"worker", PyLogLevel.INFO, f"{index}:first".encode()),
+                PyLog(index, b"worker", PyLogLevel.INFO, f"{index}:second".encode()),
+            ]
+        )
+
+    try:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(push_batch, range(100)))
+        assert handler._file is handle
+        assert not handle.closed
+    finally:
+        handler.close()
+    assert handle.closed
+    assert not errors
+    lines = path.read_text().splitlines()
+    assert len(lines) == 200
+    batches: set[int] = set()
+    for index in range(0, len(lines), 2):
+        number = int(lines[index].split(":")[0])
+        assert lines[index : index + 2] == [f"{number}:first", f"{number}:second"]
+        batches.add(number)
+    assert batches == set(range(100))
+
+
+def test_retained_file_close_failure_is_reported_once(tmp_path):
+    path = tmp_path / "close_error.txt"
+    handler = FileLogHandler(str(path), create=True)
+    handle = handler._file
+    assert handle is not None
+    errors: list[tuple[BaseException, str]] = []
+    handler.set_error_handler(lambda exc, context: errors.append((exc, context)))
+    original_close = handle.close
+    try:
+        with patch.object(
+            handle, "close", side_effect=OSError("close failed")
+        ) as close:
+            handler.close()
+            handler.close()
+            close.assert_called_once()
+        assert handler._file is None
+        assert len(errors) == 1
+        assert str(errors[0][0]) == "close failed"
+        assert errors[0][1] == "close"
+    finally:
+        original_close()
+
+
+def test_file_close_waits_for_an_active_batch(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    path = tmp_path / "close_during_write.txt"
+    handler = FileLogHandler(str(path), create=True)
+    handler.add_primary_config(LoggerConfig(str_format="%(message)s"))
+    handle = handler._file
+    assert handle is not None
+    entered, release, closing, closed = (threading.Event() for _ in range(4))
+    errors: list[BaseException] = []
+    handler.set_error_handler(lambda exc, context: errors.append(exc))
+    original_write = handle.write
+
+    def paused_write(payload: str) -> int:
+        entered.set()
+        assert release.wait(2.0)
+        return original_write(payload)
+
+    def close() -> None:
+        closing.set()
+        handler.close()
+        closed.set()
+
+    with patch.object(handle, "write", side_effect=paused_write):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            push = pool.submit(
+                handler.push, [PyLog(1, b"worker", PyLogLevel.INFO, b"batch")]
+            )
+            try:
+                assert entered.wait(1.0)
+                close_future = pool.submit(close)
+                assert closing.wait(1.0)
+                assert not closed.wait(0.02)
+            finally:
+                release.set()
+            push.result(timeout=1.0)
+            close_future.result(timeout=1.0)
+    assert handle.closed
+    assert not errors
+    assert path.read_text() == "batch\n"
+
+
+@pytest.mark.parametrize("operation", ["write", "flush"])
+def test_cached_file_reports_io_errors_and_still_closes(tmp_path, operation):
+    handler = FileLogHandler(str(tmp_path / "io_error.txt"), create=True)
+    handler.add_primary_config(LoggerConfig(str_format="%(message)s"))
+    handle = handler._file
+    assert handle is not None
+    errors: list[tuple[BaseException, str]] = []
+    handler.set_error_handler(lambda exc, context: errors.append((exc, context)))
+    with patch.object(handle, operation, side_effect=OSError("disk full")):
+        handler.push([PyLog(1, b"worker", PyLogLevel.INFO, b"message")])
+    handler.close()
+    assert handle.closed
+    assert handler._file is None
+    assert len(errors) == 1
+    assert str(errors[0][0]) == "disk full"
+    assert errors[0][1] == "push"

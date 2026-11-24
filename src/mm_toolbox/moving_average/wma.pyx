@@ -34,7 +34,7 @@ cdef class WeightedMovingAverage(MovingAverage):
         # so below. Messy, but speeds things up considerably.
         self._window_double = <double>self._window
 
-        self._raw_values = NumericRingBuffer(window, dtype='float64')
+        self._raw_values = NumericRingBuffer(window, dtype='float64', disable_async=True)
         self._rolling_sum = 0.0    
         self._rolling_wsum = 0.0   
 
@@ -51,16 +51,16 @@ cdef class WeightedMovingAverage(MovingAverage):
             ValueError: If the input length does not match ``window``.
         """
         cdef:
-            int i, n = values.shape[0]
+            const double[:] values_view = self.validate_values(values)
+            Py_ssize_t i, n = values_view.shape[0]
             double val
-            double[:] values_view = values
 
         if n != self._window:
             raise ValueError(
                 f"Input array length must match window; expected {self._window} but got {n}"
             )
 
-        self._values.clear()
+        self.reset_history()
         self._raw_values.clear()
         self._rolling_sum = 0.0
         self._rolling_wsum = 0.0
@@ -88,6 +88,7 @@ cdef class WeightedMovingAverage(MovingAverage):
             double: The projected WMA value.
         """
         self.ensure_warm()
+        self.validate_value(new_val)
 
         cdef:
             double new_sum
@@ -108,6 +109,7 @@ cdef class WeightedMovingAverage(MovingAverage):
             double: The updated WMA value.
         """
         self.ensure_warm()
+        self.validate_value(new_val)
 
         cdef:
             double old_val = self._raw_values.consume()

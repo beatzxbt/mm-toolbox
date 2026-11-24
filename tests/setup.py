@@ -130,6 +130,14 @@ all_extensions.append(
         extra_compile_args=EXTRA_COMPILE_ARGS,
     )
 )
+all_extensions.append(
+    Extension(
+        name="cython_test_rate_limiter_clock",
+        sources=["rate_limiter/clock.pyx"],
+        include_dirs=[str(source_root), "."],
+        extra_compile_args=EXTRA_COMPILE_ARGS,
+    )
+)
 
 # Collect all .pyx source files from extensions before cythonization
 pyx_files: list[str] = []

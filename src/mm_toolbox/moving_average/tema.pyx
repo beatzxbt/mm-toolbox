@@ -54,8 +54,9 @@ cdef class TimeExponentialMovingAverage(MovingAverage):
             return 0.0
         return -expm1(-self._lam * (<double>elapsed_ns * 1e-9))
 
-    cdef double _next_at(self, double new_val, i64 time_now_ns) noexcept:
+    cdef double _next_at(self, double new_val, i64 time_now_ns):
         """Calculate a preview at a supplied monotonic timestamp."""
+        self.validate_value(new_val)
         if not self._is_warm:
             return new_val
         cdef double alpha = self._alpha_at(time_now_ns)
@@ -64,10 +65,12 @@ cdef class TimeExponentialMovingAverage(MovingAverage):
     cdef double _update_at(self, double new_val, i64 time_now_ns):
         """Apply a sample at a supplied monotonic timestamp."""
         cdef double alpha
+        self.validate_value(new_val)
         if not self._is_warm:
             self._time_ns = time_now_ns
             self._value = new_val
             self._is_warm = True
+            self.push_to_ringbuffer()
             return self._value
 
         alpha = self._alpha_at(time_now_ns)
@@ -84,31 +87,27 @@ cdef class TimeExponentialMovingAverage(MovingAverage):
         decay begins with subsequent live updates.
 
         Args:
-            values (cnp.ndarray): Array of initial values (length > 1).
+            values (cnp.ndarray): Nonempty one-dimensional finite float64 array.
 
         Returns:
             double: The final TEMA value after ingesting all values.
 
         Raises:
-            ValueError: If the input array is too short.
+            ValueError: If the input array is empty, nonfinite, or not a vector.
         """
         cdef:
-            int i, n = values.shape[0]
-            double _temp_var
-
-        if n <= 1:
-            raise ValueError(
-                f"Input array too short; expected >1 but got {n}"
-            )
+            const double[:] values_view = self.validate_values(values)
+            Py_ssize_t i, n = values_view.shape[0]
 
         self._time_ns = time_monotonic_ns()
-        self._values.clear()
-        self._value = values[0]
-        self.push_to_ringbuffer()
+        self.reset_history()
+        self._value = values_view[0]
         self._is_warm = True
 
-        for i in range(1, n):
-            _temp_var = self._update_at(values[i], self._time_ns)
+        # Equal historical timestamps give every later sample zero weight.
+        if not self._is_fast:
+            for i in range(n):
+                self.push_to_ringbuffer()
 
         return self._value
 

@@ -1,10 +1,12 @@
 """Configuration classes and enums for the standard buffered logger.
 
 Provides ``LogLevel`` severity enumeration and ``LoggerConfig`` for
-controlling output formatting, flush thresholds, and atexit behavior.
+controlling output formatting and flush thresholds.
 """
 
 from enum import IntEnum
+from math import isfinite
+from typing import Final
 
 
 class LogLevel(IntEnum):
@@ -15,6 +17,13 @@ class LogLevel(IntEnum):
     INFO = 2
     WARNING = 3
     ERROR = 4
+
+
+TRACE_LEVEL: Final = LogLevel.TRACE.value
+DEBUG_LEVEL: Final = LogLevel.DEBUG.value
+INFO_LEVEL: Final = LogLevel.INFO.value
+WARNING_LEVEL: Final = LogLevel.WARNING.value
+ERROR_LEVEL: Final = LogLevel.ERROR.value
 
 
 class LoggerConfig:
@@ -29,8 +38,7 @@ class LoggerConfig:
         flush_size_threshold: int = 1000,
         flush_on_interval: bool = False,
         flush_interval_s: float = 1.0,
-        auto_flush_on_exit: bool = True,
-    ):
+    ) -> None:
         """Initializes the LoggerConfig.
 
         Args:
@@ -52,8 +60,6 @@ class LoggerConfig:
             flush_interval_s (float): Elapsed-time threshold checked on each
                 log call when flush_on_interval is True. Must be > 0.
                 Defaults to 1.0.
-            auto_flush_on_exit (bool): If True, registers an atexit hook to
-                flush remaining logs on interpreter shutdown. Defaults to True.
 
         Raises:
             ValueError: If flush_interval_s <= 0 when flush_on_interval is True.
@@ -74,7 +80,9 @@ class LoggerConfig:
 
         self.flush_on_interval = flush_on_interval
         self.flush_interval_s = flush_interval_s
-        if self.flush_on_interval and self.flush_interval_s <= 0.0:
+        if self.flush_on_interval and (
+            not isfinite(self.flush_interval_s) or self.flush_interval_s <= 0.0
+        ):
             raise ValueError(
                 f"Invalid flush interval; expected >0 but got {self.flush_interval_s}"
             )
@@ -83,4 +91,16 @@ class LoggerConfig:
         if "%(message)s" not in self.str_format:
             raise ValueError("Format string must contain '%(message)s' placeholder")
 
-        self.auto_flush_on_exit = auto_flush_on_exit
+    @property
+    def base_level(self) -> LogLevel:
+        return self._base_level
+
+    @base_level.setter
+    def base_level(self, level: LogLevel) -> None:
+        self.set_base_level(level)
+
+    def set_base_level(self, level: LogLevel) -> None:
+        """Change severity and rebuild its integer cache for all sharing loggers."""
+        validated = LogLevel(level)
+        self._base_level = validated
+        self._base_level_value: int = validated.value

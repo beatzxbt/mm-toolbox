@@ -22,6 +22,18 @@ def main() -> None:
             Path(directory) / "scripts",
             ignore=shutil.ignore_patterns("__pycache__"),
         )
+        # Example contract tests exercise the actual standalone drivers and
+        # their helpers against the installed library, outside the checkout.
+        shutil.copytree(
+            project / "examples",
+            Path(directory) / "examples",
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+        shutil.copytree(
+            project / "benchmarks",
+            Path(directory) / "benchmarks",
+            ignore=shutil.ignore_patterns("__pycache__", ".ipc"),
+        )
         tests = Path(directory) / "tests"
         shutil.copytree(
             project / "tests",

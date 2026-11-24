@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Coroutine, Iterator
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, SupportsIndex, TypeVar
 
 T = TypeVar("T")
 
@@ -23,6 +23,7 @@ class GenericRingBuffer(Generic[T]):
     def is_full(self) -> bool: ...
     def __contains__(self, item: T) -> bool: ...
     def __len__(self) -> int: ...
+    def __getitem__(self, index: SupportsIndex) -> T: ...
     @property
     def latest_insert_time_ns(self) -> int: ...
     @property

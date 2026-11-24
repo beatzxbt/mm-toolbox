@@ -50,15 +50,15 @@ class TestTemaInitialize:
         assert tema.initialize(np.array([10.0, 20.0, 30.0])) == 10.0
         np.testing.assert_array_equal(tema.get_values(), [10.0, 10.0, 10.0])
 
-    def test_initialize_too_short_raises(self):
-        """Given arrays of length 0 or 1, ``initialize()`` raises ``ValueError``."""
+    def test_initialize_empty_raises(self):
         tema = TimeExponentialMovingAverage(window=2, half_life_s=1.0)
-
-        with pytest.raises(ValueError, match="too short"):
+        with pytest.raises(ValueError, match="empty"):
             tema.initialize(np.array([], dtype=np.float64))
 
-        with pytest.raises(ValueError, match="too short"):
-            tema.initialize(np.array([1.0], dtype=np.float64))
+    def test_initialize_single_value_seeds_history(self):
+        tema = TimeExponentialMovingAverage(window=2, half_life_s=1.0)
+        assert tema.initialize(np.array([42.0])) == 42.0
+        np.testing.assert_array_equal(tema.get_values(), [42.0])
 
     def test_initialize_warms_correctly(self):
         """Given a valid array, the MA is warm and the ringbuffer is populated."""
@@ -175,6 +175,7 @@ class TestTemaUpdate:
 
         assert result == pytest.approx(99.0)
         assert tema.get_value() == pytest.approx(99.0)
+        np.testing.assert_array_equal(tema.get_values(), [99.0])
 
     def test_update_alpha_accuracy(self):
         """The update recurrence agrees with an exact monotonic interval."""
