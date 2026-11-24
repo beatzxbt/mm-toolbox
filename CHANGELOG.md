@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.0.0b11 (2026-11-24, unpublished candidate)
+
+- Share candle trade validation and stale-input acceptance across candle types, preserve equal timestamps, reset trigger state during replay, and provide consistent retained-history indexing and iteration.
+- Validate moving-average inputs before mutation, reset aggregation/history/clock state consistently, and avoid allocating output history in fast mode. Cover streaming, projection, reinitialization and exact clock boundaries with independent expectations.
+- Share remote logging delivery, retry and rate-limit policies across both logging stacks. Reuse HTTP sessions and file handles, bound pending delivery and shutdown, use monotonic flush deadlines, and retain explicit loss/error accounting.
+- Apply one rate-limiter burst policy across capacity, sub-bucket and threshold limits. Keep the burst budget for the whole window, preserve forced-use accounting, and test exact refill boundaries with a controlled native clock.
 - Compare the standard orderbook and both advanced APIs with one independent dictionary reference after every operation. Add named snapshot, delta, BBO, capacity, calculation, numeric and stream scenarios, deterministic generated traces, a recorded-feed replay and a dedicated extended CI workload. Consolidate duplicated behavior tests while retaining focused ingestion, ownership and native memory tests.
 - Apply completed delta batches and crossing cleanup before capacity truncation, recover depleted sides, and reject ambiguous zero-size BBOs atomically. Preserve valid retained tails across the small/bulk batch boundary. Align crossing helpers on strict crossing; touching equality is not crossed.
 - Keep exact large normalized units unchanged, reject unsafe unsigned conversions, avoid midpoint/quantity overflow, and correct fractional execution-impact and tick-boundary calculations. Compute floored weighted midpoints with exact bounded integer arithmetic, including skewed quantities near the unsigned limit. Standard books retain owned copies of mutable ingestion values.
@@ -20,7 +26,7 @@ All notable changes to this project will be documented in this file.
 - Retain exact WebSocket receive-overwrite totals across startup, reconnects, retired connections and close; sample overload diagnostics at powers of two. The concrete single/pool getters are additive and the public client protocol is unchanged.
 - Stop market-data examples on lost continuity, disconnects or rejected SHM writes; propagate processing and child failures, and follow Binance futures snapshot/`pu` sequencing. Rebuild the whole example after a failure.
 - Expose cumulative worker-logger transport counters after shutdown, report startup loss at the master, and reject benchmark runs with worker/shutdown errors or unexplained missing deliveries. Intentional overwrite stress remains explicitly counted.
-- Repair example and benchmark API calls, accounting, workload labels, bounded cleanup and input filtering; record the measured workloads in `EXAMPLES_BENCHMARK_REVIEW.md`.
+- Repair example and benchmark API calls, accounting, workload labels, bounded cleanup and input filtering; record the measured workloads in the relevant module README files.
 - Move release-named test collections into ordinary component suites, share replay helpers, make shutdown checks deterministic and extend extreme power-of-ten rounding boundaries. Preserve native and cross-backend contracts in source and installed-wheel tests.
 - Rebuild the library and any dependent Cython extensions together when upgrading this candidate; native layouts have changed.
 
