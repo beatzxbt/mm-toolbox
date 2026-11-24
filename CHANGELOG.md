@@ -29,6 +29,7 @@ All notable changes to this project will be documented in this file.
 - Repair example and benchmark API calls, accounting, workload labels, bounded cleanup and input filtering; record the measured workloads in the relevant module README files.
 - Move release-named test collections into ordinary component suites, share replay helpers, make shutdown checks deterministic and extend extreme power-of-ten rounding boundaries. Preserve native and cross-backend contracts in source and installed-wheel tests.
 - Rebuild the library and any dependent Cython extensions together when upgrading this candidate; native layouts have changed.
+- Include native test typing stubs in source distributions so the typed component suites remain complete outside the Git checkout.
 
 ## 1.0.0b10 (2026-10-25, unpublished candidate)
 

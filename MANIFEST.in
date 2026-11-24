@@ -31,7 +31,7 @@ recursive-include benchmarks *.py
 recursive-include scripts *.py
 
 # Include tests
-recursive-include tests *.py *.pyx *.pxd *.c *.h
+recursive-include tests *.py *.pyx *.pxd *.pyi *.c *.h
 recursive-include tests *.jsonl
 include tests/orderbook/README.md
 include tests/orderbook/data/README.md
