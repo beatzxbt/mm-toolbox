@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from libc.float cimport DBL_EPSILON
-from libc.math cimport INFINITY, fabs, isfinite
+from libc.math cimport INFINITY, floor, isfinite
 from libc.stdint cimport uint64_t as u64
 from libc.stdlib cimport free, malloc
 
+from .._precision import impact_limit_tick, reciprocal, required_lots
 from .enum.enums cimport CyOrderbookSortedness
 from .ladder.ladder cimport OrderbookLadder, OrderbookLadderData
 from .level.helpers cimport (
@@ -30,6 +30,7 @@ from .level.level cimport (
 )
 
 cdef extern from "c/orderbook_helpers.h":
+    u64 orderbook_impact_limit_tick(u64 anchor, u64 bps, bint is_buy) noexcept nogil
     u64 orderbook_weighted_mid_tick(
         u64 bid_ticks,
         u64 ask_ticks,
@@ -43,6 +44,49 @@ cdef enum:
     ORDER_UNKNOWN = 0
     ORDER_ASCENDING = 1
     ORDER_DESCENDING = 2
+
+
+cdef struct _DepthQuantity:
+    u64 low
+    u64 high
+
+
+cdef inline _DepthQuantity _required_depth(
+    double size, double lot_size, double scale, u64 price_ticks,
+    double tick_size, bint is_base_currency,
+):
+    cdef _DepthQuantity result
+    cdef object exact
+    if is_base_currency and size * scale < 4503599627370496.0:
+        result.low = convert_size_to_lot_trusted(size, scale)
+        if convert_size_from_lot(result.low, lot_size) < size:
+            result.low += 1
+        result.high = 0
+    else:
+        exact = required_lots(
+            size, lot_size, 1 if is_base_currency else price_ticks,
+            1.0 if is_base_currency else tick_size,
+        )
+        # At most 2^24 levels of u64 lots fit in a ladder. An even larger
+        # request is unfillable; retain a saturated 128-bit sentinel.
+        if exact >= (1 << 128):
+            result.low = <u64>-1
+            result.high = <u64>-1
+        else:
+            result.low = exact & ((1 << 64) - 1)
+            result.high = exact >> 64
+    return result
+
+
+cdef inline bint _consume_depth(_DepthQuantity* remaining, u64 lots) noexcept:
+    cdef u64 previous
+    if remaining.high == 0 and remaining.low <= lots:
+        remaining.low = 0
+        return True
+    previous = remaining.low
+    remaining.low -= lots
+    remaining.high -= previous < lots
+    return False
 
 
 cdef inline int _ask_order_from_sortedness(CyOrderbookSortedness sortedness) noexcept:
@@ -120,8 +164,8 @@ cdef class CoreAdvancedOrderbook:
 
         self._tick_size = tick_size
         self._lot_size = lot_size
-        self._tick_size_recip = 1.0 / tick_size
-        self._lot_size_recip = 1.0 / lot_size
+        self._tick_size_recip = reciprocal(tick_size)
+        self._lot_size_recip = reciprocal(lot_size)
         self._max_levels = num_levels
         self._delta_sortedness = delta_sortedness
         self._snapshot_sortedness = snapshot_sortedness
@@ -869,8 +913,14 @@ cdef class CoreAdvancedOrderbook:
         if size <= 0.0:
             return mid_price
         cdef:
+            u64 bid_ticks = self._bids.top().ticks
+            u64 mid_ticks = bid_ticks + (self._asks.top().ticks - bid_ticks) // 2
+            _DepthQuantity needed = _required_depth(
+                size, self._lot_size, self._lot_size_recip, mid_ticks,
+                self._tick_size, is_base_currency,
+            )
+            _DepthQuantity depth = needed
             double target = size if is_base_currency else (size / mid_price)
-            double tolerance = target * DBL_EPSILON * 4.0
             double remaining = target
             double consumed
             double available
@@ -880,21 +930,26 @@ cdef class CoreAdvancedOrderbook:
         for i in range(self._asks_data.num_levels):
             available = convert_size_from_lot(self._asks.at(i).lots, self._lot_size)
             consumed = available if available < remaining else remaining
+            if consumed < 0.0:
+                consumed = 0.0
             buy_notional += <double>self._asks.at(i).ticks * consumed
             remaining -= consumed
-            if remaining == 0.0:
+            if _consume_depth(&depth, self._asks.at(i).lots):
                 break
-        if remaining > tolerance:
+        if depth.low != 0 or depth.high != 0:
             return INFINITY
         remaining = target
+        depth = needed
         for i in range(self._bids_data.num_levels):
             available = convert_size_from_lot(self._bids.at(i).lots, self._lot_size)
             consumed = available if available < remaining else remaining
+            if consumed < 0.0:
+                consumed = 0.0
             sell_notional += <double>self._bids.at(i).ticks * consumed
             remaining -= consumed
-            if remaining == 0.0:
+            if _consume_depth(&depth, self._bids.at(i).lots):
                 break
-        if remaining > tolerance:
+        if depth.low != 0 or depth.high != 0:
             return INFINITY
         return (buy_notional + sell_notional) * self._tick_size / (2.0 * target)
 
@@ -906,27 +961,18 @@ cdef class CoreAdvancedOrderbook:
             OrderbookLadder side = self._asks if is_buy else self._bids
             OrderbookLadderData* side_data = side.get_data()
             u64 touch_anchor_ticks = side.top().ticks
-            double touch_anchor_price = convert_price_from_tick(touch_anchor_ticks, self._tick_size)
-            double target_base = size if is_base_currency else (size / touch_anchor_price)
-            double tolerance = target_base * DBL_EPSILON * 4.0
-            double remaining = target_base
-            double consumed
-            double available
-            u64 last_touched_ticks = touch_anchor_ticks
+            _DepthQuantity depth = _required_depth(
+                size, self._lot_size, self._lot_size_recip, touch_anchor_ticks,
+                self._tick_size, is_base_currency,
+            )
+            u64 last_touched_ticks
             u64 i
         for i in range(side_data.num_levels):
-            available = convert_size_from_lot(side.at(i).lots, self._lot_size)
-            consumed = available if available < remaining else remaining
-            if consumed > 0.0:
+            if _consume_depth(&depth, side.at(i).lots):
                 last_touched_ticks = side.at(i).ticks
-            remaining -= consumed
-            # Stop before an arithmetic residual falsely touches the next tick.
-            if remaining <= tolerance:
-                break
-        if remaining > tolerance:
-            return INFINITY
-        return fabs(convert_price_from_tick(last_touched_ticks, self._tick_size)
-                    - touch_anchor_price)
+                return (last_touched_ticks - touch_anchor_ticks if is_buy
+                        else touch_anchor_ticks - last_touched_ticks) * self._tick_size
+        return INFINITY
 
     cdef inline double get_size_for_price_impact_bps(
         self,
@@ -943,20 +989,17 @@ cdef class CoreAdvancedOrderbook:
             OrderbookLadder side = self._asks if is_buy else self._bids
             OrderbookLadderData* side_data = side.get_data()
             u64 touch_anchor_ticks = side.top().ticks
-            double limit_scaled
-            double ceiling_tolerance
             u64 limit_ticks
             u64 ticks
             u64 lots
             double total_lots = 0.0
             double total_ticks_times_lots = 0.0
             u64 i
+        if impact_bps < 18446744073709551616.0 and impact_bps == floor(impact_bps):
+            limit_ticks = orderbook_impact_limit_tick(touch_anchor_ticks, <u64>impact_bps, is_buy)
+        else:
+            limit_ticks = impact_limit_tick(touch_anchor_ticks, impact_bps, is_buy)
         if is_buy:
-            limit_scaled = <double>touch_anchor_ticks * (1.0 + impact_bps / 10000.0)
-            if not isfinite(limit_scaled) or limit_scaled >= 18446744073709551616.0:
-                limit_ticks = <u64>-1
-            else:
-                limit_ticks = convert_price_to_tick(limit_scaled, 1.0)
             for i in range(side_data.num_levels):
                 ticks = side.at(i).ticks
                 if ticks > limit_ticks:
@@ -965,17 +1008,6 @@ cdef class CoreAdvancedOrderbook:
                 total_lots += lots
                 total_ticks_times_lots += <double>ticks * <double>lots
         else:
-            limit_scaled = <double>touch_anchor_ticks * (1.0 - impact_bps / 10000.0)
-            if limit_scaled < 0.0:
-                limit_scaled = 0.0
-            limit_ticks = convert_price_to_tick(limit_scaled, 1.0)
-            ceiling_tolerance = fabs(limit_scaled) * DBL_EPSILON * 4.0
-            if ceiling_tolerance > 0.5:
-                ceiling_tolerance = 0.5
-            # A mathematical integer boundary can round a few ULPs above
-            # its tick. Only a meaningful fraction requires the next tick.
-            if limit_scaled - <double>limit_ticks > ceiling_tolerance:
-                limit_ticks += 1
             for i in range(side_data.num_levels):
                 ticks = side.at(i).ticks
                 if ticks < limit_ticks:

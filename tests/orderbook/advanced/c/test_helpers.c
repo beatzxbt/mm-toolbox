@@ -60,15 +60,34 @@ static MunitResult test_price_to_tick_rounding(const MunitParameter params[] MUN
     return MUNIT_OK;
 }
 
-/** @test Exact large integers stay exact; only near-integer noise is corrected. */
+/** @test True grid values stay exact and genuine fractional units floor. */
 static MunitResult test_scaled_conversion_boundaries(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     munit_assert_uint64(price_to_tick(1e19, 1.0), ==, UINT64_C(10000000000000000000));
     munit_assert_uint64(size_to_lot(1.2e19, 1.0), ==, UINT64_C(12000000000000000000));
-    munit_assert_uint64(price_to_tick(nextafter(9.0, 0.0), 1.0), ==, 9);
+    munit_assert_uint64(price_to_tick(nextafter(9.0, 0.0), 1.0), ==, 8);
     munit_assert_uint64(size_to_lot(8.5, 1.0), ==, 8);
+    munit_assert_uint64(price_to_tick(1e15 + 0.5, 1.0), ==, UINT64_C(1000000000000000));
+    munit_assert_uint64(size_to_lot(1e15 + 0.875, 1.0), ==, UINT64_C(1000000000000000));
+    munit_assert_uint64(price_to_tick(80789.76, 100.0), ==, 8078976);
+    munit_assert_uint64(size_to_lot(3e-8, 1e8), ==, 3);
+    munit_assert_uint64(price_to_tick(3e-15, 1.0 / 1e-15), ==, 3);
+    munit_assert_uint64(size_to_lot(1e6, 1.0 / 1e-9), ==, UINT64_C(1000000000000000));
+    munit_assert_uint64(price_to_tick(9000.0, 1e-3), ==, 9);
+    munit_assert_uint64(price_to_tick(6.885287409893999e17, 1e-5), ==, UINT64_C(6885287409893));
     return MUNIT_OK;
 }
 
+static MunitResult test_exact_impact_limits(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
+    munit_assert_uint64(orderbook_impact_limit_tick(UINT64_C(1000000000000009), 1000, true), ==, UINT64_C(1100000000000009));
+    munit_assert_uint64(orderbook_impact_limit_tick(UINT64_C(1000000000000008), 1000, false), ==, UINT64_C(900000000000008));
+    munit_assert_uint64(orderbook_impact_limit_tick(UINT64_MAX, 1000, false), ==, UINT64_C(16602069666338596454));
+    munit_assert_uint64(orderbook_impact_limit_tick(UINT64_MAX, 1, true), ==, UINT64_MAX);
+    munit_assert_uint64(orderbook_impact_limit_tick(UINT64_MAX, UINT64_MAX, true), ==, UINT64_MAX);
+    munit_assert_uint64(orderbook_impact_limit_tick(UINT64_MAX, 10000, false), ==, 0);
+    munit_assert_uint64(orderbook_impact_limit_tick(100, 0, true), ==, 100);
+    munit_assert_uint64(orderbook_impact_limit_tick(100, 0, false), ==, 100);
+    return MUNIT_OK;
+}
 /** @test The noexcept C conversion sentinel prevents out-of-range integer casts. */
 static MunitResult test_scaled_conversion_invalid_sentinel(const MunitParameter params[] MUNIT_UNUSED, void* data MUNIT_UNUSED) {
     const double invalid[] = {-1.0, NAN, INFINITY, 18446744073709551616.0};
@@ -239,6 +258,7 @@ static MunitTest helper_tests[] = {
     { "/price_to_tick/zero", test_price_to_tick_zero, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/price_to_tick/rounding", test_price_to_tick_rounding, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/conversion/scaled_boundaries", test_scaled_conversion_boundaries, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+    { "/impact/exact_limits", test_exact_impact_limits, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/conversion/invalid_sentinel", test_scaled_conversion_invalid_sentinel, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/tick_to_price/basic", test_tick_to_price_basic, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
     { "/tick_to_price/zero", test_tick_to_price_zero, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },

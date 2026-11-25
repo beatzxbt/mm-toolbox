@@ -68,7 +68,16 @@ class StandardAdapter:
             (x.price, x.size, x.norders) for x in getattr(self.book, "get_" + side)()
         ]
 
+    def integer_rows(self, side):
+        if not self.initialized:
+            return []
+        return [
+            (x.ticks, x.lots, x.norders) for x in getattr(self.book, "get_" + side)()
+        ]
+
     def query(self, name, *args):
+        if name == "integer_bbo":
+            return tuple((x.ticks, x.lots, x.norders) for x in self.book.get_bbo())
         if name == "get_bbo":
             return tuple((x.price, x.size, x.norders) for x in self.book.get_bbo())
         if name == "counts":

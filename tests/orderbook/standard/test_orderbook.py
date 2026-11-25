@@ -4,6 +4,8 @@ Feed mutations and calculations are tested across all three implementations in
 the shared independent-reference scenario suite.
 """
 
+from decimal import Decimal, ROUND_FLOOR
+
 import pytest
 
 from mm_toolbox.orderbook.standard import (
@@ -506,8 +508,9 @@ class TestPrecisionAndIntegerArithmetic:
             ticks = _price_to_ticks(price, tick_size)
             recovered_price = _price_from_ticks(ticks, tick_size)
 
-            # Should be exact (within floating point precision)
-            assert abs(recovered_price - (ticks * tick_size)) < 1e-15
+            expected_ticks = int(Decimal(str(price)) / Decimal(str(tick_size)))
+            assert ticks == expected_ticks
+            assert recovered_price == float(expected_ticks * Decimal(str(tick_size)))
 
     def test_lot_precision_consistency(self):
         """Given various sizes, When roundtripped through lots, Then exact recovery."""
@@ -520,8 +523,13 @@ class TestPrecisionAndIntegerArithmetic:
             lots = _size_to_lots(size, lot_size)
             recovered_size = _size_from_lots(lots, lot_size)
 
-            # Should be exact (within floating point precision)
-            assert abs(recovered_size - (lots * lot_size)) < 1e-15
+            expected_lots = int(
+                (Decimal(str(size)) / Decimal(str(lot_size))).to_integral_value(
+                    rounding=ROUND_FLOOR
+                )
+            )
+            assert lots == expected_lots
+            assert recovered_size == float(expected_lots * Decimal(str(lot_size)))
 
 
 if __name__ == "__main__":

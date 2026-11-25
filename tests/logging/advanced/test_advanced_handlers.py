@@ -147,6 +147,9 @@ class TestBaseLogHandler:
                     "mm_toolbox.logging.advanced.handlers.base.time_monotonic_ns",
                     new=lambda: int(clock[0] * 1e9),
                 ),
+                # Exercise the join-budget branch even if the real loop thread
+                # wins the shutdown race and exits before close checks it.
+                patch.object(thread, "is_alive", return_value=True),
                 patch.object(thread, "join", wraps=original_join) as thread_join,
             ):
                 handler.close(timeout_s=timeout_s)

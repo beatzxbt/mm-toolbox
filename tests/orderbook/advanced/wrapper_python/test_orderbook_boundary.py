@@ -79,9 +79,10 @@ class TestMaxCapacityBoundaries:
         """A practical 1000-level capacity exports every retained row accurately."""
         book = max_capacity_orderbook
 
-        # Create 1000 levels
-        ask_prices = [100.0 + i * 0.01 for i in range(1000)]
-        bid_prices = [99.99 - i * 0.01 for i in range(1000)]
+        # Build exact decimal grid inputs. Repeated floating subtraction can
+        # put an intended price just below its tick and merge adjacent rows.
+        ask_prices = [(10000 + i) / 100 for i in range(1000)]
+        bid_prices = [(9999 - i) / 100 for i in range(1000)]
         sizes = [1.0] * 1000
         norders = [1] * 1000
 

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, replace
 from decimal import Decimal
+from math import nextafter
 from random import Random
 
 BASE_BIDS = [(100.0, 10.0, 1), (99.0, 20.0, 2), (98.0, 30.0, 3), (97.0, 40.0, 4)]
@@ -384,6 +385,21 @@ def scenarios():
                         [(100.0, 0.3, 3), (99.0, 0.6, 4)],
                     ),
                     query("get_volume_weighted_mid_price", 0.9, True),
+                    query(
+                        "get_volume_weighted_mid_price",
+                        nextafter(0.9, float("inf")),
+                        True,
+                        expected=float("inf"),
+                    ),
+                    *(
+                        query("get_price_impact", amount, buy, True, expected=impact)
+                        for buy in (True, False)
+                        for amount, impact in (
+                            (0.3, 0.0),
+                            (nextafter(0.3, float("inf")), 1.0),
+                            (nextafter(0.9, float("inf")), float("inf")),
+                        )
+                    ),
                     query(
                         "get_volume_weighted_mid_price",
                         0.9001,
@@ -772,6 +788,84 @@ def numeric_scenarios():
             lot=1.0,
         )
     )
+    # Real fractional units must never be promoted by a price-dependent epsilon.
+    for fraction in (0.125, 0.5, 0.875):
+        ask = (1e15 + 4 + fraction, 1e15 + fraction, 3)
+        bid = (1e15 + 2 + fraction, 1e15 + fraction, 4)
+        cases.append(
+            Scenario(
+                f"N2_large_fractional_units_{fraction}",
+                (
+                    snapshot([ask], [bid]),
+                    delta([(ask[0], bid[1], 5)], [(bid[0], ask[1], 6)]),
+                    bbo(ask, bid),
+                ),
+            )
+        )
+    cases.append(
+        Scenario(
+            "N2_raw_immediately_below_whole_tick_and_lot",
+            (
+                snapshot(
+                    [(10.0, nextafter(9.0, 0.0), 1)], [(nextafter(9.0, 0.0), 1.0, 2)]
+                ),
+            ),
+        )
+    )
+    for tick, lot, ask, bid in (
+        (1e-15, 1e-15, (5e-15, 3e-15, 1), (3e-15, 5e-15, 2)),
+        (1e-9, 1e-9, (1000001.0, 1e6, 1), (1e6, 1000001.0, 2)),
+        (1e-15, 1e-15, (10000.125, 1e4, 1), (1e4, 10000.125, 2)),
+        (1000.0, 100.0, (9000.0, 300.0, 1), (8000.0, 500.0, 2)),
+        (100000.0, 1.0, (6.885287409893999e17, 1.0, 1), (6.885287409892e17, 1.0, 2)),
+    ):
+        cases.append(
+            Scenario(
+                f"N2_canonical_decimal_reciprocal_{tick}_{lot}_{bid[0]}",
+                (snapshot([ask], [bid]), delta([ask], [bid]), bbo(ask, bid)),
+                tick=tick,
+                lot=lot,
+            )
+        )
+    cases.extend(
+        [
+            Scenario(
+                "M6_large_integer_and_fractional_impact_boundaries",
+                (
+                    snapshot(
+                        [
+                            (1000000000000009.0, 1.0, 1),
+                            (1100000000000009.0, 2.0, 2),
+                            (1100000000000010.0, 4.0, 3),
+                        ],
+                        [
+                            (1000000000000008.0, 1.0, 4),
+                            (900000000000008.0, 2.0, 5),
+                            (900000000000007.0, 4.0, 6),
+                        ],
+                    ),
+                    *(
+                        query("get_size_for_price_impact_bps", bps, buy, base)
+                        for bps in (1000.0, 1000.5, 10000.0, 1e19, 1e20)
+                        for buy in (True, False)
+                        for base in (True, False)
+                    ),
+                ),
+            ),
+            Scenario(
+                "M5_small_tick_impact_at_large_raw_prices",
+                (
+                    snapshot(
+                        [(10000000000000.03, 1.0, 1), (10000000000000.04, 1.0, 2)],
+                        [(10000000000000.01, 1.0, 3), (10000000000000.0, 1.0, 4)],
+                    ),
+                    query("get_price_impact", 2.0, True, True, expected=0.01),
+                    query("get_price_impact", 2.0, False, True, expected=0.01),
+                ),
+                tick=0.01,
+            ),
+        ]
+    )
     cases.extend(
         [
             Scenario(
@@ -842,6 +936,31 @@ def numeric_scenarios():
                 ),
             ),
         ]
+    )
+    cases.append(
+        Scenario(
+            "M4_large_requests_must_not_forgive_real_depth_shortfalls",
+            (
+                snapshot([(105.0, 1e16, 1)], [(100.0, 1e16, 2)]),
+                query("get_price_impact", 1e16 + 2, True, True, expected=float("inf")),
+                query("get_price_impact", 1e16 + 2, False, True, expected=float("inf")),
+                query(
+                    "get_volume_weighted_mid_price",
+                    1e16 + 2,
+                    True,
+                    expected=float("inf"),
+                ),
+                delta([(106.0, 1e16, 3)], [(99.0, 1e16, 4)]),
+                query("get_price_impact", 2e16 + 4, True, True, expected=float("inf")),
+                query("get_price_impact", 2e16 + 4, False, True, expected=float("inf")),
+                query(
+                    "get_volume_weighted_mid_price",
+                    2e16 + 4,
+                    True,
+                    expected=float("inf"),
+                ),
+            ),
+        )
     )
     # Decimal-exact representable integers near the unsigned-64 price limit.
     # Mirrored extreme touch quantities expose a floating weighted mean that

@@ -11,7 +11,7 @@ from functools import lru_cache
 
 import pytest
 
-from .adapters import TARGETS, make_target
+from .adapters import TARGETS, StandardAdapter, make_target
 from .reference import ReferenceBook
 from .scenarios import (
     EXTENDED_SEEDS,
@@ -28,7 +28,7 @@ def _export_units(value, quantum):
 
     This test-owned conversion does not import production precision helpers.
     A tolerance of one millionth of a unit cannot conceal a one-tick/lot error.
-    Off-grid standard levels intentionally retain their original raw values.
+    Standard levels are checked through their actual cached integer fields.
     """
     ratio = Decimal(str(value)) / quantum
     nearest = ratio.to_integral_value(rounding=ROUND_HALF_EVEN)
@@ -53,29 +53,33 @@ def _assert_value(actual, expected, context):
 
 
 def assert_state(target, reference, context):
-    raw = {side: target.rows(side) for side in ("asks", "bids")}
-    for side, rows in raw.items():
-        actual = [
-            (_export_units(p, reference.tick), _export_units(q, reference.lot), n)
-            for p, q, n in rows
-        ]
+    for side in ("asks", "bids"):
+        if isinstance(target, StandardAdapter):
+            actual = target.integer_rows(side)
+        else:
+            actual = [
+                (_export_units(p, reference.tick), _export_units(q, reference.lot), n)
+                for p, q, n in target.rows(side)
+            ]
         expected = reference.integer_rows(side)
         assert actual == expected, (
             f"{context}\nside={side}\nexpected={expected!r}"
-            f"\nactual={actual!r}\nraw_actual={rows!r}"
+            f"\nactual={actual!r}\nraw_actual={target.rows(side)!r}"
         )
     # Full-row equality includes side counts and touch quantity/order metadata.
     # Query the real BBO getter as well, independently of full-depth exports.
     if reference.asks and reference.bids:
-        touch = target.query("get_bbo")
         expected_touch = (
             reference.integer_rows("bids")[0],
             reference.integer_rows("asks")[0],
         )
-        actual_touch = tuple(
-            (_export_units(p, reference.tick), _export_units(q, reference.lot), n)
-            for p, q, n in touch
-        )
+        if isinstance(target, StandardAdapter):
+            actual_touch = target.query("integer_bbo")
+        else:
+            actual_touch = tuple(
+                (_export_units(p, reference.tick), _export_units(q, reference.lot), n)
+                for p, q, n in target.query("get_bbo")
+            )
         assert actual_touch == expected_touch, (
             f"{context}\nexpected BBO={expected_touch!r}\nactual BBO={actual_touch!r}"
         )
@@ -89,8 +93,8 @@ def assert_state(target, reference, context):
                 # A rounded weighted mean must stay inside the normalized touch.
                 # Keep this strict: approximate equality at very large prices
                 # could otherwise conceal an overshoot by several float ulps.
-                bid_bound = expected_touch[0][0] * float(reference.tick)
-                ask_bound = expected_touch[1][0] * float(reference.tick)
+                bid_bound = float(expected_touch[0][0] * reference.tick)
+                ask_bound = float(expected_touch[1][0] * reference.tick)
                 assert bid_bound <= actual <= ask_bound, (
                     f"{context}\nquery={name}\nexpected bounds=[{bid_bound!r}, {ask_bound!r}]"
                     f"\nactual={actual!r}"

@@ -14,6 +14,10 @@ weighted midpoint are checked at each populated state. The weighted midpoint
 must lie within the normalized BBO, with no tolerance for overshoot. Rejected operations
 must preserve state; queries must preserve it too.
 
+The standard target's cached integer ticks/lots are inspected directly: its raw
+price and size fields intentionally preserve the caller's off-grid inputs.
+Re-normalizing only those raw exports would hide an incorrect internal key.
+
 ## Where the tests live
 
 | File | Responsibility |
@@ -49,9 +53,9 @@ rows. One-sided cases have bid and ask variants.
 | C5 | Cross cleanup and all updates complete before capacity truncation; small and bulk paths retain the same valid tails. |
 | C6–C9 | Repeated wrapped heads, clear/reseed, depleted-side recovery and replacement-snapshot recovery. |
 | M1–M3 | Spread, floored midpoint, weighted midpoint and independently calculated execution VWAP. |
-| M4–M6 | Exact/insufficient depth, fractional requested sizes, base/quote conversion and impact-band boundaries. Unfillable depth reports positive infinity. |
+| M4–M6 | Exact/insufficient depth, fractional requested sizes, base/quote conversion and exact integer/fractional impact-band boundaries at large prices. A one-tick execution impact stays one tick despite cancellation in raw price subtraction. A representable shortfall of 2 lots at 1e16 (or 4 at 2e16) must still report positive infinity. |
 | M7–M8 | Strict crossing helpers distinguish touching equality; every getter/calculation preserves book state. |
-| N1–N3 | Power-of-ten grids, exact decimal boundaries, one/three lots and valid large prices, quantities and order counts. |
+| N1–N3 | Power-of-ten grids (including reciprocal drift at 1e-9/1e-15), exact decimal boundaries, one/three lots, genuine fractional units at 1e15 and values immediately below whole units. Snapshot, delta and BBO paths must floor consistently. Valid large prices, quantities and order counts remain supported. |
 | N4–N5 | Invalid price/size at different batch positions and sides, plus crossed/locked snapshots and BBOs, reject before mutation. |
 | N6–N7 | NumPy lengths, shapes, dtypes, writable-buffer requirements and supported strided layouts. |
 | N8–N9 | Reusing caller inputs cannot rewrite retained state; exported views/copies obey their documented reuse and lifetime contracts. |
@@ -98,5 +102,6 @@ Focused standard primitive/level, precision-trust, getter/iterator and
 initialization contracts remain. Focused Python constructor/return-type and
 meaningful numeric boundaries remain. Native C/engine tests remain for unsafe
 memory and primitive behavior that a dictionary comparison cannot establish.
-The C suite exercises both compiler-wide and portable weighted-mid arithmetic.
+The C suite exercises both compiler-wide and portable weighted-mid and
+impact-boundary arithmetic, including unsigned-limit saturation.
 No production implementation is used as the reference for another.
