@@ -48,6 +48,32 @@ static uint64_t divide_bounded_u128(
 }
 #endif
 
+uint64_t orderbook_impact_limit_tick(uint64_t anchor, uint64_t bps, bool is_buy) {
+    if (!is_buy && bps >= 10000) {
+        return 0;
+    }
+    uint64_t distance;
+#if defined(__SIZEOF_INT128__) && !defined(MM_TOOLBOX_FORCE_PORTABLE_WMID)
+    __uint128_t quotient = (__uint128_t)anchor * bps / 10000;
+    if (quotient > UINT64_MAX) {
+        return UINT64_MAX;
+    }
+    distance = (uint64_t)quotient;
+#else
+    uint64_t high;
+    uint64_t low;
+    multiply_u64_wide(anchor, bps, &high, &low);
+    if (high >= 10000) {
+        return UINT64_MAX;
+    }
+    distance = high == 0 ? low / 10000 : divide_bounded_u128(high, low, 0, 10000);
+#endif
+    if (!is_buy) {
+        return anchor - distance;
+    }
+    return distance > UINT64_MAX - anchor ? UINT64_MAX : anchor + distance;
+}
+
 uint64_t orderbook_weighted_mid_tick(
     uint64_t bid_ticks,
     uint64_t ask_ticks,

@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-## 1.0.0b11 (2026-11-24, unpublished candidate)
+## 1.0.0b11 (2026-11-25, unpublished candidate)
 
 - Share candle trade validation and stale-input acceptance across candle types, preserve equal timestamps, reset trigger state during replay, and provide consistent retained-history indexing and iteration.
 - Validate moving-average inputs before mutation, reset aggregation/history/clock state consistently, and avoid allocating output history in fast mode. Cover streaming, projection, reinitialization and exact clock boundaries with independent expectations.
@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - Compare the standard orderbook and both advanced APIs with one independent dictionary reference after every operation. Add named snapshot, delta, BBO, capacity, calculation, numeric and stream scenarios, deterministic generated traces, a recorded-feed replay and a dedicated extended CI workload. Consolidate duplicated behavior tests while retaining focused ingestion, ownership and native memory tests.
 - Apply completed delta batches and crossing cleanup before capacity truncation, recover depleted sides, and reject ambiguous zero-size BBOs atomically. Preserve valid retained tails across the small/bulk batch boundary. Align crossing helpers on strict crossing; touching equality is not crossed.
 - Keep exact large normalized units unchanged, reject unsafe unsigned conversions, avoid midpoint/quantity overflow, and correct fractional execution-impact and tick-boundary calculations. Compute floored weighted midpoints with exact bounded integer arithmetic, including skewed quantities near the unsigned limit. Standard books retain owned copies of mutable ingestion values.
+- Floor genuine fractional ticks/lots using directed grid comparisons rather than a magnitude-dependent epsilon. Cache canonical decimal reciprocals, calculate inclusive impact bands with exact integer ratios, and measure execution impact in ticks before converting to prices. Compare the standard book's stored ticks/lots directly in the shared numeric scenarios.
 - Publish collector events through one depth-aware sequence gate. Hold future BBOs within explicit bounds, let covering depth win equal IDs, discard stale quotes, and propagate stream failures even at the capture limit. Include a compact recorded fixture in source distributions.
 - Apply advanced-orderbook BBO prices across all obsolete top levels, including multi-level jumps and quotes outside retained depth. Refresh the quoted quantity and order count when its price already exists, and preserve valid deeper levels without allocation or locks.
 - Fix the advanced logging benchmark's shared transport capacity at an explicit 64 MiB for both the master and workers, and include that setting in its report.

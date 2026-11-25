@@ -3,6 +3,7 @@ from collections.abc import Iterator
 from math import isfinite
 from sys import float_info
 
+from .._precision import impact_limit_tick, reciprocal
 from .level import (
     OrderbookLevel,
     price_from_ticks,
@@ -48,8 +49,8 @@ class Orderbook:
 
         self._tick_size = tick_size
         self._lot_size = lot_size
-        self._inv_tick_size = 1.0 / tick_size
-        self._inv_lot_size = 1.0 / lot_size
+        self._inv_tick_size = reciprocal(tick_size)
+        self._inv_lot_size = reciprocal(lot_size)
         self._size = size
         self._trust_input_precision = trust_input_precision
 
@@ -727,7 +728,8 @@ class Orderbook:
 
         tolerance = size * float_info.epsilon * 4.0
         remaining_size = size
-        last_touched_price = touch_anchor_price
+        touch_anchor_ticks = best_ask_ticks if is_buy else best_bid_ticks
+        last_touched_ticks = touch_anchor_ticks
 
         if is_buy:
             for tick in sorted_ask_ticks:
@@ -735,7 +737,7 @@ class Orderbook:
                 consumed_size = min(remaining_size, level.lots * self._lot_size)
                 remaining_size -= consumed_size
                 if consumed_size > 0.0:
-                    last_touched_price = tick * self._tick_size
+                    last_touched_ticks = tick
                 if remaining_size <= tolerance:
                     break
         else:
@@ -744,14 +746,14 @@ class Orderbook:
                 consumed_size = min(remaining_size, level.lots * self._lot_size)
                 remaining_size -= consumed_size
                 if consumed_size > 0.0:
-                    last_touched_price = tick * self._tick_size
+                    last_touched_ticks = tick
                 if remaining_size <= tolerance:
                     break
 
         if remaining_size > tolerance:
             return float("inf")
 
-        return abs(last_touched_price - touch_anchor_price)
+        return abs(last_touched_ticks - touch_anchor_ticks) * self._tick_size
 
     def get_size_for_price_impact_bps(
         self, impact_bps: float, is_buy: bool, is_base_currency: bool = True
@@ -782,11 +784,7 @@ class Orderbook:
         total_quote = 0.0
 
         if is_buy:
-            max_scaled = best_ask_ticks * (1.0 + impact_bps / 10_000.0)
-            if not isfinite(max_scaled) or max_scaled >= 18446744073709551616.0:
-                max_ticks = (1 << 64) - 1
-            else:
-                max_ticks = price_to_ticks_fast(max_scaled, 1.0)
+            max_ticks = impact_limit_tick(best_ask_ticks, float(impact_bps), True)
             for tick in sorted_ask_ticks:
                 if tick > max_ticks:
                     break
@@ -795,11 +793,7 @@ class Orderbook:
                 total_base += base_size
                 total_quote += base_size * tick * tick_size
         else:
-            min_scaled = max(0.0, best_bid_ticks * (1.0 - impact_bps / 10_000.0))
-            min_ticks = price_to_ticks_fast(min_scaled, 1.0)
-            ceiling_tolerance = min(abs(min_scaled) * float_info.epsilon * 4.0, 0.5)
-            if min_scaled - min_ticks > ceiling_tolerance:
-                min_ticks += 1
+            min_ticks = impact_limit_tick(best_bid_ticks, float(impact_bps), False)
             for tick in reversed(sorted_bid_ticks):
                 if tick < min_ticks:
                     break

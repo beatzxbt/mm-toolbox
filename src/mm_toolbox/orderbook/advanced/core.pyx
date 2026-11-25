@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from libc.float cimport DBL_EPSILON
-from libc.math cimport INFINITY, fabs, isfinite
+from libc.math cimport INFINITY, floor, isfinite
 from libc.stdint cimport uint64_t as u64
 from libc.stdlib cimport free, malloc
 
+from .._precision import impact_limit_tick, reciprocal
 from .enum.enums cimport CyOrderbookSortedness
 from .ladder.ladder cimport OrderbookLadder, OrderbookLadderData
 from .level.helpers cimport (
@@ -30,6 +31,7 @@ from .level.level cimport (
 )
 
 cdef extern from "c/orderbook_helpers.h":
+    u64 orderbook_impact_limit_tick(u64 anchor, u64 bps, bint is_buy) noexcept nogil
     u64 orderbook_weighted_mid_tick(
         u64 bid_ticks,
         u64 ask_ticks,
@@ -120,8 +122,8 @@ cdef class CoreAdvancedOrderbook:
 
         self._tick_size = tick_size
         self._lot_size = lot_size
-        self._tick_size_recip = 1.0 / tick_size
-        self._lot_size_recip = 1.0 / lot_size
+        self._tick_size_recip = reciprocal(tick_size)
+        self._lot_size_recip = reciprocal(lot_size)
         self._max_levels = num_levels
         self._delta_sortedness = delta_sortedness
         self._snapshot_sortedness = snapshot_sortedness
@@ -925,8 +927,8 @@ cdef class CoreAdvancedOrderbook:
                 break
         if remaining > tolerance:
             return INFINITY
-        return fabs(convert_price_from_tick(last_touched_ticks, self._tick_size)
-                    - touch_anchor_price)
+        return (last_touched_ticks - touch_anchor_ticks if is_buy
+                else touch_anchor_ticks - last_touched_ticks) * self._tick_size
 
     cdef inline double get_size_for_price_impact_bps(
         self,
@@ -943,20 +945,17 @@ cdef class CoreAdvancedOrderbook:
             OrderbookLadder side = self._asks if is_buy else self._bids
             OrderbookLadderData* side_data = side.get_data()
             u64 touch_anchor_ticks = side.top().ticks
-            double limit_scaled
-            double ceiling_tolerance
             u64 limit_ticks
             u64 ticks
             u64 lots
             double total_lots = 0.0
             double total_ticks_times_lots = 0.0
             u64 i
+        if impact_bps < 18446744073709551616.0 and impact_bps == floor(impact_bps):
+            limit_ticks = orderbook_impact_limit_tick(touch_anchor_ticks, <u64>impact_bps, is_buy)
+        else:
+            limit_ticks = impact_limit_tick(touch_anchor_ticks, impact_bps, is_buy)
         if is_buy:
-            limit_scaled = <double>touch_anchor_ticks * (1.0 + impact_bps / 10000.0)
-            if not isfinite(limit_scaled) or limit_scaled >= 18446744073709551616.0:
-                limit_ticks = <u64>-1
-            else:
-                limit_ticks = convert_price_to_tick(limit_scaled, 1.0)
             for i in range(side_data.num_levels):
                 ticks = side.at(i).ticks
                 if ticks > limit_ticks:
@@ -965,17 +964,6 @@ cdef class CoreAdvancedOrderbook:
                 total_lots += lots
                 total_ticks_times_lots += <double>ticks * <double>lots
         else:
-            limit_scaled = <double>touch_anchor_ticks * (1.0 - impact_bps / 10000.0)
-            if limit_scaled < 0.0:
-                limit_scaled = 0.0
-            limit_ticks = convert_price_to_tick(limit_scaled, 1.0)
-            ceiling_tolerance = fabs(limit_scaled) * DBL_EPSILON * 4.0
-            if ceiling_tolerance > 0.5:
-                ceiling_tolerance = 0.5
-            # A mathematical integer boundary can round a few ULPs above
-            # its tick. Only a meaningful fraction requires the next tick.
-            if limit_scaled - <double>limit_ticks > ceiling_tolerance:
-                limit_ticks += 1
             for i in range(side_data.num_levels):
                 ticks = side.at(i).ticks
                 if ticks < limit_ticks:

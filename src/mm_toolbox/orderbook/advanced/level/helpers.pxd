@@ -1,8 +1,11 @@
 from libc.stdint cimport uint64_t as u64
-from libc.float cimport DBL_EPSILON
-from libc.math cimport fabs, floor, fmin, isfinite
+from libc.math cimport isfinite
 
 from .level cimport OrderbookEntry
+
+cdef extern from "orderbook_helpers.h":
+    double orderbook_canonical_scale(double scale) noexcept nogil
+    u64 orderbook_floor_grid(double raw, double scale) noexcept nogil
 
 cdef u64 convert_price_to_tick(double price, double tick_size_recip) noexcept nogil
 cdef u64 convert_size_to_lot(double size, double lot_size_recip) noexcept nogil
@@ -14,24 +17,18 @@ cdef void validate_price(double price)
 cdef void validate_size(double size)
 
 
-cdef inline u64 _checked_scaled_units(double value) except? -1 nogil:
-    cdef double integer
-    cdef double epsilon
+cdef inline u64 _checked_scaled_units(double raw, double scale) except? -1 nogil:
+    scale = orderbook_canonical_scale(scale)
+    cdef double value = raw * scale
     if not isfinite(value) or value < 0.0 or value >= 18446744073709551616.0:
         with gil:
             raise ValueError("Normalized price/size must fit in unsigned 64-bit units")
-    integer = floor(value)
-    if value == integer:
-        return <u64>integer
-    epsilon = fmin(fabs(value) * DBL_EPSILON * 4.0, 0.5)
-    if 1.0 - (value - integer) <= epsilon:
-        integer += 1.0
-    return <u64>integer
+    return orderbook_floor_grid(raw, scale)
 
 
 cdef inline u64 convert_price_to_tick_trusted(double price, double tick_size_recip) except? -1 nogil:
-    return _checked_scaled_units(price * tick_size_recip)
+    return _checked_scaled_units(price, tick_size_recip)
 
 
 cdef inline u64 convert_size_to_lot_trusted(double size, double lot_size_recip) except? -1 nogil:
-    return _checked_scaled_units(size * lot_size_recip)
+    return _checked_scaled_units(size, lot_size_recip)

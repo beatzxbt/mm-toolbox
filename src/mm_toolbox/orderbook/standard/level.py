@@ -8,21 +8,34 @@ single price level on either side of an orderbook.
 from __future__ import annotations
 
 from math import floor, isfinite
-from sys import float_info
 from typing import Self
 
 from msgspec import Struct
 
+from .._precision import canonical_scale, reciprocal
 
-def _floor_scaled_units(value: float) -> int:
-    """Correct representation noise without advancing an exact whole unit."""
+
+def _floor_scaled_units(raw: float, scale: float) -> int:
+    """Floor against the represented grid, without a magnitude-based tolerance."""
+    scale = canonical_scale(scale)
+    value = raw * scale
     if not isfinite(value) or value < 0.0 or value >= 18446744073709551616.0:
         raise ValueError("Normalized price/size must fit in unsigned 64-bit units")
     integer = floor(value)
-    if value == integer:
-        return integer
-    epsilon = min(abs(value) * float_info.epsilon * 4.0, 0.5)
-    return integer + 1 if 1.0 - (value - integer) <= epsilon else integer
+    # Adjacent ticks must be distinguishable as doubles before comparing them.
+    if value < 4503599627370496.0:
+        if scale >= 1.0:
+            current = integer / scale
+            following = (integer + 1) / scale
+        else:
+            quantum = canonical_scale(1.0 / scale)
+            current = integer * quantum
+            following = (integer + 1) * quantum
+        if raw < current:
+            integer -= 1
+        elif raw >= following:
+            integer += 1
+    return integer
 
 
 def price_to_ticks(price: float, tick_size: float) -> int:
@@ -36,7 +49,7 @@ def price_to_ticks(price: float, tick_size: float) -> int:
         int: Equivalent number of ticks.
 
     """
-    return price_to_ticks_fast(price, 1.0 / tick_size)
+    return price_to_ticks_fast(price, reciprocal(tick_size))
 
 
 def size_to_lots(size: float, lot_size: float) -> int:
@@ -50,7 +63,7 @@ def size_to_lots(size: float, lot_size: float) -> int:
         int: Equivalent number of lots.
 
     """
-    return size_to_lots_fast(size, 1.0 / lot_size)
+    return size_to_lots_fast(size, reciprocal(lot_size))
 
 
 def price_to_ticks_fast(price: float, inv_tick_size: float) -> int:
@@ -64,7 +77,7 @@ def price_to_ticks_fast(price: float, inv_tick_size: float) -> int:
         int: Equivalent number of ticks.
 
     """
-    return _floor_scaled_units(price * inv_tick_size)
+    return _floor_scaled_units(price, inv_tick_size)
 
 
 def size_to_lots_fast(size: float, inv_lot_size: float) -> int:
@@ -78,7 +91,7 @@ def size_to_lots_fast(size: float, inv_lot_size: float) -> int:
         int: Equivalent number of lots.
 
     """
-    return _floor_scaled_units(size * inv_lot_size)
+    return _floor_scaled_units(size, inv_lot_size)
 
 
 def price_from_ticks(ticks: int, tick_size: float) -> float:
@@ -92,7 +105,7 @@ def price_from_ticks(ticks: int, tick_size: float) -> float:
         float: Reconstructed price.
 
     """
-    return ticks * tick_size
+    return ticks / reciprocal(tick_size) if tick_size < 1.0 else ticks * tick_size
 
 
 def size_from_lots(lots: int, lot_size: float) -> float:
@@ -106,7 +119,7 @@ def size_from_lots(lots: int, lot_size: float) -> float:
         float: Reconstructed size.
 
     """
-    return lots * lot_size
+    return lots / reciprocal(lot_size) if lot_size < 1.0 else lots * lot_size
 
 
 class OrderbookLevel(Struct):
