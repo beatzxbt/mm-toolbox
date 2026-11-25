@@ -53,7 +53,7 @@ rows. One-sided cases have bid and ask variants.
 | C5 | Cross cleanup and all updates complete before capacity truncation; small and bulk paths retain the same valid tails. |
 | C6–C9 | Repeated wrapped heads, clear/reseed, depleted-side recovery and replacement-snapshot recovery. |
 | M1–M3 | Spread, floored midpoint, weighted midpoint and independently calculated execution VWAP. |
-| M4–M6 | Exact/insufficient depth, fractional requested sizes, base/quote conversion and exact integer/fractional impact-band boundaries at large prices. A one-tick execution impact stays one tick despite cancellation in raw price subtraction. Unfillable depth reports positive infinity. |
+| M4–M6 | Exact/insufficient depth, fractional requested sizes, base/quote conversion and exact integer/fractional impact-band boundaries at large prices. A one-tick execution impact stays one tick despite cancellation in raw price subtraction. A representable shortfall of 2 lots at 1e16 (or 4 at 2e16) must still report positive infinity. |
 | M7–M8 | Strict crossing helpers distinguish touching equality; every getter/calculation preserves book state. |
 | N1–N3 | Power-of-ten grids (including reciprocal drift at 1e-9/1e-15), exact decimal boundaries, one/three lots, genuine fractional units at 1e15 and values immediately below whole units. Snapshot, delta and BBO paths must floor consistently. Valid large prices, quantities and order counts remain supported. |
 | N4–N5 | Invalid price/size at different batch positions and sides, plus crossed/locked snapshots and BBOs, reject before mutation. |

@@ -1,7 +1,7 @@
 """Private grid construction and exact impact-band arithmetic."""
 
 from decimal import Decimal
-from math import floor, log10
+from math import floor, isfinite, log10
 
 
 def reciprocal(quantum: float) -> float:
@@ -35,3 +35,20 @@ def impact_limit_tick(anchor: int, bps: float, is_buy: bool) -> int:
     if is_buy:
         return min((1 << 64) - 1, anchor + distance)
     return max(0, anchor - distance)
+
+
+def required_lots(
+    size: float, lot_size: float, price_ticks: int = 1, tick_size: float = 1.0
+) -> int:
+    """Ceil an execution request to lots for an exact depth sufficiency check."""
+    if not isfinite(size):
+        raise ValueError("Invalid size; expected a finite value")
+    numerator, denominator = Decimal(str(size)).as_integer_ratio()
+    lot_numerator, lot_denominator = Decimal(str(lot_size)).as_integer_ratio()
+    numerator *= lot_denominator
+    denominator *= lot_numerator
+    if price_ticks != 1 or tick_size != 1.0:
+        tick_numerator, tick_denominator = Decimal(str(tick_size)).as_integer_ratio()
+        numerator *= tick_denominator
+        denominator *= price_ticks * tick_numerator
+    return -(-numerator // denominator)

@@ -387,6 +387,21 @@ def scenarios():
                     query("get_volume_weighted_mid_price", 0.9, True),
                     query(
                         "get_volume_weighted_mid_price",
+                        nextafter(0.9, float("inf")),
+                        True,
+                        expected=float("inf"),
+                    ),
+                    *(
+                        query("get_price_impact", amount, buy, True, expected=impact)
+                        for buy in (True, False)
+                        for amount, impact in (
+                            (0.3, 0.0),
+                            (nextafter(0.3, float("inf")), 1.0),
+                            (nextafter(0.9, float("inf")), float("inf")),
+                        )
+                    ),
+                    query(
+                        "get_volume_weighted_mid_price",
                         0.9001,
                         True,
                         expected=float("inf"),
@@ -921,6 +936,31 @@ def numeric_scenarios():
                 ),
             ),
         ]
+    )
+    cases.append(
+        Scenario(
+            "M4_large_requests_must_not_forgive_real_depth_shortfalls",
+            (
+                snapshot([(105.0, 1e16, 1)], [(100.0, 1e16, 2)]),
+                query("get_price_impact", 1e16 + 2, True, True, expected=float("inf")),
+                query("get_price_impact", 1e16 + 2, False, True, expected=float("inf")),
+                query(
+                    "get_volume_weighted_mid_price",
+                    1e16 + 2,
+                    True,
+                    expected=float("inf"),
+                ),
+                delta([(106.0, 1e16, 3)], [(99.0, 1e16, 4)]),
+                query("get_price_impact", 2e16 + 4, True, True, expected=float("inf")),
+                query("get_price_impact", 2e16 + 4, False, True, expected=float("inf")),
+                query(
+                    "get_volume_weighted_mid_price",
+                    2e16 + 4,
+                    True,
+                    expected=float("inf"),
+                ),
+            ),
+        )
     )
     # Decimal-exact representable integers near the unsigned-64 price limit.
     # Mirrored extreme touch quantities expose a floating weighted mean that

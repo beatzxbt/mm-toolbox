@@ -1,9 +1,8 @@
 from bisect import bisect_left, bisect_right, insort
 from collections.abc import Iterator
 from math import isfinite
-from sys import float_info
 
-from .._precision import impact_limit_tick, reciprocal
+from .._precision import impact_limit_tick, reciprocal, required_lots
 from .level import (
     OrderbookLevel,
     price_from_ticks,
@@ -654,32 +653,41 @@ class Orderbook:
 
         mid_ticks = (best_ask_ticks + best_bid_ticks) // 2
         mid_price = mid_ticks * tick_size
+        depth_needed = required_lots(
+            size,
+            self._lot_size,
+            1 if is_base_currency else mid_ticks,
+            1.0 if is_base_currency else tick_size,
+        )
         if not is_base_currency:
             size = size / mid_price
-        tolerance = size * float_info.epsilon * 4.0
 
         remaining = size
+        remaining_lots = depth_needed
         buy_notional = 0.0
         for tick in sorted_ask_ticks:
             level = asks[tick]
-            consumed = min(remaining, level.lots * self._lot_size)
+            consumed = max(0.0, min(remaining, level.lots * self._lot_size))
             buy_notional += tick * tick_size * consumed
             remaining -= consumed
-            if remaining == 0.0:
+            remaining_lots -= level.lots
+            if remaining_lots <= 0:
                 break
-        if remaining > tolerance:
+        if remaining_lots > 0:
             return float("inf")
 
         remaining = size
+        remaining_lots = depth_needed
         sell_notional = 0.0
         for tick in reversed(sorted_bid_ticks):
             level = bids[tick]
-            consumed = min(remaining, level.lots * self._lot_size)
+            consumed = max(0.0, min(remaining, level.lots * self._lot_size))
             sell_notional += tick * tick_size * consumed
             remaining -= consumed
-            if remaining == 0.0:
+            remaining_lots -= level.lots
+            if remaining_lots <= 0:
                 break
-        if remaining > tolerance:
+        if remaining_lots > 0:
             return float("inf")
 
         return (buy_notional + sell_notional) / (2.0 * size)
@@ -718,42 +726,20 @@ class Orderbook:
         best_ask_ticks = self._best_ask_ticks
         best_bid_ticks = self._best_bid_ticks
 
-        if is_buy:
-            touch_anchor_price = best_ask_ticks * self._tick_size
-        else:
-            touch_anchor_price = best_bid_ticks * self._tick_size
-
-        if not is_base_currency:
-            size = size / touch_anchor_price
-
-        tolerance = size * float_info.epsilon * 4.0
-        remaining_size = size
         touch_anchor_ticks = best_ask_ticks if is_buy else best_bid_ticks
-        last_touched_ticks = touch_anchor_ticks
-
-        if is_buy:
-            for tick in sorted_ask_ticks:
-                level = asks[tick]
-                consumed_size = min(remaining_size, level.lots * self._lot_size)
-                remaining_size -= consumed_size
-                if consumed_size > 0.0:
-                    last_touched_ticks = tick
-                if remaining_size <= tolerance:
-                    break
-        else:
-            for tick in reversed(sorted_bid_ticks):
-                level = bids[tick]
-                consumed_size = min(remaining_size, level.lots * self._lot_size)
-                remaining_size -= consumed_size
-                if consumed_size > 0.0:
-                    last_touched_ticks = tick
-                if remaining_size <= tolerance:
-                    break
-
-        if remaining_size > tolerance:
-            return float("inf")
-
-        return abs(last_touched_ticks - touch_anchor_ticks) * self._tick_size
+        remaining_lots = required_lots(
+            size,
+            self._lot_size,
+            1 if is_base_currency else touch_anchor_ticks,
+            1.0 if is_base_currency else self._tick_size,
+        )
+        side = asks if is_buy else bids
+        ticks = iter(sorted_ask_ticks) if is_buy else reversed(sorted_bid_ticks)
+        for tick in ticks:
+            remaining_lots -= side[tick].lots
+            if remaining_lots <= 0:
+                return abs(tick - touch_anchor_ticks) * self._tick_size
+        return float("inf")
 
     def get_size_for_price_impact_bps(
         self, impact_bps: float, is_buy: bool, is_base_currency: bool = True
